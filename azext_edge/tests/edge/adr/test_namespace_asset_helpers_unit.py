@@ -18,7 +18,9 @@ from azext_edge.edge.providers.adr.namespace_devices import DeviceEndpointType
 from azext_edge.edge.providers.adr.namespace_assets import (
     _build_destination,
     _create_datapoint,
-    _get_event,
+    _create_event,
+    _get_event_group,
+    _get_mgmt_group,
     _process_configs,
     _process_opcua_dataset_configurations_v1,
     _process_opcua_event_configurations_v1,
@@ -135,50 +137,50 @@ def test_build_destination_error(test_case: dict):
         assert msg in str(excinfo.value)
 
 
-@pytest.mark.parametrize("num_events", [1, 5, 10])
-def test_get_event(num_events: int):
-    from .test_namespace_asset_events_unit import generate_event
+@pytest.mark.parametrize("num_groups", [1, 5, 10])
+def test_get_event_group(num_groups: int):
+    from .test_namespace_asset_events_unit import generate_event_group
     test_event = generate_random_string()
     asset = {
         "name": "testAsset",
         "properties": {
-            "events": []
+            "eventGroups": []
         }
     }
 
-    for i in range(num_events):
-        asset["properties"]["events"].append(generate_event(f"testEvent{i}"))
+    for i in range(num_groups):
+        asset["properties"]["eventGroups"].append(generate_event_group(f"testEvent{i}"))
 
-    # Set up events in asset properties
-    asset["properties"]["events"].append(generate_event(test_event))
+    # Set up eventGroups in roperties
+    asset["properties"]["eventGroups"].append(generate_event_group(test_event))
 
     # Test success case
-    result = _get_event(asset, test_event)
+    result = _get_event_group(asset, test_event)
     assert result["name"] == test_event
     # lazy way cause the event is last
-    assert result == asset["properties"]["events"][-1]
+    assert result == asset["properties"]["eventGroups"][-1]
 
 
 @pytest.mark.parametrize("test_case", [
     {
         "event_name": generate_random_string(),
-        "events": [
+        "event_groups": [
             {
                 "name": f"another{generate_random_string()}",
-                "eventNotifier": "nsu=test;s=FastUInt456",
+                "dataSource": "nsu=test;s=FastUInt456",
             }
         ],
     },
     {
         "event_name": generate_random_string(),
-        "events": [],
+        "event_groups": [],
     },
     {
         "event_name": generate_random_string(),
-        "events": None,
+        "event_groups": None,
     }
 ])
-def test_get_event_error(test_case):
+def test_get_event_group_error(test_case):
     """Test error handling when an event is not found in an asset."""
     asset = {
         "name": "testAsset",
@@ -186,13 +188,71 @@ def test_get_event_error(test_case):
     }
 
     # Set up events in asset properties if provided
-    if test_case["events"] is not None:
-        asset["properties"]["events"] = test_case["events"]
+    if test_case["event_groups"] is not None:
+        asset["properties"]["eventGroups"] = test_case["event_groups"]
 
     # Test error cases
     with pytest.raises(InvalidArgumentValueError) as ex:
-        _get_event(asset, test_case["event_name"])
-    error_msg = f"Event '{test_case['event_name']}' not found in asset '{asset['name']}'."
+        _get_event_group(asset, test_case["event_name"])
+    error_msg = f"Event group '{test_case['event_name']}' not found in asset '{asset['name']}'."
+    assert error_msg in str(ex.value)
+
+
+@pytest.mark.parametrize("num_groups", [1, 5, 10])
+def test_get_mgmt_group(num_groups: int):
+    test_mgmt = generate_random_string()
+    asset = {
+        "name": "testAsset",
+        "properties": {
+            "managementGroups": []
+        }
+    }
+
+    for i in range(num_groups):
+        asset["properties"]["managementGroups"].append({"name": f"mgmt{i}", "dataSource": f"src{i}"})
+
+    # Append the target management group
+    asset["properties"]["managementGroups"].append({"name": test_mgmt, "dataSource": "src-target"})
+
+    # success case
+    result = _get_mgmt_group(asset, test_mgmt)
+    assert result["name"] == test_mgmt
+    assert result == asset["properties"]["managementGroups"][-1]
+
+
+@pytest.mark.parametrize("test_case", [
+    {
+        "mgmt_name": generate_random_string(),
+        "mgmt_groups": [
+            {
+                "name": f"another{generate_random_string()}",
+                "dataSource": "src-other",
+            }
+        ],
+    },
+    {
+        "mgmt_name": generate_random_string(),
+        "mgmt_groups": [],
+    },
+    {
+        "mgmt_name": generate_random_string(),
+        "mgmt_groups": None,
+    }
+])
+def test_get_mgmt_group_error(test_case):
+    asset = {
+        "name": "testAsset",
+        "properties": {}
+    }
+
+    # Set up managementGroups in asset properties if provided
+    if test_case["mgmt_groups"] is not None:
+        asset["properties"]["managementGroups"] = test_case["mgmt_groups"]
+
+    with pytest.raises(InvalidArgumentValueError) as ex:
+        _get_mgmt_group(asset, test_case["mgmt_name"])
+
+    error_msg = f"Management group '{test_case['mgmt_name']}' not found in asset '{asset['name']}'."
     assert error_msg in str(ex.value)
 
 
@@ -318,6 +378,161 @@ def test_create_datapoint(test_case, mocker):
         assert json.loads(result["dataPointConfiguration"]) == test_config
     else:
         assert "dataPointConfiguration" not in result or result["dataPointConfiguration"] == "{}"
+
+
+@pytest.mark.parametrize("test_case", [
+    # Basic event with only required parameters
+    {
+        "params": {
+            "event_name": "test_event",
+            "data_source": "nsu=test;s=Source1"
+        },
+        "expected": {
+            "name": "test_event",
+            "dataSource": "nsu=test;s=Source1"
+        }
+    },
+    # Event with type reference
+    {
+        "params": {
+            "event_name": "test_event",
+            "data_source": "nsu=test;s=Source1",
+            "type_ref": "dtmi:contoso:datatype:event;1"
+        },
+        "expected": {
+            "name": "test_event",
+            "dataSource": "nsu=test;s=Source1",
+            "typeRef": "dtmi:contoso:datatype:event;1"
+        }
+    },
+    # Event with custom configuration
+    {
+        "params": {
+            "event_name": "test_event",
+            "data_source": "nsu=test;s=Source1",
+            "custom_configuration": '{"customSetting": "value"}'
+        },
+        "expected": {
+            "name": "test_event",
+            "dataSource": "nsu=test;s=Source1",
+            "eventConfiguration": '{"customSetting": "value"}'
+        }
+    },
+    # Event with OPC UA configuration (queue_size only)
+    {
+        "params": {
+            "event_name": "test_event",
+            "data_source": "nsu=test;s=Source1",
+            "queue_size": 10
+        },
+        "expected": {
+            "name": "test_event",
+            "dataSource": "nsu=test;s=Source1",
+            "eventConfiguration": '{"queueSize": 10}'
+        }
+    },
+    # Event with OPC UA configuration (sampling_interval only)
+    {
+        "params": {
+            "event_name": "test_event",
+            "data_source": "nsu=test;s=Source1",
+            "sampling_interval": 500
+        },
+        "expected": {
+            "name": "test_event",
+            "dataSource": "nsu=test;s=Source1",
+            "eventConfiguration": '{"samplingInterval": 500}'
+        }
+    },
+    # Event with OPC UA configuration (both queue_size and sampling_interval)
+    {
+        "params": {
+            "event_name": "test_event",
+            "data_source": "nsu=test;s=Source1",
+            "queue_size": 10,
+            "sampling_interval": 500
+        },
+        "expected": {
+            "name": "test_event",
+            "dataSource": "nsu=test;s=Source1",
+            "eventConfiguration": '{"queueSize": 10, "samplingInterval": 500}'
+        }
+    },
+    # Event with destinations (ensure destinations are set)
+    {
+        "params": {
+            "event_name": "test_event",
+            "data_source": "nsu=test;s=Source1",
+            "event_destinations": ["topic=/contoso/test", "retain=Never", "qos=Qos0", "ttl=3600"]
+        },
+        "expected": {
+            "name": "test_event",
+            "dataSource": "nsu=test;s=Source1",
+            "destinations": [
+                {
+                    "target": "Mqtt",
+                    "configuration": {
+                        "topic": "/contoso/test",
+                        "retain": "Never",
+                        "qos": "Qos0",
+                        "ttl": 3600
+                    }
+                }
+            ]
+        }
+    }
+])
+def test_create_event(test_case, mocker):
+    # Patch additional configuration processor used by custom_configuration path
+    mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_assets.process_additional_configuration",
+        return_value='{"customSetting": "value"}'
+    )
+    # Patch _build_destination so tests that expect destinations get a deterministic value
+    mock_dest = [
+        {
+            "target": "Mqtt",
+            "configuration": {
+                "topic": "/contoso/test",
+                "retain": "Never",
+                "qos": "Qos0",
+                "ttl": 3600
+            }
+        }
+    ]
+    mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_assets._build_destination",
+        return_value=mock_dest
+    )
+
+    result = _create_event(**test_case["params"])
+
+    assert result["name"] == test_case["expected"]["name"]
+    assert result["dataSource"] == test_case["expected"]["dataSource"]
+
+    # typeRef optional field
+    if "typeRef" in test_case["expected"]:
+        assert result.get("typeRef") == test_case["expected"]["typeRef"]
+    else:
+        assert "typeRef" not in result
+
+    # destinations optional field
+    if "destinations" in test_case["expected"]:
+        assert "destinations" in result
+        # we patched _build_destination to return mock_dest, so compare to that
+        assert result["destinations"] == mock_dest
+    else:
+        assert "destinations" not in result
+
+    # eventConfiguration optional field
+    if "eventConfiguration" in test_case["expected"]:
+        assert "eventConfiguration" in result
+        assert result["eventConfiguration"] == test_case["expected"]["eventConfiguration"]
+    else:
+        # when no configuration provided, function returns an empty json object string
+        # ensure eventConfiguration exists and is a json string (possibly "{}")
+        assert "eventConfiguration" in result
+        assert isinstance(result["eventConfiguration"], str)
 
 
 @pytest.mark.parametrize(
