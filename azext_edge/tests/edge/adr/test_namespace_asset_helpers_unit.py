@@ -18,9 +18,8 @@ from azext_edge.edge.providers.adr.namespace_devices import DeviceEndpointType
 from azext_edge.edge.providers.adr.namespace_assets import (
     _build_destination,
     _create_datapoint,
+    _get_sub_property,
     _create_event,
-    _get_event_group,
-    _get_mgmt_group,
     _process_configs,
     _process_opcua_dataset_configurations_v1,
     _process_opcua_event_configurations_v1,
@@ -137,123 +136,40 @@ def test_build_destination_error(test_case: dict):
         assert msg in str(excinfo.value)
 
 
-@pytest.mark.parametrize("num_groups", [1, 5, 10])
-def test_get_event_group(num_groups: int):
-    from .test_namespace_asset_events_unit import generate_event_group
-    test_event = generate_random_string()
-    asset = {
-        "name": "testAsset",
-        "properties": {
-            "eventGroups": []
-        }
-    }
+@pytest.mark.parametrize("property_key", ["datasets", "eventGroups", "managementGroups"])
+def test_get_sub_property_success(property_key: str):
+    test_name = generate_random_string()
+    asset = {"name": "testAsset", "properties": {property_key: []}}
 
-    for i in range(num_groups):
-        asset["properties"]["eventGroups"].append(generate_event_group(f"testEvent{i}"))
+    # add some non-matching entries
+    for i in range(3):
+        asset["properties"][property_key].append({"name": f"other{i}", "dataSource": f"src{i}"})
 
-    # Set up eventGroups in roperties
-    asset["properties"]["eventGroups"].append(generate_event_group(test_event))
+    # append the target entry
+    expected = {"name": test_name, "dataSource": "nsu=test;s=SourceX"}
+    asset["properties"][property_key].append(expected)
 
-    # Test success case
-    result = _get_event_group(asset, test_event)
-    assert result["name"] == test_event
-    # lazy way cause the event is last
-    assert result == asset["properties"]["eventGroups"][-1]
+    result = _get_sub_property(asset, test_name, property_key=property_key)
+    assert result == expected
 
 
-@pytest.mark.parametrize("test_case", [
-    {
-        "event_name": generate_random_string(),
-        "event_groups": [
-            {
-                "name": f"another{generate_random_string()}",
-                "dataSource": "nsu=test;s=FastUInt456",
-            }
-        ],
-    },
-    {
-        "event_name": generate_random_string(),
-        "event_groups": [],
-    },
-    {
-        "event_name": generate_random_string(),
-        "event_groups": None,
-    }
-])
-def test_get_event_group_error(test_case):
-    """Test error handling when an event is not found in an asset."""
-    asset = {
-        "name": "testAsset",
-        "properties": {}
-    }
+@pytest.mark.parametrize("property_key", ["datasets", "eventGroups", "managementGroups"])
+def test_get_sub_property_error(property_key):
+    name = generate_random_string()
+    asset = {"name": "testAsset", "properties": {}}
 
-    # Set up events in asset properties if provided
-    if test_case["event_groups"] is not None:
-        asset["properties"]["eventGroups"] = test_case["event_groups"]
-
-    # Test error cases
+    # when property list missing
     with pytest.raises(InvalidArgumentValueError) as ex:
-        _get_event_group(asset, test_case["event_name"])
-    error_msg = f"Event group '{test_case['event_name']}' not found in asset '{asset['name']}'."
-    assert error_msg in str(ex.value)
+        _get_sub_property(asset, name, property_key=property_key)
 
-
-@pytest.mark.parametrize("num_groups", [1, 5, 10])
-def test_get_mgmt_group(num_groups: int):
-    test_mgmt = generate_random_string()
-    asset = {
-        "name": "testAsset",
-        "properties": {
-            "managementGroups": []
-        }
+    name_map = {
+        "datasets": "Dataset",
+        "eventGroups": "Event group",
+        "managementGroups": "Management group"
     }
-
-    for i in range(num_groups):
-        asset["properties"]["managementGroups"].append({"name": f"mgmt{i}", "dataSource": f"src{i}"})
-
-    # Append the target management group
-    asset["properties"]["managementGroups"].append({"name": test_mgmt, "dataSource": "src-target"})
-
-    # success case
-    result = _get_mgmt_group(asset, test_mgmt)
-    assert result["name"] == test_mgmt
-    assert result == asset["properties"]["managementGroups"][-1]
-
-
-@pytest.mark.parametrize("test_case", [
-    {
-        "mgmt_name": generate_random_string(),
-        "mgmt_groups": [
-            {
-                "name": f"another{generate_random_string()}",
-                "dataSource": "src-other",
-            }
-        ],
-    },
-    {
-        "mgmt_name": generate_random_string(),
-        "mgmt_groups": [],
-    },
-    {
-        "mgmt_name": generate_random_string(),
-        "mgmt_groups": None,
-    }
-])
-def test_get_mgmt_group_error(test_case):
-    asset = {
-        "name": "testAsset",
-        "properties": {}
-    }
-
-    # Set up managementGroups in asset properties if provided
-    if test_case["mgmt_groups"] is not None:
-        asset["properties"]["managementGroups"] = test_case["mgmt_groups"]
-
-    with pytest.raises(InvalidArgumentValueError) as ex:
-        _get_mgmt_group(asset, test_case["mgmt_name"])
-
-    error_msg = f"Management group '{test_case['mgmt_name']}' not found in asset '{asset['name']}'."
-    assert error_msg in str(ex.value)
+    property_name = name_map[property_key]
+    expected_msg = f"{property_name} '{name}' not found in asset '{asset['name']}'."
+    assert expected_msg in str(ex.value)
 
 
 @pytest.mark.parametrize("test_case", [
