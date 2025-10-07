@@ -257,9 +257,10 @@ class Schemas(Queryable):
             return
 
         with console.status("Working..."):
-            return self.ops.begin_delete(
+            poller = self.ops.begin_delete(
                 resource_group_name=resource_group_name, schema_registry_name=schema_registry_name, schema_name=name
             )
+            return poller.result()
 
     def add_version(
         self,
@@ -333,12 +334,13 @@ class Schemas(Queryable):
         resource_group_name: str,
     ):
         with console.status("Working..."):
-            return self.version_ops.begin_delete(
+            poller = self.version_ops.begin_delete(
                 resource_group_name=resource_group_name,
                 schema_registry_name=schema_registry_name,
                 schema_name=schema_name,
                 schema_version_name=name,
             )
+            return poller.result()
 
     def list_dataflow_friendly_versions(
         self,
