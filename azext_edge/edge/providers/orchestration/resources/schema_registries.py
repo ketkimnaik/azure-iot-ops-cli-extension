@@ -333,7 +333,7 @@ class Schemas(Queryable):
         schema_name: str,
         schema_registry_name: str,
         resource_group_name: str,
-        **kwargs    
+        **kwargs
     ):
         with console.status("Working..."):
             poller = self.version_ops.begin_delete(
