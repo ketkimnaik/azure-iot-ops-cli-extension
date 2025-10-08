@@ -252,16 +252,14 @@ class Schemas(Queryable):
         schema_registry_name: str,
         resource_group_name: str,
         confirm_yes: Optional[bool] = None,
-        **kwargs
     ):
         if not should_continue_prompt(confirm_yes=confirm_yes):
             return
 
         with console.status("Working..."):
-            poller = self.ops.begin_delete(
+            return self.ops.begin_delete(
                 resource_group_name=resource_group_name, schema_registry_name=schema_registry_name, schema_name=name
             )
-            wait_for_terminal_state(poller, **kwargs)
 
     def add_version(
         self,
@@ -333,16 +331,14 @@ class Schemas(Queryable):
         schema_name: str,
         schema_registry_name: str,
         resource_group_name: str,
-        **kwargs
     ):
         with console.status("Working..."):
-            poller = self.version_ops.begin_delete(
+            return self.version_ops.begin_delete(
                 resource_group_name=resource_group_name,
                 schema_registry_name=schema_registry_name,
                 schema_name=schema_name,
                 schema_version_name=name,
             )
-            wait_for_terminal_state(poller, **kwargs)
 
     def list_dataflow_friendly_versions(
         self,
