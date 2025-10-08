@@ -28,7 +28,7 @@ from ....generators import generate_random_string
 from .conftest import get_base_endpoint, get_mock_resource
 
 SCHEMA_RP = "Microsoft.DeviceRegistry"
-SCHEMA_REGISTRY_RP_API_VERSION = DeviceRegistryMgmtApiVersion.V20250701_preview.value
+SCHEMA_REGISTRY_RP_API_VERSION = DeviceRegistryMgmtApiVersion.V20251001.value
 
 
 def get_schema_endpoint(
