@@ -178,7 +178,8 @@ def test_schema_list(mocked_cmd, mocked_responses: responses, records: int):
     assert len(mocked_responses.calls) == 1
 
 
-def test_schema_delete(mocked_cmd, mocked_responses: responses):
+@pytest.mark.parametrize("status_code", [200, 204])
+def test_schema_delete(mocked_cmd, mocked_responses: responses, status_code: int):
     schema_name = generate_random_string()
     registry_name = generate_random_string()
     resource_group_name = generate_random_string()
@@ -190,7 +191,7 @@ def test_schema_delete(mocked_cmd, mocked_responses: responses):
             registry_name=registry_name,
             schema_name=schema_name
         ),
-        status=202,
+        status=status_code,
         content_type="application/json",
     )
     delete_schema(
@@ -382,7 +383,8 @@ def test_version_list(mocked_cmd, mocked_responses: responses, records: int):
     assert len(mocked_responses.calls) == 1
 
 
-def test_version_remove(mocked_cmd, mocked_responses: responses):
+@pytest.mark.parametrize("status_code", [200, 204])
+def test_version_remove(mocked_cmd, mocked_responses: responses, status_code: int):
     version_num = randint(1, 10)
     schema_name = generate_random_string()
     registry_name = generate_random_string()
@@ -396,7 +398,7 @@ def test_version_remove(mocked_cmd, mocked_responses: responses):
             schema_name=schema_name,
             schema_version=version_num
         ),
-        status=202,
+        status=status_code,
         content_type="application/json",
     )
     remove_version(
