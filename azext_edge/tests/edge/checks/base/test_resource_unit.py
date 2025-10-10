@@ -431,7 +431,7 @@ def test_process_list_resource(mocker, mocked_check_manager, resource, expected_
         ("Warn", "[yellow]{}[/yellow]"),
         ("Error", "[red]{}[/red]"),
         ("N/A", "[yellow]{}[/yellow]"),
-        ("Unknown", "[green]{}[/green]"),
+        ("Unknown", "[bright white]{}[/bright white]"),
     ],
 )
 def test_decorate_resource_status(status, expected_status_text):
