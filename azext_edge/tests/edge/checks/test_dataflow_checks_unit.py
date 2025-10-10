@@ -1212,6 +1212,76 @@ def test_evaluate_dataflow_endpoints(
                 ]
             ],
         ),
+        # profile with healthState (IoT Operations API)
+        (
+            # profiles
+            [
+                {
+                    "metadata": {
+                        "name": DEFAULT_DATAFLOW_PROFILE,
+                        "namespace": DEFAULT_NAMESPACE,
+                    },
+                    "spec": {
+                        "instanceCount": 1,
+                    },
+                    "status": {
+                        "provisioningStatus": {
+                            "status": "success",
+                        },
+                        "healthState": {
+                            "status": "Available",
+                        },
+                    },
+                },
+            ],
+            # pods
+            [
+                generate_pod_stub(
+                    name=f"aio-dataflow-{DEFAULT_DATAFLOW_PROFILE}-0",
+                    phase="Running",
+                ),
+            ],
+            # conditions
+            [
+                "spec.instanceCount",
+                f"[*].metadata.name=='{DEFAULT_DATAFLOW_PROFILE}'",
+            ],
+            # evaluations
+            [
+                [
+                    ("status", "success"),
+                    (
+                        "name",
+                        DEFAULT_DATAFLOW_PROFILE,
+                    ),
+                    ("value", {"status.provisioningStatus.status": "success"}),
+                ],
+                [
+                    ("status", "success"),
+                    (
+                        "name",
+                        DEFAULT_DATAFLOW_PROFILE,
+                    ),
+                    ("value", {"status.healthState.status": "Available"}),
+                ],
+                [
+                    ("status", "success"),
+                    (
+                        "name",
+                        DEFAULT_DATAFLOW_PROFILE,
+                    ),
+                    ("value", {"spec.instanceCount": 1}),
+                ],
+                [
+                    ("status", "success"),
+                    (
+                        "name",
+                        "pod/aio-dataflow-default-0",
+                    ),
+                    ("value", {"status.phase": "Running"}),
+                ],
+            ],
+        ),
     ],
 )
 def test_evaluate_dataflow_profiles(

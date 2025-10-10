@@ -808,6 +808,11 @@ def test_combine_statuses(status_list, expected_final_status):
         ("warn", "warning"),
         ("Error", "error"),
         ("N/A", "warning"),
+        # IoT Operations healthState values
+        ("Available", "success"),
+        ("Degraded", "warning"),
+        ("Unavailable", "error"),
+        ("Unknown", "skipped"),
     ],
 )
 def test_calculate_status(resource_state, expected_status):
