@@ -967,7 +967,7 @@ def test_evaluate_dataflow_endpoints(
                                 "message": "message",
                             },
                         },
-                        "healthState": "Available",
+                        "healthState": {"status": "Available"},
                     },
                 },
             ],
@@ -1000,7 +1000,7 @@ def test_evaluate_dataflow_endpoints(
                         "name",
                         DEFAULT_DATAFLOW_PROFILE,
                     ),
-                    ("value", {"status.healthState": "Available"}),
+                    ("value", {"status.healthState.status": "Available"}),
                 ],
                 [
                     ("status", "success"),
@@ -1124,7 +1124,7 @@ def test_evaluate_dataflow_endpoints(
                             },
                             "failureCause": "failure cause",
                         },
-                        "healthState": "Available",
+                        "healthState": {"status": "Available"},
                     },
                 },
             ],
@@ -1165,7 +1165,7 @@ def test_evaluate_dataflow_endpoints(
                     (
                         "value",
                         {
-                            "status.healthState": "Available",
+                            "status.healthState.status": "Available",
                         },
                     ),
                 ],
@@ -1222,7 +1222,7 @@ def test_evaluate_dataflow_endpoints(
                         "provisioningStatus": {
                             "status": "success",
                         },
-                        "healthState": "Available",
+                        "healthState": {"status": "Available"},
                     },
                 },
             ],
@@ -1254,7 +1254,7 @@ def test_evaluate_dataflow_endpoints(
                         "name",
                         DEFAULT_DATAFLOW_PROFILE,
                     ),
-                    ("value", {"status.healthState": "Available"}),
+                    ("value", {"status.healthState.status": "Available"}),
                 ],
                 [
                     ("status", "success"),

@@ -157,11 +157,13 @@ def _process_dataflow_resource_status(
     # status handling - IoT Operations resources use healthState (optional)
     health_state = status.get("healthState")
     if health_state:
-        runtime_status_enum = ResourceState.map_to_status(health_state)
+        # healthState is an object like provisioningStatus
+        health_state_status = health_state.get("status")
+        runtime_status_enum = ResourceState.map_to_status(health_state_status)
 
         # create display for health state
         health_status_display = (
-            f"Health Status: {{{colorize_string(color=runtime_status_enum.color, value=health_state)}}}"
+            f"Health Status: {{{colorize_string(color=runtime_status_enum.color, value=health_state_status)}}}"
         )
         check_manager.add_display(
             target_name=target_name,
@@ -185,7 +187,8 @@ def _process_dataflow_resource_status(
         )
     if runtime_status_enum != CheckTaskStatus.skipped:
         # Only healthState is supported (runtimeStatus removed from API)
-        status_value = {"status.healthState": health_state}
+        # healthState is an object like provisioningStatus
+        status_value = {"status.healthState.status": health_state.get("status")}
 
         check_manager.add_target_eval(
             target_name=target_name,

@@ -427,7 +427,8 @@ def process_custom_resource_status(
 
     # Handle healthState for IoT Operations resources
     if health_state:
-        status_list.append(calculate_status(health_state))
+        health_state_status = health_state.get("status")
+        status_list.append(calculate_status(health_state_status))
 
     # combine provisioning and health state status
     status_eval_status = combine_statuses(status_list)
@@ -460,17 +461,13 @@ def process_custom_resource_status(
             "Health Status": health_state,
         }.items():
             if prop_value:
-                # Handle string values (healthState) vs objects (provisioningStatus)
-                if isinstance(prop_value, str):
-                    status_value = prop_value
-                    status_text = f"{prop_name} {{{decorate_resource_status(status_value)}}}."
-                else:
-                    status_value = prop_value.get('status')
-                    status_text = f"{prop_name} {{{decorate_resource_status(status_value)}}}."
-                    if detail_level == ResourceOutputDetailLevel.verbose.value:
-                        status_description = prop_value.get("description") or prop_value.get("output", {}).get("message")
-                        if status_description:
-                            status_text = status_text.replace(".", f", [cyan]{status_description}[/cyan].")
+                # Both healthState and provisioningStatus are objects
+                status_value = prop_value.get('status')
+                status_text = f"{prop_name} {{{decorate_resource_status(status_value)}}}."
+                if detail_level == ResourceOutputDetailLevel.verbose.value:
+                    status_description = prop_value.get("description") or prop_value.get("output", {}).get("message")
+                    if status_description:
+                        status_text = status_text.replace(".", f", [cyan]{status_description}[/cyan].")
 
                 check_manager.add_display(
                     target_name=target_name,

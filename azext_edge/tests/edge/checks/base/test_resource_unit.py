@@ -829,7 +829,7 @@ def test_calculate_status(resource_state, expected_status):
         # Scenario 1: Both healthState and provisioningStatus are provided with summary detail level.
         (
             {
-                "healthState": "Available",
+                "healthState": {"status": "Available"},
                 "provisioningStatus": {"status": "Success"},
             },
             ResourceOutputDetailLevel.summary.value,
@@ -842,7 +842,7 @@ def test_calculate_status(resource_state, expected_status):
                     status="success",
                     value={
                         "status": {
-                            "healthState": "Available",
+                            "healthState": {"status": "Available"},
                             "provisioningStatus": {"status": "Success"},
                         }
                     },
@@ -852,7 +852,7 @@ def test_calculate_status(resource_state, expected_status):
         ),
         # Scenario 2: No healthState and provisioningStatus provided.
         (
-            {"healthState": None, "provisioningStatus": {}},
+            {"healthState": {}, "provisioningStatus": {}},
             ResourceOutputDetailLevel.summary.value,
             ["Status [red]not found[/red]."],
             [call(target_name="test_target", namespace="test_namespace", conditions=["status"])],
@@ -861,7 +861,7 @@ def test_calculate_status(resource_state, expected_status):
                     target_name="test_target",
                     namespace="test_namespace",
                     status=CheckTaskStatus.error.value,
-                    value={"status": {"healthState": None, "provisioningStatus": {}}},
+                    value={"status": {"healthState": {}, "provisioningStatus": {}}},
                     resource_name="test_resource",
                 )
             ],
@@ -869,14 +869,14 @@ def test_calculate_status(resource_state, expected_status):
         # Scenario 3: Both statuses, verbose detail level.
         (
             {
-                "healthState": "Available",
+                "healthState": {"status": "Available", "description": "Resource is healthy"},
                 "provisioningStatus": {"status": "Success"},
             },
             ResourceOutputDetailLevel.verbose.value,
             [
                 "Status:",
                 "Provisioning Status {[green]Success[/green]}.",
-                "Health Status {[green]Available[/green]}.",
+                "Health Status {[green]Available[/green]}, [cyan]Resource is healthy[/cyan].",
             ],
             [call(target_name="test_target", namespace="test_namespace", conditions=["status"])],
             [
@@ -886,7 +886,7 @@ def test_calculate_status(resource_state, expected_status):
                     status="success",
                     value={
                         "status": {
-                            "healthState": "Available",
+                            "healthState": {"status": "Available", "description": "Resource is healthy"},
                             "provisioningStatus": {"status": "Success"},
                         }
                     },
