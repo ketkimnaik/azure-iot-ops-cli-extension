@@ -826,10 +826,10 @@ def test_calculate_status(resource_state, expected_status):
 @pytest.mark.parametrize(
     "status, detail_level, expected_display_texts, expected_conditions_calls, expected_eval_calls",
     [
-        # Scenario 1: Both runtimeStatus and provisioningStatus are provided with summary detail level.
+        # Scenario 1: Both healthState and provisioningStatus are provided with summary detail level.
         (
             {
-                "runtimeStatus": {"status": "Running", "description": "All good"},
+                "healthState": "Available",
                 "provisioningStatus": {"status": "Success"},
             },
             ResourceOutputDetailLevel.summary.value,
@@ -842,7 +842,7 @@ def test_calculate_status(resource_state, expected_status):
                     status="success",
                     value={
                         "status": {
-                            "runtimeStatus": {"status": "Running", "description": "All good"},
+                            "healthState": "Available",
                             "provisioningStatus": {"status": "Success"},
                         }
                     },
@@ -850,9 +850,9 @@ def test_calculate_status(resource_state, expected_status):
                 )
             ],
         ),
-        # Scenario 2: No runtimeStatus and provisioningStatus provided.
+        # Scenario 2: No healthState and provisioningStatus provided.
         (
-            {"runtimeStatus": {}, "provisioningStatus": {}},
+            {"healthState": None, "provisioningStatus": {}},
             ResourceOutputDetailLevel.summary.value,
             ["Status [red]not found[/red]."],
             [call(target_name="test_target", namespace="test_namespace", conditions=["status"])],
@@ -861,7 +861,7 @@ def test_calculate_status(resource_state, expected_status):
                     target_name="test_target",
                     namespace="test_namespace",
                     status=CheckTaskStatus.error.value,
-                    value={"status": {"runtimeStatus": {}, "provisioningStatus": {}}},
+                    value={"status": {"healthState": None, "provisioningStatus": {}}},
                     resource_name="test_resource",
                 )
             ],
@@ -869,14 +869,14 @@ def test_calculate_status(resource_state, expected_status):
         # Scenario 3: Both statuses, verbose detail level.
         (
             {
-                "runtimeStatus": {"status": "Running", "description": "All good"},
+                "healthState": "Available",
                 "provisioningStatus": {"status": "Success"},
             },
             ResourceOutputDetailLevel.verbose.value,
             [
                 "Status:",
                 "Provisioning Status {[green]Success[/green]}.",
-                "Runtime Status {[green]Running[/green]}, [cyan]All good[/cyan].",
+                "Health Status {[green]Available[/green]}.",
             ],
             [call(target_name="test_target", namespace="test_namespace", conditions=["status"])],
             [
@@ -886,7 +886,7 @@ def test_calculate_status(resource_state, expected_status):
                     status="success",
                     value={
                         "status": {
-                            "runtimeStatus": {"status": "Running", "description": "All good"},
+                            "healthState": "Available",
                             "provisioningStatus": {"status": "Success"},
                         }
                     },

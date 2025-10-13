@@ -154,44 +154,20 @@ def _process_dataflow_resource_status(
                 display=Padding("Log Errors:", (0, 0, 0, inner_padding)),
             )
 
-    # status handling - IoT Operations resources use healthState, fallback to runtimeStatus for compatibility
-    runtime_status = status.get("runtimeStatus", {})
-    if runtime_status:
-        # calculate status
-        runtime_level = runtime_status.get("level")
-        runtime_status_enum = ResourceState.map_to_status(runtime_level)
-        description = runtime_status.get("description")
+    # status handling - IoT Operations resources use healthState (optional)
+    health_state = status.get("healthState")
+    if health_state:
+        runtime_status_enum = ResourceState.map_to_status(health_state)
 
-        # create display
-        runtime_status_display = (
-            f"Runtime Status: {{{colorize_string(color=runtime_status_enum.color, value=runtime_status.get('level'))}}}"
+        # create display for health state
+        health_status_display = (
+            f"Health Status: {{{colorize_string(color=runtime_status_enum.color, value=health_state)}}}"
         )
-        if description and detail_level > ResourceOutputDetailLevel.summary.value:
-            runtime_status_display += f" - {colorize_string(description)}"
         check_manager.add_display(
             target_name=target_name,
             namespace=namespace,
-            display=Padding(runtime_status_display, (0, 0, 0, padding)),
+            display=Padding(health_status_display, (0, 0, 0, padding)),
         )
-    else:
-        # Check for healthState (expected for dataflow profiles and other IoT Operations resources)
-        health_state = status.get("healthState", {})
-        if health_state:
-            health_status = health_state.get("status") if isinstance(health_state, dict) else health_state
-            runtime_status_enum = ResourceState.map_to_status(health_status)
-
-            # create display for health state
-            health_status_display = (
-                f"Health Status: {{{colorize_string(color=runtime_status_enum.color, value=health_status)}}}"
-            )
-            check_manager.add_display(
-                target_name=target_name,
-                namespace=namespace,
-                display=Padding(health_status_display, (0, 0, 0, padding)),
-            )
-        elif resource_kind == DataflowResourceKinds.DATAFLOWPROFILE.value:
-            # Only force error for dataflow profiles if no status is found at all
-            runtime_status_enum = CheckTaskStatus.error
 
     # add evals if necessary
     if provisioning_status_enum != CheckTaskStatus.skipped:
@@ -208,16 +184,8 @@ def _process_dataflow_resource_status(
             value=status_obj,
         )
     if runtime_status_enum != CheckTaskStatus.skipped:
-        # Determine the appropriate status field to evaluate
-        if runtime_status:
-            # Standard runtime status case
-            status_value = {"status.runtimeStatus.level": runtime_status.get("level")}
-        elif resource_kind == DataflowResourceKinds.DATAFLOWPROFILE.value and status.get("healthState"):
-            # Dataflow profile with healthState case
-            status_value = {"status.healthState.status": status.get("healthState", {}).get("status")}
-        else:
-            # Fallback case
-            status_value = {"status.runtimeStatus.level": None}
+        # Only healthState is supported (runtimeStatus removed from API)
+        status_value = {"status.healthState": health_state}
 
         check_manager.add_target_eval(
             target_name=target_name,

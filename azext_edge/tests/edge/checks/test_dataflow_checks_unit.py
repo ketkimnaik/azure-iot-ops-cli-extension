@@ -967,10 +967,7 @@ def test_evaluate_dataflow_endpoints(
                                 "message": "message",
                             },
                         },
-                        "runtimeStatus": {
-                            "level": "ok",
-                            "description": "runtime status",
-                        },
+                        "healthState": "Available",
                     },
                 },
             ],
@@ -1003,7 +1000,7 @@ def test_evaluate_dataflow_endpoints(
                         "name",
                         DEFAULT_DATAFLOW_PROFILE,
                     ),
-                    ("value", {"status.runtimeStatus.level": "ok"}),
+                    ("value", {"status.healthState": "Available"}),
                 ],
                 [
                     ("status", "success"),
@@ -1127,10 +1124,7 @@ def test_evaluate_dataflow_endpoints(
                             },
                             "failureCause": "failure cause",
                         },
-                        "runtimeStatus": {
-                            "level": "ok",
-                            "description": "runtime status",
-                        },
+                        "healthState": "Available",
                     },
                 },
             ],
@@ -1171,7 +1165,7 @@ def test_evaluate_dataflow_endpoints(
                     (
                         "value",
                         {
-                            "status.runtimeStatus.level": "ok",
+                            "status.healthState": "Available",
                         },
                     ),
                 ],
@@ -1228,9 +1222,7 @@ def test_evaluate_dataflow_endpoints(
                         "provisioningStatus": {
                             "status": "success",
                         },
-                        "healthState": {
-                            "status": "Available",
-                        },
+                        "healthState": "Available",
                     },
                 },
             ],
@@ -1262,7 +1254,7 @@ def test_evaluate_dataflow_endpoints(
                         "name",
                         DEFAULT_DATAFLOW_PROFILE,
                     ),
-                    ("value", {"status.healthState.status": "Available"}),
+                    ("value", {"status.healthState": "Available"}),
                 ],
                 [
                     ("status", "success"),
