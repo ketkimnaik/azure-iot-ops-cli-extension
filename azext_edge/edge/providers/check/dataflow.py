@@ -165,6 +165,12 @@ def _process_dataflow_resource_status(
         health_status_display = (
             f"Health Status: {{{colorize_string(color=runtime_status_enum.color, value=health_state_status)}}}"
         )
+        # Add description for higher detail levels
+        if detail_level > ResourceOutputDetailLevel.summary.value:
+            description = health_state.get("description")
+            if description:
+                health_status_display += f" - [cyan]{description}[/cyan]"
+
         check_manager.add_display(
             target_name=target_name,
             namespace=namespace,
