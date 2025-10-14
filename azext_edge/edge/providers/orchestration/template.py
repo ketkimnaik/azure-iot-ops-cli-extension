@@ -652,7 +652,7 @@ TEMPLATE_BLUEPRINT_ENABLEMENT = TemplateBlueprint(
 )
 
 TEMPLATE_BLUEPRINT_INSTANCE = TemplateBlueprint(
-    commit_id="879800a554ae1418ae8727b6c28ed24770f44847",
+    commit_id="fcc9376e1bccc273fb42bc6dea582d9f60d5f241",
     content={
         "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
         "languageVersion": "2.0",
@@ -1243,7 +1243,7 @@ TEMPLATE_BLUEPRINT_INSTANCE = TemplateBlueprint(
             "advancedConfig": {"$ref": "#/definitions/_1.AdvancedConfig", "defaultValue": {}},
         },
         "variables": {
-            "VERSIONS": {"iotOperations": "1.2.93"},
+            "VERSIONS": {"iotOperations": "1.2.97"},
             "TRAINS": {"iotOperations": "integration"},
             "HASH": "[coalesce(tryGet(parameters('advancedConfig'), 'resourceSuffix'), take(uniqueString(resourceGroup().id, parameters('clusterName'), parameters('clusterNamespace')), 5))]",
             "AIO_EXTENSION_SUFFIX": "[take(uniqueString(resourceId('Microsoft.Kubernetes/connectedClusters', parameters('clusterName'))), 5)]",
