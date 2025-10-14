@@ -169,7 +169,7 @@ def _process_dataflow_resource_status(
         if detail_level > ResourceOutputDetailLevel.summary.value:
             description = health_state.get("description")
             if description:
-                health_status_display += f" - [cyan]{description}[/cyan]"
+                health_status_display += f" - {colorize_string(description)}"
 
         check_manager.add_display(
             target_name=target_name,
