@@ -169,6 +169,7 @@ def create_instance(
     persist_mode: Optional[List[str]] = None,
     # Tags
     tags: Optional[dict] = None,
+    skip_sr_ra: Optional[bool] = None,
     no_progress: Optional[bool] = None,
     **kwargs,
 ) -> Union[Dict[str, Any], None]:
@@ -215,6 +216,7 @@ def create_instance(
         persist_pvc_sc=persist_pvc_sc,
         persist_mode=persist_mode,
         tags=tags,
+        skip_sr_ra=skip_sr_ra,
         **kwargs,
     )
     if no_progress and result_payload:
@@ -228,6 +230,7 @@ def upgrade_instance(
     cmd,
     resource_group_name: str,
     instance_name: str,
+    adr_namespace_resource_id: Optional[str] = None,
     no_progress: Optional[bool] = None,
     confirm_yes: Optional[bool] = None,
     ops_config: Optional[List[str]] = None,
@@ -242,6 +245,7 @@ def upgrade_instance(
     cm_version: Optional[str] = None,
     cm_train: Optional[str] = None,
     cm_config_sync_mode: Optional[str] = None,
+    no_cm_install: Optional[bool] = None,
     force: Optional[bool] = None,
     **kwargs,
 ) -> Optional[List[dict]]:
@@ -251,6 +255,7 @@ def upgrade_instance(
         cmd=cmd,
         resource_group_name=resource_group_name,
         instance_name=instance_name,
+        adr_namespace_resource_id=adr_namespace_resource_id,
         no_progress=no_progress,
         confirm_yes=confirm_yes,
         ops_config=ops_config,
@@ -265,6 +270,7 @@ def upgrade_instance(
         cm_version=cm_version,
         cm_train=cm_train,
         cm_config_sync_mode=cm_config_sync_mode,
+        no_cm_install=no_cm_install,
         force=force,
         **kwargs,
     )

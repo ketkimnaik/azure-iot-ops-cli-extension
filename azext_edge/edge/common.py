@@ -69,6 +69,11 @@ class ResourceState(Enum):
     warn = "warn"
     error = "error"
     n_a = "n/a"
+    # IoT Operations healthState values
+    available = "available"
+    degraded = "degraded"
+    unavailable = "unavailable"
+    unknown = "unknown"
 
     @classmethod
     def map_to_color(cls, value) -> str:
@@ -86,6 +91,10 @@ class ResourceState(Enum):
             cls.error.value: CheckTaskStatus.error,
             cls.waiting.value: CheckTaskStatus.warning,
             cls.warning.value: CheckTaskStatus.warning,
+            cls.available.value: CheckTaskStatus.success,
+            cls.degraded.value: CheckTaskStatus.warning,
+            cls.unavailable.value: CheckTaskStatus.error,
+            cls.unknown.value: CheckTaskStatus.skipped,
         }
         return status_map.get(value, CheckTaskStatus.success)
 
@@ -244,6 +253,10 @@ DEFAULT_BROKER_AUTHN = "default"
 # Dataflow constants
 DEFAULT_DATAFLOW_PROFILE = "default"
 DEFAULT_DATAFLOW_ENDPOINT = "default"
+
+# Artifact Registry constants
+DEFAULT_ARTIFACT_REGISTRY = "default"
+
 
 # OPC UA check constant
 OPCUA_SERVICE = "opcua"
