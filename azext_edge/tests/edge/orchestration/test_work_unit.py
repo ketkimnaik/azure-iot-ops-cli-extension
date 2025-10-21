@@ -38,6 +38,7 @@ from azext_edge.edge.common import (
     DEFAULT_BROKER_LISTENER,
     DEFAULT_DATAFLOW_ENDPOINT,
     DEFAULT_DATAFLOW_PROFILE,
+    DEFAULT_ARTIFACT_REGISTRY,
 )
 from azext_edge.edge.providers.base import DEFAULT_NAMESPACE
 from azext_edge.edge.providers.orchestration.common import (
@@ -776,6 +777,9 @@ def assert_cluster_prechecks(mock_prechecks: Dict[str, Mock], target_scenario: d
             ),
             omit_http_methods=frozenset([responses.PUT, responses.POST]),
         ),
+        build_target_scenario(
+            skip_sr_ra=True,
+        ),
     ],
 )
 def test_iot_ops_create(
@@ -828,6 +832,9 @@ def test_iot_ops_create(
         if key in target_scenario:
             create_call_kwargs[key] = target_scenario[key]
 
+    skip_sr_ra = target_scenario.get("skip_sr_ra")
+    create_call_kwargs["skip_sr_ra"] = skip_sr_ra
+
     exc_meta: Optional[ExceptionMeta] = target_scenario.get("raises")
     if exc_meta:
         exc_meta: ExceptionMeta
@@ -844,8 +851,8 @@ def test_iot_ops_create(
         CallKey.GET_ADR_NAMESPACE: 1,
         CallKey.GET_CLUSTER_EXTENSIONS: 2,
         CallKey.GET_EXISTING_DEPLOYMENTS: 1,
-        CallKey.GET_SCHEMA_REGISTRY_RA: 1,
-        CallKey.PUT_SCHEMA_REGISTRY_RA: 1,
+        CallKey.GET_SCHEMA_REGISTRY_RA: 0 if skip_sr_ra else 1,
+        CallKey.PUT_SCHEMA_REGISTRY_RA: 0 if skip_sr_ra else 1,
         CallKey.CREATE_CUSTOM_LOCATION: 2,
         CallKey.DEPLOY_CREATE_EXT: 1,
         CallKey.DEPLOY_CREATE_INSTANCE: 1,
@@ -909,7 +916,7 @@ def get_expected_keys_for(phase: InstancePhase) -> Tuple[Set[str], Set[str]]:
     ext_keys = {"cluster", "aioExtension"}
     instance_keys = ext_keys.union({"customLocation", "aioInstance"})
     resource_keys = instance_keys.union(
-        {"broker", "brokerAuthn", "brokerListener", "dataflowProfile", "dataflowEndpoint"}
+        {"broker", "brokerAuthn", "brokerListener", "dataflowProfile", "dataflowEndpoint", "artifactRegistryEndpoint"}
     )
     if phase == InstancePhase.EXT:
         return ext_keys, {}
@@ -1028,8 +1035,8 @@ def assert_instance_deployment_body(body_str: str, target_scenario: dict, phase:
         assert resources["broker"]["name"] == f"{instance_name_lowered}/{DEFAULT_BROKER}"
         assert resources["brokerAuthn"]["name"] == f"{instance_name_lowered}/{DEFAULT_BROKER}/{DEFAULT_BROKER_AUTHN}"
         assert (
-            resources["brokerListener"]["name"]
-            == f"{instance_name_lowered}/{DEFAULT_BROKER}/{DEFAULT_BROKER_LISTENER}"
+            resources["brokerListener"]["name"] == f"{instance_name_lowered}/{DEFAULT_BROKER}/{DEFAULT_BROKER_LISTENER}"
         )
         assert resources["dataflowProfile"]["name"] == f"{instance_name_lowered}/{DEFAULT_DATAFLOW_PROFILE}"
         assert resources["dataflowEndpoint"]["name"] == f"{instance_name_lowered}/{DEFAULT_DATAFLOW_ENDPOINT}"
+        assert resources["artifactRegistryEndpoint"]["name"] == f"{instance_name_lowered}/{DEFAULT_ARTIFACT_REGISTRY}"
