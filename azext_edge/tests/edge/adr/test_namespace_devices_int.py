@@ -336,7 +336,7 @@ def test_namespace_device_lifecycle_operations(require_init, tracked_resources: 
     # Removed endpoints should be present as keys but with None values
     assert endpoint_name_onvif in result
     assert result[endpoint_name_onvif] is None
-    assert endpoint_name_media in result  
+    assert endpoint_name_media in result
     assert result[endpoint_name_media] is None
     assert endpoint_name_rest in result
     assert result[endpoint_name_rest] is None
