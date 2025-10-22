@@ -933,16 +933,18 @@ def load_iotops_arguments(self, _):
             help="Explictly use anonymous authentication.",
         )
         context.argument(
-            "trusted_signing_configmap_key",
-            options_list=["--trust-config-map-ref", "--tcmr"],
-            help="Trusted signing config map reference.",
-            arg_group="Trusted Signing",
+            "code_signing_configmap_refs",
+            options_list=["--cs-config-map-refs", "--cscmr"],
+            nargs="*",
+            help="Space-separated list of code signing CA config map references.",
+            arg_group="Code Signing CA",
         )
         context.argument(
-            "trusted_signing_secret_key",
-            options_list=["--trust-secret-ref", "--tsr"],
-            help="Trusted signing secret reference.",
-            arg_group="Trusted Signing",
+            "code_signing_secret_refs",
+            options_list=["--cs-secret-refs", "--cssr"],
+            nargs="*",
+            help="Space-separated list of code signing CA secret references.",
+            arg_group="Code Signing CA",
         )
 
     with self.argument_context("iot ops broker") as context:
@@ -1464,6 +1466,13 @@ def load_iotops_arguments(self, _):
             help="Force the operation to continue. Use to get around guards, such as those preventing downgrade.",
             arg_group="Extension Config",
             deprecate_info=context.deprecate(hide=True),
+        )
+        context.argument(
+            "no_cm_install",
+            options_list=["--no-cm-install"],
+            help="Flag to disable cert-manager arc extension installation.",
+            arg_type=get_three_state_flag(),
+            arg_group="Extension Config",
         )
 
     with self.argument_context("iot ops delete") as context:
