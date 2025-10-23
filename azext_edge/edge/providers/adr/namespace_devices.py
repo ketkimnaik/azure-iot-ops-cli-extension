@@ -428,16 +428,25 @@ class NamespaceDevices(Queryable):
         namespace = parse_resource_id(device["id"])
         original_endpoints = _get_endpoints(device)
         # remove the endpoints from the endpoint list by key
-        remaining_endpoints = {
-            endpoint: endpoint_body if endpoint not in endpoint_names else None
-            for endpoint, endpoint_body in original_endpoints.items()
-        }
+        # only send endpoints to be removed with null values
+        # also include any existing endpoints that already have null bodies
+        endpoints_to_remove = {}
+        
+        # Add endpoints explicitly requested for removal
+        for endpoint_name in endpoint_names:
+            if endpoint_name in original_endpoints:
+                endpoints_to_remove[endpoint_name] = None
+        
+        # Add any existing endpoints that already have null/None bodies
+        for endpoint_name, endpoint_body in original_endpoints.items():
+            if endpoint_body is None:
+                endpoints_to_remove[endpoint_name] = None
 
         # update payload
         update_payload = {
             "properties": {
                 "endpoints": {
-                    "inbound": remaining_endpoints
+                    "inbound": endpoints_to_remove
                 }
             }
         }
