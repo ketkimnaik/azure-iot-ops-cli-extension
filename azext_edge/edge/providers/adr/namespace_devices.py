@@ -431,12 +431,12 @@ class NamespaceDevices(Queryable):
         # only send endpoints to be removed with null values
         # also include any existing endpoints that already have null bodies
         endpoints_to_remove = {}
-        
+
         # Add endpoints explicitly requested for removal
         for endpoint_name in endpoint_names:
             if endpoint_name in original_endpoints:
                 endpoints_to_remove[endpoint_name] = None
-        
+
         # Add any existing endpoints that already have null/None bodies
         for endpoint_name, endpoint_body in original_endpoints.items():
             if endpoint_body is None:
