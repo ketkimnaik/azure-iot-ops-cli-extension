@@ -64,8 +64,8 @@ def test_namespace_custom_asset_management_group_lifecycle_operations(
 
     mgmt_group_result = run(
         f"az iot ops ns asset custom mgmt-group add --asset {asset_name} --instance {instance_name} "
-        f"-g {resource_group} --name {mgmt_group_name} --data-source {data_source} "
-        f"--default-topic {default_topic} --default-timeout {default_timeout} --config {custom_config_path}"
+        f"-g {resource_group} --name {mgmt_group_name} --data-source '{data_source}' "
+        f"--default-topic '{default_topic}' --default-timeout {default_timeout} --config {custom_config_path}"
     )
 
     assert_management_group_properties(
@@ -108,9 +108,9 @@ def test_namespace_custom_asset_management_group_lifecycle_operations(
 
     updated_mgmt_group = run(
         f"az iot ops ns asset custom mgmt-group update --asset {asset_name} --instance {instance_name} "
-        f"-g {resource_group} --name {mgmt_group_name} --default-topic {updated_default_topic} "
+        f"-g {resource_group} --name {mgmt_group_name} --default-topic '{updated_default_topic}' "
         f"--default-timeout {updated_default_timeout} --config {custom_config_path} "
-        f"--data-source {updated_data_source}"
+        f"--data-source '{updated_data_source}'"
     )
 
     assert_management_group_properties(
@@ -127,8 +127,8 @@ def test_namespace_custom_asset_management_group_lifecycle_operations(
     replaced_data_source = f"nsu=replacedNamespace;i={randint(1, 999)}"
     replaced_mgmt_group = run(
         f"az iot ops ns asset custom mgmt-group add --asset {asset_name} --instance {instance_name} "
-        f"-g {resource_group} --name {mgmt_group_name} --default-topic {replaced_default_topic} "
-        f"--data-source {replaced_data_source} --replace"
+        f"-g {resource_group} --name {mgmt_group_name} --default-topic '{replaced_default_topic}' "
+        f"--data-source '{replaced_data_source}' --replace"
     )
 
     assert_management_group_properties(
@@ -283,8 +283,8 @@ def test_namespace_opcua_asset_management_group_lifecycle_operations(require_ini
 
     mgmt_group_result = run(
         f"az iot ops ns asset opcua mgmt-group add --asset {asset_name} --instance {instance_name} "
-        f"-g {resource_group} --name {mgmt_group_name} --default-topic {default_topic} "
-        f"--default-timeout {default_timeout} --data-source {data_source}"
+        f"-g {resource_group} --name {mgmt_group_name} --default-topic '{default_topic}' "
+        f"--default-timeout {default_timeout} --data-source '{data_source}'"
     )
 
     assert_management_group_properties(
@@ -324,7 +324,7 @@ def test_namespace_opcua_asset_management_group_lifecycle_operations(require_ini
 
     updated_mgmt_group = run(
         f"az iot ops ns asset opcua mgmt-group update --asset {asset_name} --instance {instance_name} "
-        f"-g {resource_group} --name {mgmt_group_name} --default-topic {updated_default_topic} "
+        f"-g {resource_group} --name {mgmt_group_name} --default-topic '{updated_default_topic}' "
         f"--default-timeout {updated_default_timeout}"
     )
 
@@ -341,8 +341,8 @@ def test_namespace_opcua_asset_management_group_lifecycle_operations(require_ini
     replaced_data_source = f"nsu=replacedNamespace;i={randint(1, 999)}"
     replaced_mgmt_group = run(
         f"az iot ops ns asset opcua mgmt-group add --asset {asset_name} --instance {instance_name} "
-        f"-g {resource_group} --name {mgmt_group_name} --default-topic {replaced_default_topic} "
-        f"--data-source {replaced_data_source} --replace"
+        f"-g {resource_group} --name {mgmt_group_name} --default-topic '{replaced_default_topic}' "
+        f"--data-source '{replaced_data_source}' --replace"
     )
 
     assert_management_group_properties(
@@ -470,8 +470,8 @@ def test_namespace_onvif_asset_management_group_lifecycle_operations(require_ini
 
     mgmt_group_result = run(
         f"az iot ops ns asset onvif mgmt-group add --asset {asset_name} --instance {instance_name} "
-        f"-g {resource_group} --name {mgmt_group_name} --default-topic {default_topic} "
-        f"--default-timeout {default_timeout} --data-source {data_source}"
+        f"-g {resource_group} --name {mgmt_group_name} --default-topic '{default_topic}' "
+        f"--default-timeout {default_timeout} --data-source '{data_source}'"
     )
 
     assert_management_group_properties(
@@ -512,8 +512,8 @@ def test_namespace_onvif_asset_management_group_lifecycle_operations(require_ini
 
     updated_mgmt_group = run(
         f"az iot ops ns asset onvif mgmt-group update --asset {asset_name} --instance {instance_name} "
-        f"-g {resource_group} --name {mgmt_group_name} --default-topic {updated_default_topic} "
-        f"--default-timeout {updated_default_timeout} --data-source {updated_data_source}"
+        f"-g {resource_group} --name {mgmt_group_name} --default-topic '{updated_default_topic}' "
+        f"--default-timeout {updated_default_timeout} --data-source '{updated_data_source}'"
     )
 
     assert_management_group_properties(
@@ -529,8 +529,8 @@ def test_namespace_onvif_asset_management_group_lifecycle_operations(require_ini
     replaced_data_source = f"nsu=replacedNamespace;i={randint(1, 999)}"
     replaced_mgmt_group = run(
         f"az iot ops ns asset onvif mgmt-group add --asset {asset_name} --instance {instance_name} "
-        f"-g {resource_group} --name {mgmt_group_name} --default-topic {replaced_default_topic} "
-        f"--data-source {replaced_data_source} --replace"
+        f"-g {resource_group} --name {mgmt_group_name} --default-topic '{replaced_default_topic}' "
+        f"--data-source '{replaced_data_source}' --replace"
     )
 
     assert_management_group_properties(

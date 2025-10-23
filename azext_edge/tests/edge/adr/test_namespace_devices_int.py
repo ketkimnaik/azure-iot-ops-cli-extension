@@ -330,12 +330,19 @@ def test_namespace_device_lifecycle_operations(require_init, tracked_resources: 
         f"--instance {instance_name} -g {resource_group} "
         f"--endpoint {endpoint_name_onvif} {endpoint_name_media} {endpoint_name_rest} -y"
     )
-    assert len(result) == 2
-    assert endpoint_name_onvif not in result
-    assert endpoint_name_media not in result
-    assert endpoint_name_rest not in result
-    assert endpoint_name_opcua in result
-    assert endpoint_name_custom in result
+    # Filter out None values (removed endpoints) to get only active endpoints
+    active_endpoints = {k: v for k, v in result.items() if v is not None}
+    assert len(active_endpoints) == 2
+    # Removed endpoints should be present as keys but with None values
+    assert endpoint_name_onvif in result
+    assert result[endpoint_name_onvif] is None
+    assert endpoint_name_media in result
+    assert result[endpoint_name_media] is None
+    assert endpoint_name_rest in result
+    assert result[endpoint_name_rest] is None
+    # Remaining endpoints should be present with their configurations
+    assert endpoint_name_opcua in active_endpoints
+    assert endpoint_name_custom in active_endpoints
 
     # Test device query functionality
     # Query for specific device by name

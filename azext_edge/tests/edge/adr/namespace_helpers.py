@@ -31,10 +31,14 @@ def assert_event_properties(result, **expected):
     Minimal checks since unit tests already validate the command structure."""
     assert result["name"] == expected["name"]
 
-    if "event_notifier" in expected:
-        assert result["eventNotifier"] == expected["event_notifier"]
+    if "data_source" in expected:
+        assert result["dataSource"] == expected["data_source"]
     if "custom_configuration" in expected:
-        assert result["eventConfiguration"] == expected["custom_configuration"]
+        # Handle both event-group (eventGroupConfiguration) and event (eventConfiguration)
+        if "eventGroupConfiguration" in result:
+            assert result["eventGroupConfiguration"] == expected["custom_configuration"]
+        elif "eventConfiguration" in result:
+            assert result["eventConfiguration"] == expected["custom_configuration"]
 
 
 def assert_management_group_properties(result, **expected):
@@ -79,7 +83,11 @@ def assert_point_properties(result, **expected):
     if "data_source" in expected:
         assert result_point["dataSource"] == expected["data_source"]
     if "custom_configuration" in expected:
-        assert result_point["dataPointConfiguration"] == expected["custom_configuration"]
+        # Handle both event datapoints (eventConfiguration) and dataset datapoints (dataPointConfiguration)
+        if "eventConfiguration" in result_point:
+            assert result_point["eventConfiguration"] == expected["custom_configuration"]
+        elif "dataPointConfiguration" in result_point:
+            assert result_point["dataPointConfiguration"] == expected["custom_configuration"]
 
 
 def assert_stream_properties(result, **expected):
