@@ -1320,8 +1320,28 @@ def load_adr_arguments(self, _):
                 nargs="+",
             )
 
+        with self.argument_context(f"iot ops ns asset sse {command}") as context:
+            context.argument(
+                "dataset_destinations",
+                options_list=["--dataset-dest", "--dsd"],
+                help="Key=value pairs representing the destination for datasets. "
+                "Allowed arguments include: `key` for BrokerStateStore or "
+                "`topic`, `retain`, `qos`, and `ttl` for MQTT. Allowed values for `retain` are "
+                "`Never` and `Keep` and allowed values for `qos` are `Qos0` and `Qos1`.",
+                nargs="+",
+            )
+            context.argument(
+                "event_destinations",
+                options_list=["--event-dest", "--evd"],
+                help="Key=value pairs representing the destination for events. "
+                "Allowed arguments include: `topic`, `retain`, `qos`, and `ttl` for MQTT. "
+                "Allowed values for `retain` are `Never` and `Keep` and allowed values for "
+                "`qos` are `Qos0` and `Qos1`.",
+                nargs="+",
+            )
+
     # shared dataset, event, stream, management arguments
-    for asset_type in ("custom", "opcua", "onvif", "media", "rest"):
+    for asset_type in ("custom", "opcua", "onvif", "media", "rest", "sse"):
         with self.argument_context(f"iot ops ns asset {asset_type} dataset") as context:
             context.argument(
                 "asset_name",
@@ -1621,6 +1641,17 @@ def load_adr_arguments(self, _):
             nargs="+",
         )
 
+    with self.argument_context("iot ops ns asset sse dataset") as context:
+        context.argument(
+            "dataset_destinations",
+            options_list=["--destination", "--dest"],
+            help="Key=value pairs representing the destination for dataset. "
+            "Allowed arguments include: `key` for BrokerStateStore or "
+            "`topic`, `retain`, `qos`, and `ttl` for MQTT. Allowed values for `retain` are "
+            "`Never` and `Keep` and allowed values for `qos` are `Qos0` and `Qos1`.",
+            nargs="+",
+        )
+
     with self.argument_context("iot ops ns asset custom event-group") as context:
         context.argument(
             "event_custom_configuration",
@@ -1659,6 +1690,28 @@ def load_adr_arguments(self, _):
             options_list=["--destination", "--dest"],
             help="Key=value pairs representing the destination for event groups. "
             "Allowed and required arguments are `topic`, `retain`, `qos`, and `ttl` for MQTT destinations. "
+            "Allowed values for `retain` are `Never` and `Keep` and allowed values for `qos` are "
+            "`Qos0` and `Qos1`.",
+            nargs="+",
+        )
+
+    with self.argument_context("iot ops ns asset sse event-group") as context:
+        context.argument(
+            "event_destinations",
+            options_list=["--destination", "--dest"],
+            help="Key=value pairs representing the destination for event groups. "
+            "Allowed arguments include: `topic`, `retain`, `qos`, and `ttl` for MQTT destinations. "
+            "Allowed values for `retain` are `Never` and `Keep` and allowed values for `qos` are "
+            "`Qos0` and `Qos1`.",
+            nargs="+",
+        )
+
+    with self.argument_context("iot ops ns asset sse event") as context:
+        context.argument(
+            "event_destinations",
+            options_list=["--destination", "--dest"],
+            help="Key=value pairs representing the destination for individual events. "
+            "Allowed arguments include: `topic`, `retain`, `qos`, and `ttl` for MQTT destinations. "
             "Allowed values for `retain` are `Never` and `Keep` and allowed values for `qos` are "
             "`Qos0` and `Qos1`.",
             nargs="+",
