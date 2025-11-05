@@ -2835,7 +2835,7 @@ def load_iotops_adr_help():
         - name: Disable SSE asset
           text: >
             az iot ops ns asset sse update --name mysseAsset --instance myInstance -g myInstanceResourceGroup
-            --disabled
+            --disable
     """
 
     helps[
