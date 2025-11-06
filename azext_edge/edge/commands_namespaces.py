@@ -1911,10 +1911,6 @@ def add_namespace_sse_asset_event_group_event(
     replace: Optional[bool] = False,
     **kwargs
 ) -> dict:
-    """Add an event to an SSE asset event group.
-    SSE assets are event-driven and do not use sampling intervals or queue sizes.
-    Events are streamed in real-time from the SSE endpoint.
-    """
     return NamespaceAssets(cmd).add_event_group_event(
         asset_name=asset_name,
         instance_name=instance_name,

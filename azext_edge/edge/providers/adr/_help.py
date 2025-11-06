@@ -842,10 +842,6 @@ def load_iotops_adr_help():
     ] = """
         type: command
         short-summary: Add an SSE (Server-Sent Events) inbound endpoint to a device in a Device Registry namespace.
-        long-summary: |
-          SSE endpoints enable real-time event streaming from HTTP servers using Server-Sent Events.
-          These are event-driven connections that maintain persistent HTTP connections to receive
-          server-sent events in real-time.
 
         examples:
         - name: Add a basic SSE endpoint to a device
@@ -2746,10 +2742,6 @@ def load_iotops_adr_help():
     ] = """
         type: group
         short-summary: Manage namespaced assets that point to SSE (Server-Sent Events) device endpoints.
-        long-summary: |
-          SSE (Server-Sent Events) assets enable real-time event streaming and data collection
-          from HTTP endpoints that support the SSE protocol. These assets support both datasets
-          and events, making them ideal for real-time monitoring and event-driven scenarios.
     """
 
     helps[
@@ -2843,9 +2835,6 @@ def load_iotops_adr_help():
     ] = """
         type: group
         short-summary: Manage datasets for SSE namespaced assets.
-        long-summary: |
-          SSE datasets capture real-time data streams from Server-Sent Events endpoints.
-          Unlike REST assets, SSE datasets are event-driven and don't require sampling intervals.
     """
 
     helps[
@@ -2942,9 +2931,6 @@ def load_iotops_adr_help():
     ] = """
         type: group
         short-summary: Manage event groups for SSE namespaced assets.
-        long-summary: |
-          SSE event groups capture and organize real-time events from Server-Sent Events endpoints.
-          These are particularly useful for alert systems and real-time monitoring scenarios.
     """
 
     helps[
