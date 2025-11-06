@@ -344,8 +344,8 @@ def load_iotops_commands(self, _):
             command_type=namespace_resource_ops,
         ) as cmd_group:
             cmd_group.command("add", f"add_namespace_{asset_type}_asset_event_group_event")
-            cmd_group.command("list", f"list_namespace_{asset_type}_asset_event_group_events")
-            cmd_group.command("remove", f"remove_namespace_{asset_type}_asset_event_group_event")
+            cmd_group.command("list", "list_namespace_asset_event_group_events")
+            cmd_group.command("remove", "remove_namespace_asset_event_group_event")
 
     # stream
     for asset_type in ["custom", "media"]:
