@@ -508,6 +508,28 @@ class OpcUACerts(Queryable):
         cl_resources = self.resource_map.connected_cluster.get_aio_resources(custom_location_id=custom_location["id"])
         return cl_resources
 
+    def _extract_cert_expiration(self, cert: x509.Certificate) -> datetime:
+        """
+        Extract the expiration date from a certificate, handling both old and new cryptography library versions.
+
+        Args:
+            cert: The certificate object
+
+        Returns:
+            datetime: UTC-aware datetime of the certificate's expiration
+        """
+        # Handle both old and new cryptography library versions
+        try:
+            expiry_date = cert.not_valid_after_utc
+        except AttributeError:
+            # Fallback for older cryptography versions (< 41.0)
+            expiry_date = cert.not_valid_after
+            # Convert to UTC-aware datetime if it's naive
+            if expiry_date.tzinfo is None:
+                expiry_date = expiry_date.replace(tzinfo=timezone.utc)
+
+        return expiry_date
+
     def _check_secret_name(
         self,
         secret_names: List[str],
@@ -602,15 +624,7 @@ class OpcUACerts(Queryable):
 
                 if certs:
                     cert = certs[0]
-                    # Handle both old and new cryptography library versions
-                    try:
-                        expiry_date = cert.not_valid_after_utc
-                    except AttributeError:
-                        # Fallback for older cryptography versions (< 41.0)
-                        expiry_date = cert.not_valid_after
-                        # Convert to UTC-aware datetime if it's naive
-                        if expiry_date.tzinfo is None:
-                            expiry_date = expiry_date.replace(tzinfo=timezone.utc)
+                    expiry_date = self._extract_cert_expiration(cert)
 
                     logger.info(
                         f"Using certificate expiration date: {expiry_date.strftime('%Y-%m-%d %H:%M:%S UTC')} "
@@ -1043,15 +1057,7 @@ class OpcUACerts(Queryable):
         # check for certificate expiry
         if not cert_extension == X509FileExtension.CRL.value:
             # check if the certificate is expired
-            # Handle both old and new cryptography library versions
-            try:
-                expiry_date = cert.not_valid_after_utc
-            except AttributeError:
-                # Fallback for older cryptography versions (< 41.0)
-                expiry_date = cert.not_valid_after
-                # Convert to UTC-aware datetime if it's naive
-                if expiry_date.tzinfo is None:
-                    expiry_date = expiry_date.replace(tzinfo=timezone.utc)
+            expiry_date = self._extract_cert_expiration(cert)
 
             if expiry_date < datetime.now(timezone.utc):
                 raise InvalidArgumentValueError(
