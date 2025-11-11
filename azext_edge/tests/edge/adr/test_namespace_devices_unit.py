@@ -1755,6 +1755,7 @@ def test_add_inbound_opcua_device_endpoint(
     (DeviceEndpointType.MEDIA.value, add_inbound_media_device_endpoint),
     (DeviceEndpointType.OPCUA.value, add_inbound_opcua_device_endpoint),
     (DeviceEndpointType.REST.value, add_inbound_rest_device_endpoint),
+    (DeviceEndpointType.SSE.value, add_inbound_sse_device_endpoint),
     ("custom", add_inbound_custom_device_endpoint)
 ])
 def test_add_inbound_device_endpoint_error(

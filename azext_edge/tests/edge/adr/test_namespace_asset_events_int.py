@@ -214,6 +214,16 @@ def test_namespace_custom_asset_event_lifecycle_operations(
     remaining_event_group_names = [eg["name"] for eg in remaining_event_groups]
     assert event_group_name not in remaining_event_group_names
 
+    # Cleanup: delete asset and device (important if tests run outside of pipeline)
+    run(
+        f"az iot ops ns asset delete --name {asset_name} --instance {instance_name} "
+        f"-g {resource_group} --yes"
+    )
+    run(
+        f"az iot ops ns device delete --name {device_name} --instance {instance_name} "
+        f"-g {resource_group} --yes"
+    )
+
 
 def test_namespace_opcua_asset_event_lifecycle_operations(require_init, tracked_resources: List[str]):
     """Test complete lifecycle of OPC UA asset event-group operations (events only)."""
@@ -335,6 +345,16 @@ def test_namespace_opcua_asset_event_lifecycle_operations(require_init, tracked_
     remaining_event_group_names = [eg["name"] for eg in remaining_event_groups]
     assert event_group_name not in remaining_event_group_names
 
+    # Cleanup: delete asset and device (important if tests run outside of pipeline)
+    run(
+        f"az iot ops ns asset delete --name {asset_name} --instance {instance_name} "
+        f"-g {resource_group} --yes"
+    )
+    run(
+        f"az iot ops ns device delete --name {device_name} --instance {instance_name} "
+        f"-g {resource_group} --yes"
+    )
+
 
 def test_namespace_onvif_asset_event_lifecycle_operations(require_init, tracked_resources: List[str]):
     """Test complete lifecycle of ONVIF asset event-group operations (events only)."""
@@ -451,6 +471,16 @@ def test_namespace_onvif_asset_event_lifecycle_operations(require_init, tracked_
 
     remaining_event_group_names = [ev["name"] for ev in remaining_event_groups]
     assert event_group_name not in remaining_event_group_names
+
+    # Cleanup: delete asset and device (important if tests run outside of pipeline)
+    run(
+        f"az iot ops ns asset delete --name {asset_name} --instance {instance_name} "
+        f"-g {resource_group} --yes"
+    )
+    run(
+        f"az iot ops ns device delete --name {device_name} --instance {instance_name} "
+        f"-g {resource_group} --yes"
+    )
 
 
 def test_namespace_sse_asset_event_lifecycle_operations(require_init, tracked_resources: List[str]):
@@ -646,3 +676,13 @@ def test_namespace_sse_asset_event_lifecycle_operations(require_init, tracked_re
 
     remaining_event_group_names = [ev["name"] for ev in remaining_event_groups]
     assert event_group_name not in remaining_event_group_names
+
+    # Cleanup: delete asset and device (important if tests run outside of pipeline)
+    run(
+        f"az iot ops ns asset delete --name {asset_name} --instance {instance_name} "
+        f"-g {resource_group} --yes"
+    )
+    run(
+        f"az iot ops ns device delete --name {device_name} --instance {instance_name} "
+        f"-g {resource_group} --yes"
+    )

@@ -253,6 +253,16 @@ def test_namespace_custom_asset_dataset_lifecycle_operations(
     remaining_dataset_names = [dataset["name"] for dataset in datasets_list_after_remove]
     assert dataset_name_1 not in remaining_dataset_names
 
+    # Cleanup: Delete the asset and device to avoid leaving resources on the cluster
+    run(
+        f"az iot ops ns asset delete --name {asset_name} "
+        f"--instance {instance_name} -g {resource_group} --yes"
+    )
+    run(
+        f"az iot ops ns device delete --name {device_name} "
+        f"--instance {instance_name} -g {resource_group} --yes"
+    )
+
 
 def test_namespace_opcua_asset_dataset_lifecycle_operations(require_init, tracked_resources: List[str]):
     """Test complete lifecycle of OPCUA asset dataset and datapoint operations."""
@@ -490,6 +500,16 @@ def test_namespace_opcua_asset_dataset_lifecycle_operations(require_init, tracke
     remaining_dataset_names = [dataset["name"] for dataset in datasets_list_after_remove]
     assert dataset_name_1 not in remaining_dataset_names
 
+    # Cleanup: Delete the asset and device to avoid leaving resources on the cluster
+    run(
+        f"az iot ops ns asset delete --name {asset_name} "
+        f"--instance {instance_name} -g {resource_group} --yes"
+    )
+    run(
+        f"az iot ops ns device delete --name {device_name} "
+        f"--instance {instance_name} -g {resource_group} --yes"
+    )
+
 
 def test_namespace_rest_asset_dataset_lifecycle_operations(require_init, tracked_resources: List[str]):
     """Test complete lifecycle of REST asset dataset operations."""
@@ -646,6 +666,16 @@ def test_namespace_rest_asset_dataset_lifecycle_operations(require_init, tracked
     remaining_dataset_names = [dataset["name"] for dataset in datasets_list_after_remove]
     assert dataset_name_1 not in remaining_dataset_names
 
+    # Cleanup: Delete the asset and device to avoid leaving resources on the cluster
+    run(
+        f"az iot ops ns asset delete --name {asset_name} "
+        f"--instance {instance_name} -g {resource_group} --yes"
+    )
+    run(
+        f"az iot ops ns device delete --name {device_name} "
+        f"--instance {instance_name} -g {resource_group} --yes"
+    )
+
 
 def test_namespace_sse_asset_dataset_lifecycle_operations(require_init, tracked_resources: List[str]):
     """Test complete lifecycle of SSE asset dataset operations."""
@@ -798,3 +828,13 @@ def test_namespace_sse_asset_dataset_lifecycle_operations(require_init, tracked_
 
     remaining_dataset_names = [dataset["name"] for dataset in datasets_list_after_remove]
     assert dataset_name_1 not in remaining_dataset_names
+
+    # Cleanup: Delete the asset and device to avoid leaving resources on the cluster
+    run(
+        f"az iot ops ns asset delete --name {asset_name} "
+        f"--instance {instance_name} -g {resource_group} --yes"
+    )
+    run(
+        f"az iot ops ns device delete --name {device_name} "
+        f"--instance {instance_name} -g {resource_group} --yes"
+    )

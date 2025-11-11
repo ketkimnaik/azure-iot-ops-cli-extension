@@ -53,3 +53,68 @@ class TopicRetain(ListableEnum):
 
     keep = "Keep"
     never = "Never"
+
+
+# Help text constants for destination parameters
+# These are calculated once to avoid repeated list comprehension on every help call
+_RETAIN_VALUES = ', '.join(TopicRetain.list())
+_QOS_VALUES = ', '.join(DestinationQos.list())
+
+# Common help text fragments for destinations
+DEST_HELP_MQTT_VALUES = (
+    f"Allowed values for `retain` are {_RETAIN_VALUES} and "
+    f"allowed values for `qos` are {_QOS_VALUES}."
+)
+
+DEST_HELP_DATASET_FULL = (
+    "Key=value pairs representing the destination for dataset. "
+    "Allowed arguments include: `key` for BrokerStateStore; `path` for Storage; or "
+    f"`topic`, `retain`, `qos`, and `ttl` for MQTT. {DEST_HELP_MQTT_VALUES}"
+)
+
+DEST_HELP_DATASET_BROKER_OR_MQTT = (
+    "Key=value pairs representing the destination for datasets. "
+    "Allowed arguments include: `key` for BrokerStateStore or "
+    f"`topic`, `retain`, `qos`, and `ttl` for MQTT. {DEST_HELP_MQTT_VALUES}"
+)
+
+DEST_HELP_DATASET_MQTT_ONLY = (
+    "Key=value pairs representing the destination for datasets. "
+    "Allowed and required arguments are `topic`, `retain`, `qos`, and `ttl` for MQTT destinations.  "
+    f"{DEST_HELP_MQTT_VALUES}"
+)
+
+DEST_HELP_EVENT_FULL = (
+    "Key=value pairs representing the destination for events. "
+    "Allowed arguments include: `key` for BrokerStateStore; `path` for Storage; or "
+    f"`topic`, `retain`, `qos`, and `ttl` for MQTT. {DEST_HELP_MQTT_VALUES}"
+)
+
+DEST_HELP_EVENT_MQTT_ONLY = (
+    "Key=value pairs representing the destination for events. "
+    f"Allowed arguments include: `topic`, `retain`, `qos`, and `ttl` for MQTT. {DEST_HELP_MQTT_VALUES}"
+)
+
+DEST_HELP_EVENT_GROUP_FULL = (
+    "Key=value pairs representing the destination for event groups. "
+    "Allowed arguments include: `key` for BrokerStateStore; `path` for Storage; or "
+    f"`topic`, `retain`, `qos`, and `ttl` for MQTT. {DEST_HELP_MQTT_VALUES}"
+)
+
+DEST_HELP_EVENT_GROUP_MQTT_ONLY = (
+    "Key=value pairs representing the destination for events. "
+    "Allowed and required arguments are `topic`, `retain`, `qos`, and `ttl` for MQTT destinations.  "
+    f"{DEST_HELP_MQTT_VALUES}"
+)
+
+DEST_HELP_STREAM_FULL = (
+    "Key=value pairs representing the destination for streams. "
+    "Allowed arguments include: `key` for BrokerStateStore; `path` for Storage; or "
+    f"`topic`, `retain`, `qos`, and `ttl` for MQTT. {DEST_HELP_MQTT_VALUES}"
+)
+
+DEST_HELP_STREAM_STORAGE_OR_MQTT = (
+    "Key=value pairs representing the destination for streams. "
+    "Allowed arguments include: `path` for Storage; or "
+    f"`topic`, `retain`, `qos`, and `ttl` for MQTT. {DEST_HELP_MQTT_VALUES}"
+)

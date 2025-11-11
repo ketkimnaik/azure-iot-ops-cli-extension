@@ -841,7 +841,7 @@ def load_iotops_adr_help():
         "iot ops ns device endpoint inbound add sse"
     ] = """
         type: command
-        short-summary: Add an SSE (Server-Sent Events) inbound endpoint to a device in a Device Registry namespace.
+        short-summary: Add an SSE inbound endpoint to a device in a Device Registry namespace.
 
         examples:
         - name: Add a basic SSE endpoint to a device
@@ -3020,9 +3020,6 @@ def load_iotops_adr_help():
     ] = """
         type: group
         short-summary: Manage individual events for SSE event groups in Device Registry namespaces.
-        long-summary: |
-          SSE individual events capture specific event types within an event group from Server-Sent Events endpoints.
-          These are event-driven and do not use sampling intervals or queue sizes.
     """
 
     helps[
