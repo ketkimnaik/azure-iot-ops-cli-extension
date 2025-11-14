@@ -15,6 +15,8 @@ from .common import (
     ADRAuthModes,
     FileType,
     TopicRetain,
+)
+from .user_strings import (
     DEST_HELP_DATASET_FULL,
     DEST_HELP_DATASET_BROKER_OR_MQTT,
     DEST_HELP_DATASET_MQTT_ONLY,
