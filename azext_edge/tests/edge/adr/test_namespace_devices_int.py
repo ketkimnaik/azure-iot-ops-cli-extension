@@ -563,3 +563,48 @@ def assert_namespace_device_opcua_props(
         assert result_config["security"]["securityPolicy"] == expected_policy
     if "security_mode" in expected:
         assert result_config["security"]["securityMode"] == expected["security_mode"]
+
+
+def test_device_creation_with_cross_rg_instance(require_init, tracked_resources: List[str]):
+    """Test device creation when instance and namespace are in different resource groups.
+
+    This validates that devices are created in the namespace's resource group,
+    not the instance's resource group, when using --instance flag.
+    """
+    from azext_edge.edge.util.id_tools import parse_resource_id
+
+    instance_name = require_init["instanceName"]
+    instance_rg = require_init["resourceGroup"]
+
+    # Get the namespace ID from the instance
+    instance_result = run(f"az iot ops show -n {instance_name} -g {instance_rg}")
+    adr_namespace_ref = instance_result.get("properties", {}).get("adrNamespaceRef")
+    if not adr_namespace_ref or not adr_namespace_ref.get("resourceId"):
+        pytest.skip("Instance does not have an ADR namespace configured.")
+
+    adr_namespace_id = adr_namespace_ref["resourceId"]
+
+    # Parse namespace resource ID to get its resource group
+    namespace_parts = parse_resource_id(adr_namespace_id)
+    namespace_rg = namespace_parts["resource_group"]
+
+    # Skip test if instance and namespace are in same RG
+    if namespace_rg == instance_rg:
+        pytest.skip(
+            "Instance and namespace are in same resource group. "
+            "To test cross-RG support, set AZEXT_EDGE_ADR_NAMESPACE_ID to a namespace in different RG."
+        )
+
+    # Create device using --instance flag (provides instance RG in -g)
+    device_name = f"xrg-dev-{generate_random_string(8, force_lower=True)}"
+    result = run(
+        f"az iot ops ns device create --name {device_name} --instance {instance_name} "
+        f"-g {instance_rg}"
+    )
+    tracked_resources.append(result["id"])
+
+    # Verify device is in namespace RG, not instance RG
+    device_parts = parse_resource_id(result["id"])
+    assert device_parts["resource_group"] == namespace_rg, \
+        f"Device should be in namespace RG ({namespace_rg}), but is in {device_parts['resource_group']}"
+    assert result["name"] == device_name

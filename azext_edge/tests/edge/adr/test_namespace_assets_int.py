@@ -619,3 +619,66 @@ def assert_asset_properties(result, **expected):
         assert result_props["serialNumber"] == expected["serial_number"]
     if "software_revision" in expected:
         assert result_props["softwareRevision"] == expected["software_revision"]
+
+
+def test_asset_creation_with_cross_rg_instance(require_init, tracked_resources: List[str]):
+    """Test asset creation when instance and namespace are in different resource groups.
+
+    This validates that assets are created in the namespace's resource group,
+    not the instance's resource group, when using --instance flag.
+    """
+    from azext_edge.edge.util.id_tools import parse_resource_id
+
+    instance_name = require_init["instanceName"]
+    instance_rg = require_init["resourceGroup"]
+
+    # Get the namespace ID from the instance
+    instance_result = run(f"az iot ops show -n {instance_name} -g {instance_rg}")
+    adr_namespace_ref = instance_result.get("properties", {}).get("adrNamespaceRef")
+    if not adr_namespace_ref or not adr_namespace_ref.get("resourceId"):
+        pytest.skip("Instance does not have an ADR namespace configured.")
+
+    adr_namespace_id = adr_namespace_ref["resourceId"]
+
+    # Parse namespace resource ID to get its resource group
+    namespace_parts = parse_resource_id(adr_namespace_id)
+    namespace_rg = namespace_parts["resource_group"]
+
+    # Skip test if instance and namespace are in same RG
+    if namespace_rg == instance_rg:
+        pytest.skip(
+            "Instance and namespace are in same resource group. "
+            "To test cross-RG support, set AZEXT_EDGE_ADR_NAMESPACE_ID to a namespace in different RG."
+        )
+
+    # Create device first (prerequisite for asset)
+    device_name = f"xrg-dev-{generate_random_string(8, force_lower=True)}"
+    device_result = run(
+        f"az iot ops ns device create --name {device_name} --instance {instance_name} "
+        f"-g {instance_rg}"
+    )
+    tracked_resources.append(device_result["id"])
+
+    # Add endpoint to device
+    endpoint_name = f"ep-{generate_random_string(8)}"
+    run(
+        f"az iot ops ns device endpoint inbound add opcua --device {device_name} "
+        f"--instance {instance_name} -g {instance_rg} --name {endpoint_name} "
+        f"--endpoint-address 'opc.tcp://localhost:4840'"
+    )
+
+    # Create asset using --instance flag (provides instance RG in -g)
+    asset_name = f"xrg-asset-{generate_random_string(8, force_lower=True)}"
+    result = run(
+        f"az iot ops ns asset opcua create --name {asset_name} --instance {instance_name} "
+        f"-g {instance_rg} --device {device_name} --ep {endpoint_name}"
+    )
+    tracked_resources.append(result["id"])
+
+    # Verify asset is in namespace RG, not instance RG
+    asset_parts = parse_resource_id(result["id"])
+    assert asset_parts["resource_group"] == namespace_rg, \
+        f"Asset should be in namespace RG ({namespace_rg}), but is in {asset_parts['resource_group']}"
+    assert result["name"] == asset_name
+    assert result["properties"]["deviceRef"]["deviceName"] == device_name
+    assert result["properties"]["deviceRef"]["endpointName"] == endpoint_name

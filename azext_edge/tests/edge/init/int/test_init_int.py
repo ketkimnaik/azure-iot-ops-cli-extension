@@ -411,3 +411,100 @@ DEFAULT_BROKER_CONFIG = {
     "generateResourceLimits": {"cpu": "Disabled"},
     "memoryProfile": "Medium",
 }
+
+
+@pytest.mark.init_scenario_test
+def test_cross_rg_namespace_support(init_test_setup, tracked_resources: list):
+    """Test instance creation with namespace in different resource group.
+
+    This test validates that:
+    1. Instance can be created with namespace in different RG
+    2. Devices are created in namespace's RG (not instance's RG)
+    3. Assets are created in namespace's RG (not instance's RG)
+    """
+    from azext_edge.edge.util.id_tools import parse_resource_id
+
+    # Get test configuration
+    instance_name = init_test_setup["instanceName"]
+    instance_rg = init_test_setup["resourceGroup"]
+    cluster_name = init_test_setup["clusterName"]
+
+    # Clean up any existing instance from previous test
+    try:
+        run(f"az iot ops delete --cluster {cluster_name} -g {instance_rg} -y")
+        logger.info("Cleaned up existing IoT Operations instance before cross-RG test")
+    except Exception:
+        logger.info("No existing instance to clean up")
+
+    # Create a separate resource group and namespace for cross-RG test
+    namespace_rg = f"{instance_rg}-ns"
+    try:
+        rg_result = run(f"az group create -n {namespace_rg} -l westus --only-show-errors")
+        tracked_resources.append(rg_result["id"])
+        logger.info(f"Created resource group {namespace_rg} for cross-RG namespace")
+    except Exception:
+        logger.info(f"Resource group {namespace_rg} already exists")
+
+    namespace_name = f"crossrg-ns-{generate_random_string(8, force_lower=True)}"
+    namespace_result = run(f"az iot ops ns create -g {namespace_rg} -n {namespace_name}")
+    adr_namespace_id = namespace_result["id"]
+    logger.info(f"Created namespace {namespace_name} in {namespace_rg}")
+
+    logger.info(f"Testing cross-RG scenario: Instance in {instance_rg}, Namespace in {namespace_rg}")
+
+    # Run init and create to deploy instance with cross-RG namespace
+    additional_init_args = init_test_setup["additionalInitArgs"] or ""
+    additional_create_args = init_test_setup["additionalCreateArgs"] or ""
+    registry_id = init_test_setup["schemaRegistryId"]
+
+    init_command = f"az iot ops init -g {instance_rg} --cluster {cluster_name} --no-progress {additional_init_args}"
+    run(init_command)
+
+    create_command = (
+        f"az iot ops create -g {instance_rg} --cluster {cluster_name} -n {instance_name} "
+        f"--sr-resource-id {registry_id} --ns-resource-id {adr_namespace_id} "
+        f"--no-progress {additional_create_args}"
+    )
+    run(create_command)
+
+    # Verify instance shows correct namespace reference
+    instance_show = run(f"az iot ops show -n {instance_name} -g {instance_rg}")
+    assert instance_show["properties"]["adrNamespaceRef"]["resourceId"] == adr_namespace_id
+
+    # Create a device using --instance flag (provides instance RG in -g parameter)
+    device_name = f"cross-rg-dev-{generate_random_string(8, force_lower=True)}"
+    device_result = run(
+        f"az iot ops ns device create --name {device_name} --instance {instance_name} "
+        f"-g {instance_rg}"
+    )
+
+    # Verify device was created in namespace's RG, not instance's RG
+    device_parsed = parse_resource_id(device_result["id"])
+    assert device_parsed["resource_group"] == namespace_rg, \
+        f"Device should be in namespace RG ({namespace_rg}), but is in: {device_parsed['resource_group']}"
+    assert device_result["name"] == device_name
+
+    # Add an endpoint to the device
+    endpoint_name = f"ep-{generate_random_string(8)}"
+    run(
+        f"az iot ops ns device endpoint inbound add opcua --device {device_name} "
+        f"--instance {instance_name} -g {instance_rg} --name {endpoint_name} "
+        f"--endpoint-address 'opc.tcp://localhost:4840'"
+    )
+
+    # Create an asset using --instance flag
+    asset_name = f"cross-rg-asset-{generate_random_string(8, force_lower=True)}"
+    asset_result = run(
+        f"az iot ops ns asset opcua create --name {asset_name} --instance {instance_name} "
+        f"-g {instance_rg} --device {device_name} --ep {endpoint_name}"
+    )
+
+    # Verify asset was created in namespace's RG, not instance's RG
+    asset_parsed = parse_resource_id(asset_result["id"])
+    assert asset_parsed["resource_group"] == namespace_rg, \
+        f"Asset should be in namespace RG ({namespace_rg}), but is in: {asset_parsed['resource_group']}"
+    assert asset_result["name"] == asset_name
+    assert asset_result["properties"]["deviceRef"]["deviceName"] == device_name
+    assert asset_result["properties"]["deviceRef"]["endpointName"] == endpoint_name
+
+    logger.info(f"Successfully validated cross-RG namespace support: device and asset created in {namespace_rg}")
