@@ -681,11 +681,7 @@ def test_asset_creation_with_cross_rg_instance(require_init, tracked_resources: 
 
     # Get the namespace ID from the instance
     instance_result = run(f"az iot ops show -n {instance_name} -g {instance_rg}")
-    adr_namespace_ref = instance_result.get("properties", {}).get("adrNamespaceRef")
-    if not adr_namespace_ref or not adr_namespace_ref.get("resourceId"):
-        pytest.skip("Instance does not have an ADR namespace configured.")
-
-    adr_namespace_id = adr_namespace_ref["resourceId"]
+    adr_namespace_id = instance_result["properties"]["adrNamespaceRef"]["resourceId"]
 
     # Parse namespace resource ID to get its resource group
     namespace_parts = parse_resource_id(adr_namespace_id)
