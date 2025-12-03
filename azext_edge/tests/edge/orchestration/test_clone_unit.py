@@ -977,7 +977,10 @@ def test_clone_manager(
     assert request_headers["CommandName"] == "iot ops clone"
     assert request_headers["x-ms-correlation-request-id"]
     assert deploy_body_payload["properties"]["mode"] == "Incremental"
-    assert deploy_body_payload["properties"]["parameters"] == {"clusterName": {"value": parsed_cluster_id["name"]}}
+    assert deploy_body_payload["properties"]["parameters"] == {
+        "clusterName": {"value": parsed_cluster_id["name"]},
+        "customLocationResourceGroup": {"value": parsed_cluster_id["resource_group"]},
+    }
     assert deploy_body_payload["properties"]["template"] == content
 
     write_to = ["my", "clone", "path"]
@@ -1172,7 +1175,10 @@ def test_clone_scale(
     deploy_body_payload = json.loads(deploy_responses[0].calls[0].request.body)
 
     assert deploy_body_payload["properties"]["mode"] == "Incremental"
-    assert deploy_body_payload["properties"]["parameters"] == {"clusterName": {"value": parsed_cluster_id["name"]}}
+    assert deploy_body_payload["properties"]["parameters"] == {
+        "clusterName": {"value": parsed_cluster_id["name"]},
+        "customLocationResourceGroup": {"value": parsed_cluster_id["resource_group"]},
+    }
     assert deploy_body_payload["properties"]["template"] == content
 
     write_to = ["my", "clone", "path"]
@@ -1286,6 +1292,7 @@ def test_clone_deploy_subjects(
 
     expected_deploy_params = {
         "clusterName": {"value": parsed_cluster_id["name"]},
+        "customLocationResourceGroup": {"value": parsed_cluster_id["resource_group"]},
     }
 
     assert deploy_body_payload["properties"]["parameters"] == expected_deploy_params
@@ -1384,6 +1391,7 @@ def test_clone_deploy_params(
 
     expected_deploy_params = {
         "clusterName": {"value": parsed_cluster_id["name"]},
+        "customLocationResourceGroup": {"value": parsed_cluster_id["resource_group"]},
     }
     for param in params_input:
         key, value = param.split("=")
@@ -1506,6 +1514,7 @@ EXPECTED_PARAMETER_KEYS = {
     "clusterName",
     "clusterNamespace",
     "customLocationName",
+    "customLocationResourceGroup",
     "instanceName",
     "location",
     "opsExtensionName",
@@ -1639,7 +1648,10 @@ def _replace_instance_resource(context: dict) -> dict:
         "apiVersion": context["instance_api"],
         "name": f"[concat(parameters('instanceName'), '{config_name}')]",
         "extendedLocation": {
-            "name": "[resourceId('Microsoft.ExtendedLocation/customLocations', parameters('customLocationName'))]",
+            "name": (
+                "[resourceId(parameters('customLocationResourceGroup'), "
+                "'Microsoft.ExtendedLocation/customLocations', parameters('customLocationName'))]"
+            ),
             "type": "CustomLocation",
         },
     }
@@ -1679,7 +1691,10 @@ def _replace_instance(context: dict):
         "location": "[parameters('location')]",
         "name": "[parameters('instanceName')]",
         "extendedLocation": {
-            "name": "[resourceId('Microsoft.ExtendedLocation/customLocations', parameters('customLocationName'))]",
+            "name": (
+                "[resourceId(parameters('customLocationResourceGroup'), "
+                "'Microsoft.ExtendedLocation/customLocations', parameters('customLocationName'))]"
+            ),
             "type": "CustomLocation",
         },
         "properties": properties,
@@ -1695,7 +1710,10 @@ def _replace_instance_broker(context: dict):
         "apiVersion": context["instance_api"],
         "name": "[concat(parameters('instanceName'), '/default')]",
         "extendedLocation": {
-            "name": "[resourceId('Microsoft.ExtendedLocation/customLocations', parameters('customLocationName'))]",
+            "name": (
+                "[resourceId(parameters('customLocationResourceGroup'), "
+                "'Microsoft.ExtendedLocation/customLocations', parameters('customLocationName'))]"
+            ),
             "type": "CustomLocation",
         },
         "dependsOn": ["instance"],
@@ -1711,7 +1729,51 @@ def _replace_generic_resource(context: dict, **kwargs: dict) -> dict:
         "apiVersion": api_version or get_api_version_callback(**context),
         "location": "[parameters('location')]",
         "extendedLocation": {
-            "name": "[resourceId('Microsoft.ExtendedLocation/customLocations', parameters('customLocationName'))]",
+            "name": (
+                "[resourceId(parameters('customLocationResourceGroup'), "
+                "'Microsoft.ExtendedLocation/customLocations', parameters('customLocationName'))]"
+            ),
+            "type": "CustomLocation",
+        },
+    }
+    if get_name_callback:
+        payload["name"] = get_name_callback(**context)
+
+    return payload
+
+
+def _replace_v1_asset_resource(context: dict, **kwargs: dict) -> dict:
+    """Replacement function for v1 assets that use same-RG format (no customLocationResourceGroup)"""
+    get_api_version_callback = kwargs.get("api_version_callback")
+
+    payload = {
+        "apiVersion": get_api_version_callback(**context),
+        "location": "[parameters('location')]",
+        "extendedLocation": {
+            "name": (
+                "[resourceId('Microsoft.ExtendedLocation/customLocations', "
+                "parameters('customLocationName'))]"
+            ),
+            "type": "CustomLocation",
+        },
+    }
+    return payload
+
+
+def _replace_namespace_resource(context: dict, **kwargs: dict) -> dict:
+    """Replacement function for namespace devices/assets that keep literal location (namespace's location)"""
+    get_api_version_callback = kwargs.get("api_version_callback")
+    get_name_callback = kwargs.get("name_callback")
+    config = context["config"]
+
+    payload = {
+        "apiVersion": get_api_version_callback(**context),
+        "location": config.get("location", "westus"),  # Keep original location from API
+        "extendedLocation": {
+            "name": (
+                "[resourceId(parameters('customLocationResourceGroup'), "
+                "'Microsoft.ExtendedLocation/customLocations', parameters('customLocationName'))]"
+            ),
             "type": "CustomLocation",
         },
     }
@@ -1732,8 +1794,19 @@ def _get_ns_asset_name(**kwargs: dict) -> str:
     return f"[concat(parameters('adrNamespaceId').name, '/{kwargs['config']['name']}')]"
 
 
-_replace_asset_resource = partial(_replace_generic_resource, api_version_callback=_get_asset_api_version)
-_replace_namespace_asset_resource = partial(_replace_asset_resource, name_callback=_get_ns_asset_name)
+_replace_asset_resource = partial(
+    _replace_v1_asset_resource, api_version_callback=_get_asset_api_version
+)
+_replace_namespace_asset_resource = partial(
+    _replace_namespace_resource,
+    api_version_callback=_get_asset_api_version,
+    name_callback=_get_ns_asset_name
+)
+_replace_namespace_device_resource = partial(
+    _replace_namespace_resource,
+    api_version_callback=_get_asset_api_version,
+    name_callback=_get_ns_asset_name
+)
 _replace_secretsync_resource = partial(_replace_generic_resource, api_version=SECRET_SYNC_API_VERSION)
 
 
@@ -1755,7 +1828,7 @@ def get_expected_min_resource_map(v2_enabled: bool) -> dict:
         "registryEndpoints": {"replacements": _replace_instance_resource},
         "assetEndpointProfiles": {"replacements": _replace_asset_resource},
         "assets": {"replacements": _replace_asset_resource},
-        "namespaceDevices": {"replacements": _replace_namespace_asset_resource},
+        "namespaceDevices": {"replacements": _replace_namespace_device_resource},
         "namespaceAssets": {"replacements": _replace_namespace_asset_resource},
         "secretProviderClasss": {"replacements": _replace_secretsync_resource},
         "secretSyncs": {"replacements": _replace_secretsync_resource},
@@ -2040,7 +2113,13 @@ class CloneAssertor:
                 template["$schema"] == "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
             )
             assert template["contentVersion"] == "1.0.0.0"
-            expected_parameters = {"customLocationName": {"type": "string"}}
+            expected_parameters = {
+                "customLocationName": {"type": "string"},
+            }
+            # customLocationResourceGroup is NOT needed for v1 assets
+            if resource_config_key not in ["assetEndpointProfiles", "assets"]:
+                expected_parameters["customLocationResourceGroup"] = {"type": "string"}
+
             if resource_config_key not in [
                 "namespaceDevices",
                 "namespaceAssets",
@@ -2109,10 +2188,16 @@ class CloneAssertor:
                             "[resourceId('microsoft.iotoperations/instances', parameters('instanceName'))]"
                         )
                     elif dep in chunks_map:
-                        depends_on.append(
-                            "[resourceId('Microsoft.Resources/deployments', "
-                            f"concat(parameters('resourceSlug'), '_{dep}_{chunks_map[dep]}'))]"
-                        )
+                        # For dependencies between cross-RG deployments (e.g., namespaceAssets → namespaceDevices),
+                        # use symbolic names. Both resources must be in the cross-RG list.
+                        if (plural in ["namespaceAssets", "namespaceDevices"]
+                                and dep in ["namespaceAssets", "namespaceDevices"]):
+                            depends_on.append(f"{dep}_{chunks_map[dep]}")
+                        else:
+                            depends_on.append(
+                                "[resourceId('Microsoft.Resources/deployments', "
+                                f"concat(parameters('resourceSlug'), '_{dep}_{chunks_map[dep]}'))]"
+                            )
             elif plural in broker_related:
                 depends_on.append(
                     "[resourceId('microsoft.iotoperations/instances/brokers', parameters('instanceName'), 'default')]"
@@ -2186,6 +2271,13 @@ class CloneAssertor:
             expected_params = {
                 "customLocationName": {"value": "[parameters('customLocationName')]"},
             }
+            # customLocationResourceGroup is NOT needed for v1 assets (assetEndpointProfiles, assets)
+            # because they deploy to the same RG as the custom location
+            if resource_key not in ["assetEndpointProfiles", "assets"]:
+                expected_params["customLocationResourceGroup"] = {
+                    "value": "[parameters('customLocationResourceGroup')]"
+                }
+
             if resource_key not in [
                 "namespaceDevices",
                 "namespaceAssets",

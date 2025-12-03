@@ -301,13 +301,20 @@ def verify_extension_in_template(
             instance_name=generate_random_string(),
             custom_broker_config={generate_random_string(): generate_random_string()},
         ),
-        # User trust
+        # User trust - with namespace in same RG as instance
         build_target_scenario(
             cluster_name=generate_random_string(),
             resource_group_name=DEFAULT_RESOURCE_GROUP,
             schema_registry_resource_id=get_schema_registry_id(),
             adr_namespace_resource_id=get_ns_resource_id(DEFAULT_RESOURCE_GROUP),
             user_trust=True,
+        ),
+        # Cross-RG namespace support - namespace in different RG than instance
+        build_target_scenario(
+            cluster_name=generate_random_string(),
+            resource_group_name=DEFAULT_RESOURCE_GROUP,  # Instance in DEFAULT_RESOURCE_GROUP
+            schema_registry_resource_id=get_schema_registry_id(),
+            adr_namespace_resource_id=get_ns_resource_id("different-namespace-rg"),  # Namespace in different RG
         ),
         # Persistence configuration
         build_target_scenario(
@@ -743,40 +750,6 @@ def test_custom_location_name_limits(target_scenario: dict, expected_error: Expe
         targets = InitTargets(**target_scenario)
         if not expected_error:
             assert len(targets.custom_location_name) == len(target_scenario["custom_location_name"])
-
-
-def test_cross_rg_namespace_support():
-    """Test that namespace can be in different resource group than instance."""
-    instance_rg = "instance-resource-group"
-    namespace_rg = "namespace-resource-group"
-
-    targets = InitTargets(
-        cluster_name=generate_random_string(),
-        resource_group_name=instance_rg,
-        schema_registry_resource_id=get_schema_registry_id(),
-        adr_namespace_resource_id=get_ns_resource_id(namespace_rg),
-    )
-
-    # Should succeed without error
-    assert targets.adr_namespace_resource_id is not None
-    assert namespace_rg in targets.adr_namespace_resource_id
-    assert instance_rg not in targets.adr_namespace_resource_id
-
-
-def test_same_rg_namespace_still_works():
-    """Test backward compatibility - namespace in same RG as instance still works."""
-    resource_group = generate_random_string()
-
-    targets = InitTargets(
-        cluster_name=generate_random_string(),
-        resource_group_name=resource_group,
-        schema_registry_resource_id=get_schema_registry_id(),
-        adr_namespace_resource_id=get_ns_resource_id(resource_group),
-    )
-
-    # Should succeed without error
-    assert targets.adr_namespace_resource_id is not None
-    assert resource_group in targets.adr_namespace_resource_id
 
 
 def test_valid_trust_settings():
