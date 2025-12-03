@@ -352,13 +352,13 @@ class CloneTemplateParams(Enum):
     CLUSTER_NAME = "clusterName"
     CLUSTER_NAMESPACE = "clusterNamespace"
     CUSTOM_LOCATION_NAME = "customLocationName"
-    CUSTOM_LOCATION_RESOURCE_GROUP = "customLocationResourceGroup"
     OPS_EXTENSION_NAME = "opsExtensionName"
     SCHEMA_REGISTRY_ID = "schemaRegistryId"
     RESOURCE_SLUG = "resourceSlug"
     LOCATION = "location"
     APPLY_ROLE_ASSIGNMENTS = "applyRoleAssignments"
     ADR_NAMESPACE_ID = "adrNamespaceId"
+    ADR_NAMESPACE_LOCATION = "adrNamespaceLocation"
 
 
 class X509FileExtension(Enum):
