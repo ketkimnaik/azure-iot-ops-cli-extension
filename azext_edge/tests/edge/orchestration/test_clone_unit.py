@@ -1662,9 +1662,11 @@ def _replace_instance(context: dict):
     if v2_enabled:
         namespace_resource_id = properties.get("adrNamespaceRef", {}).get("resourceId")
         if namespace_resource_id:
-            properties["adrNamespaceRef"][
-                "resourceId"
-            ] = "[resourceId('Microsoft.DeviceRegistry/namespaces', parameters('adrNamespaceId').name)]"
+            properties["adrNamespaceRef"]["resourceId"] = (
+                "[resourceId(parameters('adrNamespaceId').subscription, "
+                "parameters('adrNamespaceId').resourceGroup, "
+                "'Microsoft.DeviceRegistry/namespaces', parameters('adrNamespaceId').name)]"
+            )
         spc_resource_id = properties.get("defaultSecretProviderClassRef", {}).get("resourceId")
         if spc_resource_id:
             properties["defaultSecretProviderClassRef"]["resourceId"] = (
@@ -1836,6 +1838,16 @@ class CloneAssertor:
             "type": "bool",
             "defaultValue": True,
         }
+        if self.api_config.v2_enabled:
+            parsed_ns_id = parse_resource_id(self.resource_configs["adrNamespaceId"])
+            assert content["parameters"]["adrNamespaceId"] == {
+                "type": "object",
+                "defaultValue": {
+                    "subscription": parsed_ns_id["subscription"],
+                    "resourceGroup": parsed_ns_id["resource_group"],
+                    "name": parsed_ns_id["name"],
+                },
+            }
 
         self._assert_resources(content)
 

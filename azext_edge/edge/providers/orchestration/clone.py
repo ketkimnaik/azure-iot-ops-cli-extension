@@ -1068,7 +1068,9 @@ class CloneManager:
             adr_namespace_ref = instance_copy["properties"].get("adrNamespaceRef", {})
             if adr_namespace_ref:
                 adr_namespace_ref["resourceId"] = (
-                    "[resourceId('Microsoft.DeviceRegistry/namespaces', "
+                    f"[resourceId(parameters('{TemplateParams.ADR_NAMESPACE_ID.value}').subscription, "
+                    f"parameters('{TemplateParams.ADR_NAMESPACE_ID.value}').resourceGroup, "
+                    f"'Microsoft.DeviceRegistry/namespaces', "
                     f"parameters('{TemplateParams.ADR_NAMESPACE_ID.value}').name)]"
                 )
             spc_ref = instance_copy["properties"].get("defaultSecretProviderClassRef", {})
