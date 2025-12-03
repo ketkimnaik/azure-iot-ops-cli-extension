@@ -131,8 +131,7 @@ TEMPLATE_EXPRESSION_MAP = {
     ),
     "customLocationName": f"[parameters('{TemplateParams.CUSTOM_LOCATION_NAME.value}')]",
     "customLocationId": (
-        "[resourceId(parameters('customLocationResourceGroup'), "
-        "'Microsoft.ExtendedLocation/customLocations', "
+        "[resourceId('Microsoft.ExtendedLocation/customLocations', "
         f"parameters('{TemplateParams.CUSTOM_LOCATION_NAME.value}'))]"
     ),
     "extensionId": (
@@ -261,7 +260,9 @@ class DeploymentContainer:
         if self.resource_group:
             result["resourceGroup"] = self.resource_group
         if self.subscription:
-            result["subscriptionId"] = self.subscription
+            # TODO: verify
+            # result["subscription"] = self.subscription
+            pass
         if self.condition:
             result["condition"] = self.condition
         if self.parameters:
@@ -333,29 +334,10 @@ class ResourceContainer:
 
     def _apply_cl_ref(self):
         if "extendedLocation" in self.resource_state:
-            # Use cross-RG format only if explicitly configured
-            use_cross_rg_cl_ref = self.config.get("use_cross_rg_cl_ref", True)
-            if use_cross_rg_cl_ref:
-                self.resource_state["extendedLocation"]["name"] = TEMPLATE_EXPRESSION_MAP["customLocationId"]
-            else:
-                # Use same-RG format (no customLocationResourceGroup parameter)
-                self.resource_state["extendedLocation"]["name"] = (
-                    "[resourceId('Microsoft.ExtendedLocation/customLocations', "
-                    f"parameters('{TemplateParams.CUSTOM_LOCATION_NAME.value}'))]"
-                )
+            self.resource_state["extendedLocation"]["name"] = TEMPLATE_EXPRESSION_MAP["customLocationId"]
 
     def _apply_location_ref(self):
         if "location" in self.resource_state:
-            # Namespace devices/assets must stay in the same region as their parent namespace
-            # which may be different from the instance location
-            if "id" in self.resource_state:
-                parsed_id = parse_resource_id(self.resource_state["id"])
-                if parsed_id.get("type", "").lower() == "namespaces" and parsed_id.get("resource_type", "").lower() in [
-                    "devices",
-                    "assets",
-                ]:
-                    # Keep original location for namespace devices/assets
-                    return
             self.resource_state["location"] = TEMPLATE_EXPRESSION_MAP[TemplateParams.LOCATION]
 
     def _apply_nested_name(self):
@@ -530,7 +512,6 @@ class InstanceRestore:
 
         parameters = {
             "clusterName": {"value": self.cluster_name},
-            "customLocationResourceGroup": {"value": self.resource_group_name},
         }
         if to_cluster_params:
             parameters.update(to_cluster_params)
@@ -846,13 +827,6 @@ class CloneManager:
                 default=self.custom_location["name"],
             )
         )
-        # Custom location will be in the target cluster's resource group
-        self.parameter_map.update(
-            build_parameter(
-                name="customLocationResourceGroup",
-                default="[resourceGroup().name]",
-            )
-        )
         self.parameter_map.update(
             build_parameter(name=TemplateParams.INSTANCE_NAME.value, default=self.instance_record["name"])
         )
@@ -1114,7 +1088,6 @@ class CloneManager:
         nested_params = {
             **build_parameter(name=TemplateParams.CUSTOM_LOCATION_NAME.value),
             **build_parameter(name=TemplateParams.INSTANCE_NAME.value),
-            **get_cl_rg_param(),
         }
         broker_resource_id_expr = get_resource_id_expr(rtype=default_broker["type"], resource_id=default_broker["id"])
 
@@ -1148,7 +1121,9 @@ class CloneManager:
         listener_depends_on = []
         for active in self.active_deployment:
             if active in [StateResourceKey.AUTHN, StateResourceKey.AUTHZ]:
-                listener_depends_on.append(self.active_deployment[active][-1])
+                listener_depends_on.append(
+                    get_resource_id_by_parts("Microsoft.Resources/deployments", self.active_deployment[active][-1])
+                )
 
         self._add_deployment(
             key=StateResourceKey.LISTENER,
@@ -1204,8 +1179,12 @@ class CloneManager:
                 )
 
             dataflow_depends_on = [
-                self.active_deployment[StateResourceKey.PROFILE][-1],
-                self.active_deployment[StateResourceKey.ENDPOINT][-1],
+                get_resource_id_by_parts(
+                    "Microsoft.Resources/deployments", self.active_deployment[StateResourceKey.PROFILE][-1]
+                ),
+                get_resource_id_by_parts(
+                    "Microsoft.Resources/deployments", self.active_deployment[StateResourceKey.ENDPOINT][-1]
+                ),
             ]
 
             self._add_deployment(
@@ -1223,7 +1202,6 @@ class CloneManager:
         nested_params = {
             **build_parameter(name=TemplateParams.CUSTOM_LOCATION_NAME.value),
             **build_parameter(name=TemplateParams.INSTANCE_NAME.value),
-            **get_cl_rg_param(),
         }
 
         # Uses the new client for v2 resources
@@ -1268,10 +1246,12 @@ class CloneManager:
             data_iter=asset_endpoints,
             depends_on=[
                 instance_resource_id_expr,
-                self.active_deployment[StateResourceKey.LISTENER][-1],
+                get_resource_id_by_parts(
+                    "Microsoft.Resources/deployments",
+                    self.active_deployment[StateResourceKey.LISTENER][-1],
+                ),
             ],
             parameters=nested_params,
-            config={"use_cross_rg_cl_ref": False},
         )
 
         # TODO: Should this not wait on AEP?
@@ -1281,9 +1261,11 @@ class CloneManager:
                 key=StateResourceKey.ASSET,
                 api_version=self.api_config.registry_mgmt_api,
                 data_iter=assets,
-                depends_on=self.active_deployment[StateResourceKey.ASSET_ENDPOINT_PROFILE][-1],
+                depends_on=get_resource_id_by_parts(
+                    "Microsoft.Resources/deployments",
+                    self.active_deployment[StateResourceKey.ASSET_ENDPOINT_PROFILE][-1],
+                ),
                 parameters=nested_params,
-                config={"use_cross_rg_cl_ref": False},
             )
 
     def _analyze_assets_v2(self):
@@ -1295,7 +1277,6 @@ class CloneManager:
                 type="object",
                 value=TEMPLATE_EXPRESSION_MAP[TemplateParams.ADR_NAMESPACE_ID],
             ),
-            **get_cl_rg_param(),
         }
         instance_resource_id_expr = get_resource_id_by_param(
             "microsoft.iotoperations/instances", TemplateParams.INSTANCE_NAME
@@ -1308,7 +1289,10 @@ class CloneManager:
             data_iter=ns_devices,
             depends_on=[
                 instance_resource_id_expr,
-                self.active_deployment[StateResourceKey.LISTENER][-1],
+                get_resource_id_by_parts(
+                    "Microsoft.Resources/deployments",
+                    self.active_deployment[StateResourceKey.LISTENER][-1],
+                ),
             ],
             parameters=nested_params,
             resource_group="[parameters('adrNamespaceId').resourceGroup]",
@@ -1321,7 +1305,10 @@ class CloneManager:
                 key=StateResourceKey.NS_ASSET,
                 api_version=self.api_config.registry_mgmt_api,
                 data_iter=ns_assets,
-                depends_on=self.active_deployment[StateResourceKey.NS_DEVICE][-1],
+                depends_on=get_resource_id_by_parts(
+                    "Microsoft.Resources/deployments",
+                    self.active_deployment[StateResourceKey.NS_DEVICE][-1],
+                ),
                 parameters=nested_params,
                 resource_group="[parameters('adrNamespaceId').resourceGroup]",
                 subscription="[parameters('adrNamespaceId').subscription]",
@@ -1331,7 +1318,6 @@ class CloneManager:
         nested_params = {
             **build_parameter(name=TemplateParams.CUSTOM_LOCATION_NAME.value),
             **build_parameter(name=TemplateParams.LOCATION.value),
-            **get_cl_rg_param(),
         }
         ssc_client = self.instances.ssc_mgmt_client
         instance_resource_id_expr = get_resource_id_by_param(
@@ -1368,7 +1354,9 @@ class CloneManager:
                 key=StateResourceKey.SSC_SECRETSYNC,
                 api_version=SECRET_SYNC_API_VERSION,
                 data_iter=ssc_secretsyncs,
-                depends_on=self.active_deployment[StateResourceKey.SSC_SPC][-1],
+                depends_on=get_resource_id_by_parts(
+                    "Microsoft.Resources/deployments", self.active_deployment[StateResourceKey.SSC_SPC][-1]
+                ),
                 parameters=nested_params,
             )
 
@@ -1380,16 +1368,11 @@ class CloneManager:
             identity[rid] = {}
             self.instance_identities.append(rid)
 
-    def _add_deployment_by_key(self, key: StateResourceKey, resource_group: Optional[str] = None) -> Tuple[str, str]:
+    def _add_deployment_by_key(self, key: StateResourceKey) -> Tuple[str, str]:
         deployments_by_key = self.active_deployment.get(key, [])
         symbolic_name = f"{key.value}s_{len(deployments_by_key) + 1}"
         deployment_name = f"concat(parameters('resourceSlug'), '_{symbolic_name}')"
-        # For cross-RG deployments, store symbolic name to avoid resourceId scope issues
-        # For same-RG deployments, use resourceId for backward compatibility with tests
-        if resource_group:
-            deployments_by_key.append(symbolic_name)
-        else:
-            deployments_by_key.append(get_resource_id_by_parts("Microsoft.Resources/deployments", deployment_name))
+        deployments_by_key.append(deployment_name)
         self.active_deployment[key] = deployments_by_key
         return symbolic_name, deployment_name
 
@@ -1403,7 +1386,6 @@ class CloneManager:
         resource_group: Optional[str] = None,
         subscription: Optional[str] = None,
         condition: Optional[str] = None,
-        config: Optional[Dict[str, Any]] = None,
     ):
         data_iter = list(data_iter)
         if data_iter:
@@ -1412,7 +1394,7 @@ class CloneManager:
             )
 
             for chunk in chunked_list_data:
-                symbolic_name, deployment_name = self._add_deployment_by_key(key, resource_group)
+                symbolic_name, deployment_name = self._add_deployment_by_key(key)
 
                 deployment_container = DeploymentContainer(
                     name=f"[{deployment_name}]",
@@ -1426,7 +1408,6 @@ class CloneManager:
                     key=key,
                     api_version=api_version,
                     data_iter=chunk,
-                    config=config,
                 )
                 # Root deployments have root resources, which may be deployments, which in turn deploy resources
                 self.rcontainer_map[symbolic_name] = deployment_container
@@ -1664,14 +1645,6 @@ def build_parameter(
     if default:
         result[name]["defaultValue"] = default
     return result
-
-
-def get_cl_rg_param() -> dict:
-    """Helper to get the customLocationResourceGroup parameter for nested deployments."""
-    return build_parameter(
-        name="customLocationResourceGroup",
-        value="[parameters('customLocationResourceGroup')]",
-    )
 
 
 def process_to_cluster_params(to_cluster_params: Optional[List[str]]) -> dict:
