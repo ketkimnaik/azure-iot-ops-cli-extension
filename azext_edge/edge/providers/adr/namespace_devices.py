@@ -50,7 +50,7 @@ class DeviceEndpointType(ListableEnum):
     def get_default_endpoint_version(cls, endpoint_type: str) -> Optional[str]:
         """
         Returns the default version for a given endpoint type.
-        
+
         Returns None if no default version is defined (ONVIF, Media, OPC-UA, custom types).
         """
         version_map = {
@@ -337,13 +337,13 @@ class NamespaceDevices(Queryable):
         **kwargs
     ):
         from .helpers import process_additional_configuration, process_authentication
-        
+
         # Set default version if not provided by user
         if endpoint_version is None:
             default_version = DeviceEndpointType.get_default_endpoint_version(endpoint_type)
             if default_version is not None:
                 endpoint_version = default_version
-        
+
         # get the original inbound endpoints
         device = self.show(
             device_name=device_name,
