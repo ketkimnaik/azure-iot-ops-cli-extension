@@ -47,23 +47,6 @@ class DeviceEndpointType(ListableEnum):
     MQTT = "Microsoft.Mqtt"
 
     @classmethod
-    def get_default_endpoint_version(cls, endpoint_type: str) -> Optional[str]:
-        """
-        Returns the default version for a given endpoint type.
-
-        Returns None if no default version is defined (ONVIF, Media, OPC-UA, custom types).
-        """
-        version_map = {
-            cls.REST.value: "1.0",
-            cls.MQTT.value: "5",
-            cls.SSE.value: "1.1",
-            cls.MEDIA.value: None,
-            cls.ONVIF.value: None,
-            cls.OPCUA.value: None,
-        }
-        return version_map.get(endpoint_type, None)
-
-    @classmethod
     def get_type_from_keyword(cls, keyword: str, return_custom_keyword: bool = True) -> Optional[str]:
         """
         Returns the endpoint type based on the keyword.
@@ -81,6 +64,23 @@ class DeviceEndpointType(ListableEnum):
             "mqtt": cls.MQTT.value
         }
         return mapped_types.get(keyword.lower(), "custom" if return_custom_keyword else keyword)
+
+
+def get_default_endpoint_version(endpoint_type: str) -> Optional[str]:
+    """
+    Returns the default version for a given endpoint type.
+
+    Returns None if no default version is defined (ONVIF, Media, OPC-UA, custom types).
+    """
+    version_map = {
+        DeviceEndpointType.REST.value: "1.0",
+        DeviceEndpointType.MQTT.value: "5",
+        DeviceEndpointType.SSE.value: "1.1",
+        DeviceEndpointType.MEDIA.value: None,
+        DeviceEndpointType.ONVIF.value: None,
+        DeviceEndpointType.OPCUA.value: None,
+    }
+    return version_map.get(endpoint_type, None)
 
 
 class NamespaceDevices(Queryable):
@@ -340,9 +340,7 @@ class NamespaceDevices(Queryable):
 
         # Set default version if not provided by user
         if endpoint_version is None:
-            default_version = DeviceEndpointType.get_default_endpoint_version(endpoint_type)
-            if default_version is not None:
-                endpoint_version = default_version
+            endpoint_version = get_default_endpoint_version(endpoint_type)
 
         # get the original inbound endpoints
         device = self.show(
