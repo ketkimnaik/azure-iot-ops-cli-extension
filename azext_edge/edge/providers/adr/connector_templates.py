@@ -28,7 +28,6 @@ from azure.cli.core.azclierror import (
     CLIInternalError,
 )
 from knack.log import get_logger
-from knack.prompting import prompt_y_n
 from rich.console import Console
 
 from ...util import assemble_nargs_to_dict
@@ -47,7 +46,6 @@ if TYPE_CHECKING:
 console = Console()
 logger = get_logger(__name__)
 
-CONNECTOR_TEMPLATE_RESOURCE_TYPE = "Microsoft.IoTOperations/instances/akriConnectorTemplates"
 DEFAULT_LOG_LEVEL = "info"
 
 # Valid enum values
@@ -108,9 +106,6 @@ class ConnectorTemplates(Queryable):
         Returns:
             dict: Created connector template resource
         """
-        # Validate connector metadata reference URL
-        self._validate_metadata_ref(connector_metadata_ref)
-
         # For private registries (3P connectors), require registry endpoint
         # Registry endpoint contains the auth credentials for the edge/connectors
         if self._is_private_registry(connector_metadata_ref):
@@ -252,7 +247,6 @@ class ConnectorTemplates(Queryable):
 
         # If metadata ref is being updated, validate version upgrade
         if connector_metadata_ref:
-            self._validate_metadata_ref(connector_metadata_ref)
             new_metadata = self._fetch_connector_metadata(connector_metadata_ref)
             
             # Extract current version from the existing template
@@ -347,10 +341,8 @@ class ConnectorTemplates(Queryable):
                         "registrySettingsType": "ContainerRegistry",
                         "containerRegistrySettings": {}
                     }
-                # Convert from RegistryEndpointRef to ContainerRegistry if needed
+                # RegistryEndpointRef doesn't support image pull secrets - warn and skip
                 if image_config_settings["registrySettings"].get("registrySettingsType") == "RegistryEndpointRef":
-                    # Keep the endpoint ref but we can't add pull secrets to RegistryEndpointRef
-                    # Convert to ContainerRegistry type - need to get registry from somewhere
                     logger.warning(
                         "Cannot add image pull secrets to RegistryEndpointRef type. "
                         "Image pull secrets are only supported with ContainerRegistry type."
@@ -652,27 +644,6 @@ class ConnectorTemplates(Queryable):
             return value == ""
         return False
 
-    def _validate_metadata_ref(self, metadata_ref: str) -> None:
-        """Validate the connector metadata reference URL.
-        
-        Expected format: registry/path/{type}-metadata:{version}
-        Example: mcr.microsoft.com/azureiotoperations/akri-connectors/rest-metadata:1.0.6
-        """
-        # Check if it's a valid URL or registry reference
-        if not metadata_ref:
-            raise RequiredArgumentMissingError(
-                "Connector metadata reference is required."
-            )
-
-        # Basic validation for registry reference format
-        # Expected format: registry.com/path/{type}-metadata:version
-        pattern = r"^[a-zA-Z0-9\-\.]+/[\w\-\./]+-metadata:[a-zA-Z0-9\.\-_]+$"
-        if not re.match(pattern, metadata_ref):
-            raise InvalidArgumentValueError(
-                f"Invalid connector metadata reference format: {metadata_ref}. "
-                "Expected format: registry.com/path/connector-type-metadata:version"
-            )
-
     def _validate_metadata(self, metadata: dict, metadata_ref: str) -> None:
         """Validate required fields in connector metadata.
         
@@ -889,28 +860,30 @@ class ConnectorTemplates(Queryable):
             
         Returns:
             dict: Parsed connector metadata JSON
+            
+        Raises:
+            RequiredArgumentMissingError: If metadata_ref is empty
+            InvalidArgumentValueError: If metadata_ref format is invalid
         """
-        import tempfile
-        import shutil
+        # Validate metadata reference format
+        if not metadata_ref:
+            raise RequiredArgumentMissingError(
+                "Connector metadata reference is required."
+            )
+        
+        pattern = r"^[a-zA-Z0-9\-\.]+/[\w\-\./]+-metadata:[a-zA-Z0-9\.\-_]+$"
+        if not re.match(pattern, metadata_ref):
+            raise InvalidArgumentValueError(
+                f"Invalid connector metadata reference format: {metadata_ref}. "
+                "Expected format: registry.com/path/connector-type-metadata:version"
+            )
         
         logger.info(f"Fetching connector metadata from: {metadata_ref}")
         
         try:
             # Parse the metadata reference
             # Format: registry/repository:tag
-            if ":" not in metadata_ref:
-                raise InvalidArgumentValueError(
-                    f"Invalid metadata reference format: {metadata_ref}. "
-                    "Expected format: registry/path/{{type}}-metadata:{{version}}"
-                )
-            
             image_path, tag = metadata_ref.rsplit(":", 1)
-            if "/" not in image_path:
-                raise InvalidArgumentValueError(
-                    f"Invalid metadata reference format: {metadata_ref}. "
-                    "Expected format: registry/path/{{type}}-metadata:{{version}}"
-                )
-            
             registry = image_path.split("/")[0]
             is_acr = ".azurecr.io" in registry
             is_mcr = registry.startswith("mcr.microsoft.com")
@@ -1077,24 +1050,6 @@ class ConnectorTemplates(Queryable):
                 f"Failed to fetch connector metadata from {metadata_ref}: {str(e)}"
             )
 
-    def _extract_image_name_from_ref(self, metadata_ref: str) -> str:
-        """Extract image name from metadata reference.
-        
-        Expected format: registry/path/{type}-metadata:{version}
-        Returns: registry/path/{type} (without -metadata suffix and version)
-        
-        DEPRECATED: Use _split_image_reference() instead for proper registry separation.
-        """
-        try:
-            # Remove the tag portion first
-            without_tag = metadata_ref.split(":")[0]
-            # Remove -metadata suffix from the image name
-            if without_tag.endswith("-metadata"):
-                without_tag = without_tag[:-len("-metadata")]
-            return without_tag
-        except Exception:
-            return metadata_ref
-    
     def _split_image_reference(self, metadata_ref: str) -> tuple:
         """Split image reference into registry and image name.
         
@@ -1249,7 +1204,6 @@ class ConnectorTemplates(Queryable):
             allocation_policy = normalized_policy
         
         # Extract image settings from metadata
-        image_settings = metadata.get("imageConfigurationSettings", {})
         registry, image_name = self._split_image_reference(connector_metadata_ref)
         image_tag = metadata.get("version", "")
         
@@ -1404,27 +1358,6 @@ class ConnectorTemplates(Queryable):
 
         return properties
 
-    def _extract_metadata_properties(
-        self, metadata: dict, metadata_ref: str
-    ) -> dict:
-        """Extract auto-populated properties from metadata."""
-        image_settings = metadata.get("imageConfigurationSettings", {})
-        inbound_endpoints = metadata.get("inboundEndpoints", [{}])
-        first_endpoint = inbound_endpoints[0] if inbound_endpoints else {}
-
-        return {
-            "connectorName": metadata.get("name", ""),
-            "connectorVersion": metadata.get("version", ""),
-            "aioMinVersion": metadata.get("aioMetadata", {}).get("aioMinVersion"),
-            "aioMaxVersion": metadata.get("aioMetadata", {}).get("aioMaxVersion"),
-            "endpointType": first_endpoint.get("endpointType"),
-            "endpointVersion": first_endpoint.get("version"),
-            "imageConfiguration": {
-                "imageName": image_settings.get("imageName", ""),
-                "imageTag": image_settings.get("tag", ""),
-            },
-        }
-
     def _parse_secrets(self, secrets_list: List[str]) -> List[dict]:
         """Parse secrets from CLI argument format to structured format.
         
@@ -1450,10 +1383,7 @@ class ConnectorTemplates(Queryable):
         
         if not secrets_list:
             return []
-
-        # Regex patterns for validation
-        # Azure Key Vault secret names: per REST API spec at
-        # https://learn.microsoft.com/en-us/rest/api/keyvault/secrets/set-secret/set-secret
+        # Validation patterns
         # Pattern: ^[0-9a-zA-Z-]+$ (alphanumeric and hyphens only)
         # Length: 1-127 characters (practical Azure naming convention limit)
         secret_ref_pattern = re.compile(r'^[0-9a-zA-Z-]{1,127}$')
