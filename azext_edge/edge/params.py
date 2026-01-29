@@ -1661,6 +1661,127 @@ def load_iotops_arguments(self, _):
             arg_group=None,
         )
 
+    with self.argument_context("iot ops connector template") as context:
+        context.argument(
+            "name",
+            options_list=["--name", "-n"],
+            help="Template name.",
+        )
+        context.argument(
+            "resource_group",
+            options_list=["--resource-group", "-g"],
+            help="Instance resource group.",
+        )
+        context.argument(
+            "instance",
+            options_list=["--instance", "-i"],
+            help="IoT Operations instance name.",
+        )
+        context.argument(
+            "connector_metadata_ref",
+            options_list=["--connector-metadata-ref", "--ref"],
+            help="URL to connector metadata artifact from container registry.\n\n"
+            "                1st-party connectors (MCR):\n"
+            "                - mcr.microsoft.com/azureiotoperations/akri-connectors/rest-metadata:<version>\n"
+            "                - mcr.microsoft.com/azureiotoperations/akri-connectors/media-metadata:<version>\n"
+            "                - mcr.microsoft.com/azureiotoperations/akri-connectors/mqtt-metadata:<version>\n"
+            "                - mcr.microsoft.com/azureiotoperations/akri-connectors/sse-metadata:<version>\n"
+            "                - mcr.microsoft.com/azureiotoperations/akri-connectors/onvif-metadata:<version>\n\n"
+            "                3rd-party connectors:\n"
+            "                - <registry>.azurecr.io/<path>-metadata:<version>\n\n"
+            "                To list available versions for 1st-party connectors:\n"
+            "                curl https://mcr.microsoft.com/v2/azureiotoperations/akri-connectors/<type>-metadata/tags/list",
+        )
+        context.argument(
+            "registry_endpoint",
+            options_list=["--registry-endpoint", "--re"],
+            help="Name of the registry endpoint for authentication. Required for private registries "
+            "(e.g., Azure Container Registry). Optional for public registries like MCR.",
+        )
+        context.argument(
+            "replicas",
+            options_list=["--replicas", "-r"],
+            type=int,
+            help="Number of connector pod replicas to deploy. "
+            "Default is taken from recommendedReplicas in metadata (default: 1).",
+        )
+        context.argument(
+            "log_level",
+            options_list=["--log-level", "--ll"],
+            help="Log level for connector pods. Options: trace, debug, info, warn, error. Default: info.",
+        )
+        context.argument(
+            "image_pull_policy",
+            options_list=["--image-pull-policy", "--ipp"],
+            help="Kubernetes image pull policy. Options: Always, IfNotPresent, Never.",
+        )
+        context.argument(
+            "image_pull_secrets",
+            options_list=["--image-pull-secrets", "--ips"],
+            nargs="+",
+            help="Space-separated Kubernetes secret names for pulling container images from private registries. "
+            "Use '' to clear existing image pull secrets.",
+        )
+        context.argument(
+            "allocation_policy",
+            options_list=["--allocation-policy", "--ap"],
+            help="Policy for allocating device endpoints across connector instances (case-insensitive). "
+            "Options: Bucketized. If not provided, no allocation policy will be set.",
+        )
+        context.argument(
+            "bucket_size",
+            options_list=["--bucket-size", "--bs"],
+            type=int,
+            help="Number of endpoints per connector instance bucket (required when allocation policy is 'Bucketized'). "
+            "If not provided, you will be prompted to enter a value.",
+        )
+        context.argument(
+            "secrets",
+            options_list=["--secrets"],
+            nargs="+",
+            action="append",
+            help="Space-separated connector application secrets to mount in key=value format. "
+            "Each secret requires three fields: secretRef (name of the secret to mount), "
+            "secretKey (the key in the secret to be mounted), and secretAlias (application alias). "
+            "Example: secretRef=mySecret secretKey=password secretAlias=dbPassword. "
+            "Can be used multiple times to define multiple secrets. "
+            "The secretRef must reference a secret synced via the secret provider class. "
+            "Use '' to clear existing secrets.",
+        )
+        context.argument(
+            "storage_volumes",
+            options_list=["--storage-volumes", "--sv"],
+            nargs="+",
+            help="Space-separated persistent volume claim reference in key=value format. "
+            "Required keys: claimName (name of existing PVC), mountPath (mount path in container). "
+            "Example: claimName=myPVC mountPath=/data. "
+            "Use '' to clear existing storage volumes.",
+        )
+        context.argument(
+            "trust_settings_secret_ref",
+            options_list=["--trust-settings-secret-ref", "--tssr"],
+            help="Secret reference for certificates to trust. "
+            "This specifies the name of the Kubernetes secret containing trusted CA certificates. "
+            "Use '' to clear existing trust settings.",
+        )
+        context.argument(
+            "connector_config",
+            options_list=["--connector-config", "--cc"],
+            nargs="+",
+            action="extend",
+            help="Space-separated connector-specific key-value configurations. "
+            "Format: key=value. Can provide multiple values in one call or use multiple times. "
+            "Examples: --cc brokerAddress=mqtt://broker:1883 qos=1 keepAlive=60 OR "
+            "--cc brokerAddress=mqtt://broker:1883 --cc qos=1 --cc keepAlive=60. "
+            "Use '' to clear existing configurations.",
+        )
+        context.argument(
+            "confirm_yes",
+            options_list=["--yes", "-y"],
+            arg_type=get_three_state_flag(),
+            help="Skip confirmation prompts.",
+        )
+
     with self.argument_context("iot ops connector opcua") as context:
         context.argument(
             "instance_name",
