@@ -71,7 +71,6 @@ class ConnectorTemplates(Queryable):
         resource_group_name: str,
         instance_name: str,
         connector_metadata_ref: str,
-        registry_endpoint: Optional[str] = None,
         replicas: Optional[int] = None,
         log_level: Optional[str] = None,
         image_pull_policy: Optional[str] = None,
@@ -91,7 +90,6 @@ class ConnectorTemplates(Queryable):
             resource_group_name: Instance resource group name
             instance_name: IoT Operations instance name
             connector_metadata_ref: URL to connector metadata JSON
-            registry_endpoint: Optional registry endpoint name for private registries
             replicas: Number of connector pod replicas
             log_level: Log level for connector pods
             image_pull_policy: Kubernetes image pull policy
@@ -106,34 +104,6 @@ class ConnectorTemplates(Queryable):
         Returns:
             dict: Created connector template resource
         """
-        # For private registries (3P connectors), require registry endpoint
-        # Registry endpoint contains the auth credentials for the edge/connectors
-        if self._is_private_registry(connector_metadata_ref):
-            if not registry_endpoint:
-                from knack.prompting import prompt
-                try:
-                    registry_endpoint = prompt(
-                        "Private registry detected. Enter the registry endpoint name for authentication: "
-                    )
-                    if not registry_endpoint or not registry_endpoint.strip():
-                        raise RequiredArgumentMissingError(
-                            "Registry endpoint is required for private registries. "
-                            "Use --registry-endpoint to specify the registry endpoint name."
-                        )
-                    registry_endpoint = registry_endpoint.strip()
-                except KeyboardInterrupt:
-                    raise RequiredArgumentMissingError(
-                        "Registry endpoint is required for private registries. "
-                        "Use --registry-endpoint to specify the registry endpoint name."
-                    )
-            
-            # Validate registry endpoint auth type and warn if MI
-            self._validate_registry_endpoint_for_connector(
-                registry_endpoint=registry_endpoint,
-                instance_name=instance_name,
-                resource_group_name=resource_group_name,
-            )
-
         # Fetch and parse connector metadata
         metadata = self._fetch_connector_metadata(connector_metadata_ref)
         logger.debug(f"Fetched metadata: {json.dumps(metadata, indent=2)}")
@@ -158,7 +128,6 @@ class ConnectorTemplates(Queryable):
         properties = self._build_template_properties(
             metadata=metadata,
             connector_metadata_ref=connector_metadata_ref,
-            registry_endpoint=registry_endpoint,
             replicas=replicas,
             log_level=log_level,
             image_pull_policy=image_pull_policy,
@@ -341,18 +310,11 @@ class ConnectorTemplates(Queryable):
                         "registrySettingsType": "ContainerRegistry",
                         "containerRegistrySettings": {}
                     }
-                # RegistryEndpointRef doesn't support image pull secrets - warn and skip
-                if image_config_settings["registrySettings"].get("registrySettingsType") == "RegistryEndpointRef":
-                    logger.warning(
-                        "Cannot add image pull secrets to RegistryEndpointRef type. "
-                        "Image pull secrets are only supported with ContainerRegistry type."
-                    )
-                else:
-                    if "containerRegistrySettings" not in image_config_settings["registrySettings"]:
-                        image_config_settings["registrySettings"]["containerRegistrySettings"] = {}
-                    image_config_settings["registrySettings"]["containerRegistrySettings"]["imagePullSecrets"] = [
-                        {"secretRef": secret} for secret in image_pull_secrets if secret
-                    ]
+                if "containerRegistrySettings" not in image_config_settings["registrySettings"]:
+                    image_config_settings["registrySettings"]["containerRegistrySettings"] = {}
+                image_config_settings["registrySettings"]["containerRegistrySettings"]["imagePullSecrets"] = [
+                    {"secretRef": secret} for secret in image_pull_secrets if secret
+                ]
         
         if allocation_policy is not None or bucket_size is not None:
             # Normalize allocation policy if provided (case-insensitive)
@@ -584,6 +546,9 @@ class ConnectorTemplates(Queryable):
         
         return summaries
 
+    
+    # Helper methods
+
     def _extract_template_summary(self, template: dict) -> dict:
         """Extract summary information from a connector template resource.
         
@@ -625,8 +590,6 @@ class ConnectorTemplates(Queryable):
             "lastModifiedAt": system_data.get("lastModifiedAt", ""),
             "provisioningState": properties.get("provisioningState", ""),
         }
-
-    # Helper methods
 
     @staticmethod
     def _is_clear_signal(value) -> bool:
@@ -677,65 +640,6 @@ class ConnectorTemplates(Queryable):
                 f"Connector metadata at '{metadata_ref}' is missing 'imageConfigurationSettings.imageName'. "
                 "This field is required to specify the connector image path."
             )
-
-    def _is_private_registry(self, metadata_ref: str) -> bool:
-        """Check if the metadata reference points to a private registry."""
-        # MCR (Microsoft Container Registry) is public
-        if metadata_ref.startswith("mcr.microsoft.com"):
-            return False
-        # Azure Container Registry (azurecr.io) is typically private
-        if ".azurecr.io" in metadata_ref:
-            return True
-        # Other registries - assume private for safety
-        return True
-
-    def _validate_registry_endpoint_for_connector(
-        self,
-        registry_endpoint: str,
-        instance_name: str,
-        resource_group_name: str,
-    ) -> None:
-        """
-        Validate that the registry endpoint has appropriate auth for connectors.
-        
-        Managed Identity auth in registry endpoints only works for Dataflow graphs,
-        not for 3P connectors. Warn users if they're using MI.
-        
-        Args:
-            registry_endpoint: Name of the registry endpoint
-            instance_name: Azure IoT Operations instance name
-            resource_group_name: Resource group name
-        """
-        try:
-            # Fetch the registry endpoint to check auth type
-            registry_ops = self.iotops_mgmt_client.registry_endpoint
-            endpoint = registry_ops.get(
-                resource_group_name=resource_group_name,
-                instance_name=instance_name,
-                registry_endpoint_name=registry_endpoint,
-            )
-            
-            # Check authentication type
-            auth_type = None
-            if hasattr(endpoint, 'properties') and endpoint.properties:
-                auth = getattr(endpoint.properties, 'authentication', None)
-                if auth:
-                    auth_type = getattr(auth, 'authentication_type', None) or getattr(auth, 'method', None)
-            
-            # Warn if using Managed Identity - it doesn't work for connectors
-            if auth_type and 'managed' in str(auth_type).lower():
-                from knack.log import get_logger
-                warning_logger = get_logger(__name__)
-                warning_logger.warning(
-                    "Registry endpoint '%s' uses Managed Identity authentication. "
-                    "Note: Managed Identity only works for Dataflow graphs, not for 3P connectors. "
-                    "For connectors, use a registry endpoint with Anonymous or Username/Password auth, "
-                    "or ensure your AKS cluster has ACR attached via 'az aks update --attach-acr'.",
-                    registry_endpoint
-                )
-        except Exception as e:
-            # Don't fail if we can't fetch the endpoint - just log and continue
-            logger.debug(f"Could not validate registry endpoint auth type: {e}")
 
     def _get_acr_access_token(self, registry: str) -> str:
         """
@@ -1015,7 +919,7 @@ class ConnectorTemplates(Queryable):
                 
                 # Find connector-metadata.json
                 metadata_file = None
-                for root, dirs, files in os.walk(temp_dir):
+                for root, _dirs, files in os.walk(temp_dir):
                     for file in files:
                         if file == "connector-metadata.json":
                             metadata_file = os.path.join(root, file)
@@ -1139,7 +1043,6 @@ class ConnectorTemplates(Queryable):
         self,
         metadata: dict,
         connector_metadata_ref: str,
-        registry_endpoint: Optional[str],
         replicas: Optional[int],
         log_level: Optional[str],
         image_pull_policy: Optional[str],
@@ -1156,7 +1059,6 @@ class ConnectorTemplates(Queryable):
         Args:
             metadata: Parsed connector metadata JSON
             connector_metadata_ref: URL to connector metadata reference
-            registry_endpoint: Optional registry endpoint name
             replicas: Number of connector pod replicas
             log_level: Log level for connector pods
             image_pull_policy: Kubernetes image pull policy
@@ -1219,28 +1121,19 @@ class ConnectorTemplates(Queryable):
         
         # Add registry settings if we have a registry
         if registry:
-            if registry_endpoint:
-                # Use RegistryEndpointRef for managed identity authentication
-                # This allows the connector to pull images using the registry endpoint credentials
-                registry_settings = {
-                    "registrySettingsType": "RegistryEndpointRef",
-                    "registryEndpointRef": registry_endpoint
+            # Use ContainerRegistry type with the registry URL
+            registry_settings = {
+                "registrySettingsType": "ContainerRegistry",
+                "containerRegistrySettings": {
+                    "registry": registry
                 }
-            else:
-                # Use ContainerRegistry type with the registry URL
-                # This requires image pull secrets for authentication
-                registry_settings = {
-                    "registrySettingsType": "ContainerRegistry",
-                    "containerRegistrySettings": {
-                        "registry": registry
-                    }
-                }
-                
-                # Add image pull secrets if provided
-                if image_pull_secrets:
-                    registry_settings["containerRegistrySettings"]["imagePullSecrets"] = [
-                        {"secretRef": secret} for secret in image_pull_secrets
-                    ]
+            }
+            
+            # Add image pull secrets if provided (optional)
+            if image_pull_secrets:
+                registry_settings["containerRegistrySettings"]["imagePullSecrets"] = [
+                    {"secretRef": secret} for secret in image_pull_secrets
+                ]
             
             image_config_settings["registrySettings"] = registry_settings
         

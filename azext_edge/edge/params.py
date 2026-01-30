@@ -1693,12 +1693,6 @@ def load_iotops_arguments(self, _):
             "                curl https://mcr.microsoft.com/v2/azureiotoperations/akri-connectors/<type>-metadata/tags/list",
         )
         context.argument(
-            "registry_endpoint",
-            options_list=["--registry-endpoint", "--re"],
-            help="Name of the registry endpoint for authentication. Required for private registries "
-            "(e.g., Azure Container Registry). Optional for public registries like MCR.",
-        )
-        context.argument(
             "replicas",
             options_list=["--replicas", "-r"],
             type=int,
@@ -1720,6 +1714,8 @@ def load_iotops_arguments(self, _):
             options_list=["--image-pull-secrets", "--ips"],
             nargs="+",
             help="Space-separated Kubernetes secret names for pulling container images from private registries. "
+            "For 3rd-party connectors using a private container registry, provide the secret(s) containing "
+            "registry credentials to enable the connector pod to pull the image. "
             "Use '' to clear existing image pull secrets.",
         )
         context.argument(
