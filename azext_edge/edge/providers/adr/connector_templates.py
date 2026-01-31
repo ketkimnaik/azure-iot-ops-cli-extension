@@ -139,7 +139,7 @@ class ConnectorTemplates(Queryable):
             connector_config=connector_config,
             trust_settings_secret_ref=trust_settings_secret_ref,
         )
-        
+
         # Validate secret sync is enabled if secrets are provided
         if secrets:
             self._check_secret_sync_enabled(
@@ -168,7 +168,7 @@ class ConnectorTemplates(Queryable):
             )
             return wait_for_terminal_state(poller=poller, logger=logger)
 
-    def update(
+    def update(  # noqa: C901
         self,
         template_name: str,
         resource_group_name: str,
@@ -217,15 +217,16 @@ class ConnectorTemplates(Queryable):
         # If metadata ref is being updated, validate version upgrade
         if connector_metadata_ref:
             new_metadata = self._fetch_connector_metadata(connector_metadata_ref)
-            
+
             # Extract current version from the existing template
             # Version is stored in tagDigestSettings.tag within imageConfigurationSettings
-            current_managed_config = existing_template["properties"]["runtimeConfiguration"].get("managedConfigurationSettings", {})
+            runtime_config = existing_template["properties"]["runtimeConfiguration"]
+            current_managed_config = runtime_config.get("managedConfigurationSettings", {})
             current_image_config = current_managed_config.get("imageConfigurationSettings", {})
             current_tag_settings = current_image_config.get("tagDigestSettings", {})
             current_version = current_tag_settings.get("tag", "0.0.0")
             new_version = new_metadata.get("version")
-            
+
             if not self._is_valid_version_upgrade(current_version, new_version):
                 raise ValidationError(
                     f"Invalid version upgrade from {current_version} to {new_version}. "
@@ -248,8 +249,9 @@ class ConnectorTemplates(Queryable):
 
             # Update image configuration settings from new metadata
             new_image_settings = new_metadata.get("imageConfigurationSettings", {})
-            current_image_config["imageName"] = new_image_settings.get("imageName", current_image_config.get("imageName", ""))
-            
+            default_image = current_image_config.get("imageName", "")
+            current_image_config["imageName"] = new_image_settings.get("imageName", default_image)
+
             # Update tag/digest settings
             if "tag" in new_image_settings:
                 current_image_config["tagDigestSettings"] = {
@@ -261,11 +263,11 @@ class ConnectorTemplates(Queryable):
                     "tagDigestType": "Digest",
                     "digest": new_image_settings["digest"]
                 }
-            
+
             # Update aioMetadata if present
             if "aioMetadata" in new_metadata:
                 existing_template["properties"]["aioMetadata"] = new_metadata["aioMetadata"]
-            
+
             # Update deviceInboundEndpointTypes from metadata
             new_endpoint_types = []
             for endpoint in new_metadata.get("inboundEndpoints", []):
@@ -277,7 +279,7 @@ class ConnectorTemplates(Queryable):
                 new_endpoint_types.append(endpoint_type_obj)
             if new_endpoint_types:
                 existing_template["properties"]["deviceInboundEndpointTypes"] = new_endpoint_types
-            
+
             # Update connectorMetadataRef to store the metadata reference
             existing_template["properties"]["connectorMetadataRef"] = connector_metadata_ref
 
@@ -285,24 +287,25 @@ class ConnectorTemplates(Queryable):
         # Access the managed configuration settings
         managed_config = existing_template["properties"]["runtimeConfiguration"].get("managedConfigurationSettings", {})
         image_config_settings = managed_config.get("imageConfigurationSettings", {})
-        
+
         if replicas is not None:
             image_config_settings["replicas"] = replicas
-        
+
         if log_level is not None:
             if "diagnostics" not in existing_template["properties"]:
                 existing_template["properties"]["diagnostics"] = {"logs": {}}
             existing_template["properties"]["diagnostics"]["logs"]["level"] = log_level
-        
+
         if image_pull_policy is not None:
             image_config_settings["imagePullPolicy"] = image_pull_policy
-        
+
         if image_pull_secrets is not None:
             if self._is_clear_signal(image_pull_secrets):
                 # Clear image pull secrets
                 if "registrySettings" in image_config_settings:
                     if "containerRegistrySettings" in image_config_settings["registrySettings"]:
-                        image_config_settings["registrySettings"]["containerRegistrySettings"].pop("imagePullSecrets", None)
+                        container_settings = image_config_settings["registrySettings"]["containerRegistrySettings"]
+                        container_settings.pop("imagePullSecrets", None)
             else:
                 # Ensure we have ContainerRegistry type settings
                 if "registrySettings" not in image_config_settings:
@@ -315,7 +318,7 @@ class ConnectorTemplates(Queryable):
                 image_config_settings["registrySettings"]["containerRegistrySettings"]["imagePullSecrets"] = [
                     {"secretRef": secret} for secret in image_pull_secrets if secret
                 ]
-        
+
         if allocation_policy is not None or bucket_size is not None:
             # Normalize allocation policy if provided (case-insensitive)
             if allocation_policy is not None:
@@ -324,30 +327,30 @@ class ConnectorTemplates(Queryable):
                     if allocation_policy.lower() == valid_policy.lower():
                         normalized_policy = valid_policy
                         break
-                
+
                 if normalized_policy is None:
                     raise InvalidArgumentValueError(
                         f"Invalid allocation policy: {allocation_policy}. "
                         f"Valid values are: {', '.join(VALID_ALLOCATION_POLICIES)} (case-insensitive)"
                     )
                 allocation_policy = normalized_policy
-            
+
             # Get or create allocation dict
             if "allocation" not in managed_config:
                 managed_config["allocation"] = {}
-            
+
             allocation_dict = managed_config["allocation"]
-            
+
             # Update allocation policy if provided
             if allocation_policy is not None:
                 allocation_dict["policy"] = allocation_policy
-            
+
             # Handle bucket size for Bucketized policy
             current_policy = allocation_dict.get("policy", "")
             if current_policy == "Bucketized" or (allocation_policy is not None and allocation_policy == "Bucketized"):
                 # Use provided bucket size or prompt for it
                 final_bucket_size = bucket_size
-                
+
                 if final_bucket_size is None and allocation_policy is not None:
                     # Only prompt if we're setting/changing to Bucketized
                     from knack.prompting import prompt
@@ -365,10 +368,10 @@ class ConnectorTemplates(Queryable):
                             "Provide it via --bucket-size parameter or when prompted. "
                             f"Error: {str(e)}"
                         )
-                
+
                 if final_bucket_size is not None:
                     allocation_dict["bucketSize"] = final_bucket_size
-        
+
         if connector_config is not None:
             if self._is_clear_signal(connector_config):
                 # Clear additional configuration
@@ -377,10 +380,13 @@ class ConnectorTemplates(Queryable):
                 if "additionalConfiguration" not in managed_config:
                     managed_config["additionalConfiguration"] = {}
                 managed_config["additionalConfiguration"].update(assemble_nargs_to_dict(connector_config))
-        
+
         # Update secrets if provided (at managedConfigurationSettings level per API schema)
         if secrets is not None:
-            if self._is_clear_signal(secrets) or (isinstance(secrets, list) and len(secrets) == 1 and self._is_clear_signal(secrets[0])):
+            is_clear = self._is_clear_signal(secrets) or (
+                isinstance(secrets, list) and len(secrets) == 1 and self._is_clear_signal(secrets[0])
+            )
+            if is_clear:
                 # Clear secrets
                 managed_config.pop("secrets", None)
             else:
@@ -392,7 +398,7 @@ class ConnectorTemplates(Queryable):
                 parsed_secrets = self._parse_secrets(secrets)
                 if parsed_secrets:
                     managed_config["secrets"] = parsed_secrets
-        
+
         # Update storage volumes if provided (at managedConfigurationSettings level per API schema)
         if storage_volumes is not None:
             if self._is_clear_signal(storage_volumes):
@@ -538,29 +544,28 @@ class ConnectorTemplates(Queryable):
             resource_group_name=resource_group_name,
             instance_name=instance_name,
         )
-        
+
         summaries = []
         for template in results:
             summary = self._extract_template_summary(template)
             summaries.append(summary)
-        
+
         return summaries
 
-    
     # Helper methods
 
     def _extract_template_summary(self, template: dict) -> dict:
         """Extract summary information from a connector template resource.
-        
+
         Args:
             template: Full connector template resource dict
-            
+
         Returns:
             dict: Summary with key fields for list display
         """
         properties = template.get("properties", {})
         system_data = template.get("systemData", {})
-        
+
         # Extract endpoint type from deviceInboundEndpointTypes
         endpoint_types = properties.get("deviceInboundEndpointTypes", [])
         connector_type = ""
@@ -569,18 +574,18 @@ class ConnectorTemplates(Queryable):
             first_endpoint = endpoint_types[0]
             connector_type = first_endpoint.get("endpointType", "")
             version = first_endpoint.get("version", "")
-        
+
         # Extract replicas and tag from runtime configuration
         runtime_config = properties.get("runtimeConfiguration", {})
         managed_settings = runtime_config.get("managedConfigurationSettings", {})
         image_settings = managed_settings.get("imageConfigurationSettings", {})
         replicas = image_settings.get("replicas", 1)
-        
+
         # Get tag as version if endpoint version not specified
         if not version:
             tag_settings = image_settings.get("tagDigestSettings", {})
             version = tag_settings.get("tag", "")
-        
+
         return {
             "name": template.get("name", ""),
             "connectorType": connector_type,
@@ -609,30 +614,31 @@ class ConnectorTemplates(Queryable):
 
     def _validate_metadata(self, metadata: dict, metadata_ref: str) -> None:
         """Validate required fields in connector metadata.
-        
+
         Ensures the metadata contains all required fields for creating a valid
         connector template.
-        
+
         Args:
             metadata: Parsed connector metadata JSON
             metadata_ref: Original metadata reference URL (for error messages)
-            
+
         Raises:
             ValidationError: If required fields are missing
         """
         required_fields = ["name", "version", "imageConfigurationSettings", "inboundEndpoints"]
         missing_fields = []
-        
+
         for field in required_fields:
             if field not in metadata or not metadata[field]:
                 missing_fields.append(field)
-        
+
         if missing_fields:
             raise ValidationError(
-                f"Connector metadata at '{metadata_ref}' is missing required fields: {', '.join(missing_fields)}. "
-                "Please ensure the metadata JSON includes: name, version, imageConfigurationSettings, and inboundEndpoints."
+                f"Connector metadata at '{metadata_ref}' is missing required fields: "
+                f"{', '.join(missing_fields)}. Please ensure the metadata JSON includes: "
+                "name, version, imageConfigurationSettings, and inboundEndpoints."
             )
-        
+
         # Validate imageConfigurationSettings has required subfields
         image_config = metadata.get("imageConfigurationSettings", {})
         if not image_config.get("imageName"):
@@ -644,21 +650,21 @@ class ConnectorTemplates(Queryable):
     def _get_acr_access_token(self, registry: str) -> str:
         """
         Get ACR access token for authentication using Azure AD token exchange.
-        
+
         Args:
             registry: Registry hostname (e.g., myregistry.azurecr.io)
-            
+
         Returns:
             str: Access token for ACR
         """
         import requests
-        
+
         try:
             # Extract ACR name from hostname
             acr_name = registry.split('.')[0]
-            
+
             logger.info("Getting ACR access token for: %s", acr_name)
-            
+
             # Get Azure AD token for ACR resource
             logger.debug("Getting Azure AD token for ACR")
             result = subprocess.run(
@@ -668,19 +674,19 @@ class ConnectorTemplates(Queryable):
                 timeout=30,
                 check=False
             )
-            
+
             if result.returncode != 0:
                 error_msg = result.stderr.strip() if result.stderr else "Unknown error"
                 raise CLIInternalError(f"Failed to get Azure AD token: {error_msg}")
-            
+
             # Parse the token
             token_data = json.loads(result.stdout)
             aad_token = token_data.get("accessToken")
             if not aad_token:
                 raise CLIInternalError("Azure AD token response did not contain access token")
-            
+
             logger.debug("Successfully obtained Azure AD token, exchanging for ACR token")
-            
+
             # Exchange AAD token for ACR refresh token
             exchange_url = f"https://{registry}/oauth2/exchange"
             exchange_data = {
@@ -688,7 +694,7 @@ class ConnectorTemplates(Queryable):
                 "service": registry,
                 "access_token": aad_token
             }
-            
+
             logger.debug(f"Exchanging token at {exchange_url}")
             exchange_response = requests.post(
                 exchange_url,
@@ -696,18 +702,18 @@ class ConnectorTemplates(Queryable):
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 timeout=30
             )
-            
+
             if exchange_response.status_code != 200:
                 raise CLIInternalError(
                     f"Token exchange failed with status {exchange_response.status_code}: {exchange_response.text}"
                 )
-            
+
             refresh_token = exchange_response.json().get("refresh_token")
             if not refresh_token:
                 raise CLIInternalError("Token exchange response did not contain refresh token")
-            
+
             logger.debug("Successfully exchanged for ACR refresh token, getting access token")
-            
+
             # Exchange refresh token for access token with repository scope
             token_url = f"https://{registry}/oauth2/token"
             token_data = {
@@ -716,7 +722,7 @@ class ConnectorTemplates(Queryable):
                 "refresh_token": refresh_token,
                 "scope": "repository:*:pull"
             }
-            
+
             logger.debug(f"Getting access token from {token_url}")
             token_response = requests.post(
                 token_url,
@@ -724,19 +730,19 @@ class ConnectorTemplates(Queryable):
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 timeout=30
             )
-            
+
             if token_response.status_code != 200:
                 raise CLIInternalError(
                     f"Failed to get access token with status {token_response.status_code}: {token_response.text}"
                 )
-            
+
             access_token = token_response.json().get("access_token")
             if not access_token:
                 raise CLIInternalError("Token response did not contain access token")
-            
+
             logger.debug("Successfully obtained ACR access token")
             return access_token
-                
+
         except subprocess.TimeoutExpired:
             raise CLIInternalError("ACR authentication timed out after 30 seconds")
         except requests.RequestException as e:
@@ -755,16 +761,16 @@ class ConnectorTemplates(Queryable):
         Handles both public registries (MCR) and private registries (ACR).
         For MCR (1st-party connectors): Uses anonymous access
         For ACR (3rd-party connectors): Uses Azure AD authentication
-        
+
         The metadata artifact uses format: {connector-type}-metadata:{version}
         For example: mcr.microsoft.com/azureiotoperations/akri-connectors/rest-metadata:1.0.6
-        
+
         Args:
             metadata_ref: Registry reference in format registry/path/{type}-metadata:{version}
-            
+
         Returns:
             dict: Parsed connector metadata JSON
-            
+
         Raises:
             RequiredArgumentMissingError: If metadata_ref is empty
             InvalidArgumentValueError: If metadata_ref format is invalid
@@ -774,16 +780,16 @@ class ConnectorTemplates(Queryable):
             raise RequiredArgumentMissingError(
                 "Connector metadata reference is required."
             )
-        
+
         pattern = r"^[a-zA-Z0-9\-\.]+/[\w\-\./]+-metadata:[a-zA-Z0-9\.\-_]+$"
         if not re.match(pattern, metadata_ref):
             raise InvalidArgumentValueError(
                 f"Invalid connector metadata reference format: {metadata_ref}. "
                 "Expected format: registry.com/path/connector-type-metadata:version"
             )
-        
+
         logger.info(f"Fetching connector metadata from: {metadata_ref}")
-        
+
         try:
             # Parse the metadata reference
             # Format: registry/repository:tag
@@ -791,12 +797,12 @@ class ConnectorTemplates(Queryable):
             registry = image_path.split("/")[0]
             is_acr = ".azurecr.io" in registry
             is_mcr = registry.startswith("mcr.microsoft.com")
-            
+
             logger.debug(f"Registry: {registry}, MCR: {is_mcr}, ACR: {is_acr}")
-            
+
             # Use REST API for all registries (ACR with auth, MCR without auth)
             return self._fetch_metadata_from_registry(metadata_ref, registry, image_path, tag, is_acr)
-            
+
         except (ValidationError, InvalidArgumentValueError, CLIInternalError):
             # Re-raise known errors
             raise
@@ -806,18 +812,20 @@ class ConnectorTemplates(Queryable):
                 f"Failed to fetch connector metadata from {metadata_ref}: {str(e)}"
             )
 
-    def _fetch_metadata_from_registry(self, metadata_ref: str, registry: str, image_path: str, tag: str, is_acr: bool) -> dict:
+    def _fetch_metadata_from_registry(  # noqa: C901
+        self, metadata_ref: str, registry: str, image_path: str, tag: str, is_acr: bool
+    ) -> dict:
         """
         Fetch metadata from container registry using REST API.
         Uses Azure AD authentication for ACR, no auth for public registries like MCR.
-        
+
         Args:
             metadata_ref: Full metadata reference
             registry: Registry hostname
             image_path: Image path without tag
             tag: Image tag
             is_acr: Whether this is an Azure Container Registry
-            
+
         Returns:
             dict: Parsed connector metadata JSON
         """
@@ -825,35 +833,35 @@ class ConnectorTemplates(Queryable):
         import shutil
         import tarfile
         import io
-        
+
         logger.info(f"Fetching metadata from registry: {metadata_ref}")
-        
+
         try:
             # Extract repository path (everything except registry and tag)
             repository = image_path.replace(registry + "/", "")
-            
+
             logger.debug(f"Repository: {repository}, Tag: {tag}")
-            
+
             # Prepare headers
             headers = {
                 "Accept": "application/vnd.oci.image.manifest.v1+json"
             }
-            
+
             # For ACR, get access token and add to headers
             if is_acr:
                 access_token = self._get_acr_access_token(registry)
                 headers["Authorization"] = f"Bearer {access_token}"
-            
+
             # Get manifest from registry
             manifest_url = f"https://{registry}/v2/{repository}/manifests/{tag}"
-            
+
             logger.debug(f"Fetching manifest from: {manifest_url}")
             manifest_response = requests.get(manifest_url, headers=headers, timeout=30)
-            
+
             logger.debug(f"Manifest response status: {manifest_response.status_code}")
             if manifest_response.status_code == 401:
                 logger.debug(f"401 response body: {manifest_response.text}")
-            
+
             if manifest_response.status_code == 404:
                 raise ResourceNotFoundError(
                     f"Metadata artifact not found: {metadata_ref}. "
@@ -865,32 +873,32 @@ class ConnectorTemplates(Queryable):
                     f"Authentication failed for {registry_type}: {registry}. "
                     "Check your credentials and registry access permissions."
                 )
-            
+
             manifest_response.raise_for_status()
             manifest = manifest_response.json()
-            
+
             # Get the blob digest (typically the first/only layer)
             if "layers" not in manifest or not manifest["layers"]:
                 raise CLIInternalError(f"No layers found in manifest for {metadata_ref}")
-            
+
             blob_digest = manifest["layers"][0]["digest"]
             logger.debug(f"Blob digest: {blob_digest}")
-            
+
             # Download the blob
             blob_url = f"https://{registry}/v2/{repository}/blobs/{blob_digest}"
             logger.debug(f"Downloading blob from: {blob_url}")
-            
+
             blob_response = requests.get(blob_url, headers=headers, timeout=60)
             blob_response.raise_for_status()
-            
+
             # Extract metadata from the blob
             temp_dir = tempfile.mkdtemp(prefix="akri_metadata_")
-            
+
             try:
                 # Try to extract as tar.gz, then as plain tar, then check if it's already JSON
                 blob_content = blob_response.content
                 logger.debug(f"Blob size: {len(blob_content)} bytes")
-                
+
                 # First, check if it's already a JSON file
                 try:
                     metadata = json.loads(blob_content.decode('utf-8'))
@@ -899,7 +907,7 @@ class ConnectorTemplates(Queryable):
                         return metadata
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     pass
-                
+
                 # Try to extract as tar.gz
                 try:
                     logger.debug("Attempting to extract as tar.gz")
@@ -916,7 +924,7 @@ class ConnectorTemplates(Queryable):
                             f"Failed to extract artifact from {metadata_ref}. "
                             f"The blob format is not recognized (not JSON, tar, or tar.gz): {str(e)}"
                         )
-                
+
                 # Find connector-metadata.json
                 metadata_file = None
                 for root, _dirs, files in os.walk(temp_dir):
@@ -926,25 +934,25 @@ class ConnectorTemplates(Queryable):
                             break
                     if metadata_file:
                         break
-                
+
                 if not metadata_file:
                     raise CLIInternalError(
                         f"Could not find connector-metadata.json in artifact from {metadata_ref}"
                     )
-                
+
                 # Read and parse metadata
                 logger.debug(f"Reading metadata from {metadata_file}")
                 with open(metadata_file, 'r', encoding='utf-8') as f:
                     metadata = json.load(f)
-                
+
                 logger.info(f"Successfully fetched metadata for connector: {metadata.get('name', 'unknown')}")
                 return metadata
-                
+
             finally:
                 # Clean up
                 if os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)
-                    
+
         except requests.exceptions.RequestException as e:
             raise CLIInternalError(f"Failed to fetch metadata from registry: {str(e)}")
         except Exception as e:
@@ -956,14 +964,14 @@ class ConnectorTemplates(Queryable):
 
     def _split_image_reference(self, metadata_ref: str) -> tuple:
         """Split image reference into registry and image name.
-        
+
         Expected format: registry/path/{type}-metadata:{version}
         Returns: (registry, image_name)
-        
+
         Examples:
             mcr.microsoft.com/azureiotoperations/akri-connectors/rest-metadata:1.0.6
             -> ('mcr.microsoft.com', 'azureiotoperations/akri-connectors/rest')
-            
+
             acrname.azurecr.io/connectors/test-metadata:1.0.0
             -> ('acrname.azurecr.io', 'connectors/test')
         """
@@ -973,7 +981,7 @@ class ConnectorTemplates(Queryable):
             # Remove -metadata suffix
             if without_tag.endswith("-metadata"):
                 without_tag = without_tag[:-len("-metadata")]
-            
+
             # Split into registry and image path
             # Registry is the first part before the first /
             parts = without_tag.split("/", 1)
@@ -984,7 +992,7 @@ class ConnectorTemplates(Queryable):
                 # No registry specified (shouldn't happen but handle it)
                 registry = ""
                 image_name = without_tag
-            
+
             return (registry, image_name)
         except Exception:
             # Fallback: return empty registry and full ref as image name
@@ -999,7 +1007,7 @@ class ConnectorTemplates(Queryable):
         Allows:
         - Patch updates: 1.0.5 -> 1.0.6
         - Minor updates: 1.0.6 -> 1.1.0
-        
+
         Blocks:
         - Major updates: 1.0.6 -> 2.0.0
         - Downgrades: 1.0.6 -> 1.0.5
@@ -1039,7 +1047,7 @@ class ConnectorTemplates(Queryable):
             )
             return False
 
-    def _build_template_properties(
+    def _build_template_properties(  # noqa: C901
         self,
         metadata: dict,
         connector_metadata_ref: str,
@@ -1055,7 +1063,7 @@ class ConnectorTemplates(Queryable):
         trust_settings_secret_ref: Optional[str] = None,
     ) -> dict:
         """Build template properties from metadata and user inputs matching API schema.
-        
+
         Args:
             metadata: Parsed connector metadata JSON
             connector_metadata_ref: URL to connector metadata reference
@@ -1069,7 +1077,7 @@ class ConnectorTemplates(Queryable):
             storage_volumes: Storage volumes configuration
             connector_config: Additional connector-specific configurations
             trust_settings_secret_ref: Secret reference for certificates to trust
-            
+
         Returns:
             dict: Template properties structure
         """
@@ -1081,14 +1089,14 @@ class ConnectorTemplates(Queryable):
                 if image_pull_policy.lower() == valid_policy.lower():
                     normalized_policy = valid_policy
                     break
-            
+
             if normalized_policy is None:
                 raise InvalidArgumentValueError(
                     f"Invalid image pull policy: {image_pull_policy}. "
                     f"Valid values are: {', '.join(VALID_IMAGE_PULL_POLICIES)} (case-insensitive)"
                 )
             image_pull_policy = normalized_policy
-        
+
         # Normalize and validate allocation policy (case-insensitive)
         if allocation_policy is not None:
             # Find matching policy case-insensitively
@@ -1097,18 +1105,18 @@ class ConnectorTemplates(Queryable):
                 if allocation_policy.lower() == valid_policy.lower():
                     normalized_policy = valid_policy
                     break
-            
+
             if normalized_policy is None:
                 raise InvalidArgumentValueError(
                     f"Invalid allocation policy: {allocation_policy}. "
                     f"Valid values are: {', '.join(VALID_ALLOCATION_POLICIES)} (case-insensitive)"
                 )
             allocation_policy = normalized_policy
-        
+
         # Extract image settings from metadata
         registry, image_name = self._split_image_reference(connector_metadata_ref)
         image_tag = metadata.get("version", "")
-        
+
         # Build image configuration settings
         # API expects imageName WITHOUT registry reference
         image_config_settings = {
@@ -1118,7 +1126,7 @@ class ConnectorTemplates(Queryable):
                 "tag": image_tag
             }
         }
-        
+
         # Add registry settings if we have a registry
         if registry:
             # Use ContainerRegistry type with the registry URL
@@ -1128,41 +1136,41 @@ class ConnectorTemplates(Queryable):
                     "registry": registry
                 }
             }
-            
+
             # Add image pull secrets if provided (optional)
             if image_pull_secrets:
                 registry_settings["containerRegistrySettings"]["imagePullSecrets"] = [
                     {"secretRef": secret} for secret in image_pull_secrets
                 ]
-            
+
             image_config_settings["registrySettings"] = registry_settings
-        
+
         # Set replicas if provided or use metadata recommendation
         if replicas is not None:
             image_config_settings["replicas"] = replicas
         elif "recommendedReplicas" in metadata:
             image_config_settings["replicas"] = metadata["recommendedReplicas"]
-        
+
         # Set image pull policy if provided
         if image_pull_policy is not None:
             image_config_settings["imagePullPolicy"] = image_pull_policy
-        
+
         # Build managed configuration settings
         managed_config = {
             "managedConfigurationType": "ImageConfiguration",
             "imageConfigurationSettings": image_config_settings
         }
-        
+
         # Add allocation policy only if explicitly provided by user
         allocation_dict = {}
         if allocation_policy is not None:
             allocation_dict["policy"] = allocation_policy
-            
+
             # Add bucketSize if policy is Bucketized
             if allocation_policy == "Bucketized":
                 # Use user-provided bucket size or prompt for it
                 final_bucket_size = bucket_size
-                
+
                 if final_bucket_size is None:
                     # Prompt user for bucket size
                     from knack.prompting import prompt
@@ -1180,41 +1188,41 @@ class ConnectorTemplates(Queryable):
                             "Provide it via --bucket-size parameter or when prompted. "
                             f"Error: {str(e)}"
                         )
-                
+
                 allocation_dict["bucketSize"] = final_bucket_size
-        
+
         if allocation_dict:
             managed_config["allocation"] = allocation_dict
-        
+
         # Add additional configuration if provided
         if connector_config:
             connector_config_dict = assemble_nargs_to_dict(connector_config)
             managed_config["additionalConfiguration"] = connector_config_dict
-        
+
         # Parse and add secrets if provided (at managedConfigurationSettings level per API schema)
         if secrets:
             parsed_secrets = self._parse_secrets(secrets)
             if parsed_secrets:
                 managed_config["secrets"] = parsed_secrets
-        
+
         # Parse and add storage volumes if provided (at managedConfigurationSettings level per API schema)
         if storage_volumes:
             parsed_volumes = self._parse_storage_volumes(storage_volumes)
             if parsed_volumes:
                 managed_config["persistentVolumeClaims"] = parsed_volumes
-        
+
         # Add trust settings if provided
         if trust_settings_secret_ref:
             managed_config["trustSettings"] = {
                 "trustListSecretRef": trust_settings_secret_ref
             }
-        
+
         # Build runtime configuration
         runtime_config = {
             "runtimeConfigurationType": "ManagedConfiguration",
             "managedConfigurationSettings": managed_config
         }
-        
+
         # Build device inbound endpoint types from metadata
         device_endpoint_types = []
         inbound_endpoints = metadata.get("inboundEndpoints", [])
@@ -1229,17 +1237,17 @@ class ConnectorTemplates(Queryable):
             if "configurationSchemaRefs" in endpoint:
                 endpoint_type_obj["configurationSchemaRefs"] = endpoint["configurationSchemaRefs"]
             device_endpoint_types.append(endpoint_type_obj)
-        
+
         # Build diagnostics settings
         diagnostics = {
             "logs": {
                 "level": log_level if log_level is not None else DEFAULT_LOG_LEVEL
             }
         }
-        
+
         # Build aioMetadata
         aio_metadata = metadata.get("aioMetadata", {})
-        
+
         # Assemble complete properties
         properties = {
             "connectorMetadataRef": connector_metadata_ref,
@@ -1253,9 +1261,9 @@ class ConnectorTemplates(Queryable):
 
     def _parse_secrets(self, secrets_list: List[str]) -> List[dict]:
         """Parse secrets from CLI argument format to structured format.
-        
+
         Expected format: secretRef=mySecret secretKey=password secretAlias=dbPassword
-        
+
         Validates:
         - secretRef: Azure Key Vault secret name (1-127 chars, alphanumeric and hyphens)
         - secretKey: Key within the secret (alphanumeric, underscores, hyphens)
@@ -1263,17 +1271,17 @@ class ConnectorTemplates(Queryable):
         - Uniqueness of secretAlias within the list
         - Uniqueness of secretKey within the list (to avoid mount path conflicts)
         - All secrets must use the same secretRef (single Secret Provider Class)
-        
+
         Args:
             secrets_list: List of secret definitions. With action="append", this is a list of lists
                          where each inner list contains key=value pairs for one secret.
                          For backward compatibility, also handles flat list of key=value pairs.
-            
+
         Returns:
             List of secret dictionaries with secretRef, secretKey, and secretAlias
         """
         import re
-        
+
         if not secrets_list:
             return []
         # Validation patterns
@@ -1283,12 +1291,12 @@ class ConnectorTemplates(Queryable):
         # Keys and aliases: application-level identifiers, using safe character set
         # (alphanumeric, underscores, hyphens)
         identifier_pattern = re.compile(r'^[a-zA-Z0-9_-]+$')
-        
+
         parsed_secrets = []
         seen_aliases = set()
         seen_secret_keys = set()
         secret_ref_values = set()
-        
+
         # Handle both list of lists (from action="append") and flat list (backward compatibility)
         # If first item is a list, we have action="append" format
         if secrets_list and isinstance(secrets_list[0], list):
@@ -1297,22 +1305,22 @@ class ConnectorTemplates(Queryable):
         else:
             # Flat list - treat entire list as one secret definition
             secret_groups = [secrets_list]
-        
+
         for secret_group in secret_groups:
-            # Handle case where user wrapped everything in quotes: 
+            # Handle case where user wrapped everything in quotes:
             # "secretRef=x secretKey=y secretAlias=z" becomes a single string
             # We need to split it by spaces to get individual key=value pairs
             if len(secret_group) == 1 and ' ' in secret_group[0]:
                 # Single string with spaces - split it
                 secret_group = secret_group[0].split()
-            
+
             secret_dict = assemble_nargs_to_dict(secret_group)
-            
+
             # Validate required fields
             secret_ref = secret_dict.get("secretRef", "").strip()
             secret_key = secret_dict.get("secretKey", "").strip()
             secret_alias = secret_dict.get("secretAlias", "").strip()
-            
+
             if not secret_ref:
                 raise RequiredArgumentMissingError(
                     "secretRef is required for each secret. "
@@ -1328,33 +1336,33 @@ class ConnectorTemplates(Queryable):
                     "secretAlias is required for each secret. "
                     "Format: secretRef=mySecret secretKey=password secretAlias=dbPassword"
                 )
-            
+
             # Validate format
             if not secret_ref_pattern.match(secret_ref):
                 raise InvalidArgumentValueError(
                     f"Invalid secretRef '{secret_ref}'. Must be 1-127 characters, "
                     "alphanumeric and hyphens only (Azure Key Vault secret name format)."
                 )
-            
+
             if not identifier_pattern.match(secret_key):
                 raise InvalidArgumentValueError(
                     f"Invalid secretKey '{secret_key}'. Must contain only "
                     "alphanumeric characters, underscores, and hyphens."
                 )
-            
+
             if not identifier_pattern.match(secret_alias):
                 raise InvalidArgumentValueError(
                     f"Invalid secretAlias '{secret_alias}'. Must contain only "
                     "alphanumeric characters, underscores, and hyphens."
                 )
-            
+
             # Check for duplicate aliases (each alias must be unique to avoid env var conflicts)
             if secret_alias in seen_aliases:
                 raise InvalidArgumentValueError(
                     f"Duplicate secretAlias '{secret_alias}'. Each alias must be unique within the template."
                 )
             seen_aliases.add(secret_alias)
-            
+
             # Check for duplicate secretKey values (each key must be unique to avoid mount path conflicts)
             if secret_key in seen_secret_keys:
                 raise InvalidArgumentValueError(
@@ -1362,7 +1370,7 @@ class ConnectorTemplates(Queryable):
                     "Using the same secretKey multiple times causes conflicting mount paths in the pod."
                 )
             seen_secret_keys.add(secret_key)
-            
+
             # Track secretRef values and ensure all are the same (single Secret Provider Class)
             secret_ref_values.add(secret_ref)
             if len(secret_ref_values) > 1:
@@ -1371,7 +1379,7 @@ class ConnectorTemplates(Queryable):
                     f"Found multiple values: {', '.join(sorted(secret_ref_values))}. "
                     "All secrets must reference the same Kubernetes secret created by the Secret Provider Class."
                 )
-            
+
             parsed_secrets.append(
                 {
                     "secretRef": secret_ref,
@@ -1383,9 +1391,9 @@ class ConnectorTemplates(Queryable):
 
     def _parse_storage_volumes(self, volumes_list: List[str]) -> List[dict]:
         """Parse storage volumes from CLI argument format to structured format.
-        
+
         Expected format: claimName=myPVC mountPath=/data
-        
+
         Returns persistent volume claim references matching API schema:
         {
             "claimName": "str",  # Name of the PersistentVolumeClaim
@@ -1397,7 +1405,7 @@ class ConnectorTemplates(Queryable):
 
         parsed_volumes = []
         for volume_str in volumes_list:
-            # Handle case where user wrapped everything in quotes: 
+            # Handle case where user wrapped everything in quotes:
             # "claimName=x mountPath=y" becomes a single string
             # We need to split it by spaces to get individual key=value pairs
             if isinstance(volume_str, str) and ' ' in volume_str and '=' in volume_str:
@@ -1405,11 +1413,11 @@ class ConnectorTemplates(Queryable):
                 volume_parts = volume_str.split()
             else:
                 volume_parts = [volume_str] if isinstance(volume_str, str) else volume_str
-            
+
             volume_dict = assemble_nargs_to_dict(volume_parts)
             claim_name = volume_dict.get("claimName", "").strip()
             mount_path = volume_dict.get("mountPath", "").strip()
-            
+
             if not claim_name:
                 raise RequiredArgumentMissingError(
                     "claimName is required for each storage volume. "
@@ -1420,7 +1428,7 @@ class ConnectorTemplates(Queryable):
                     "mountPath is required for each storage volume. "
                     "Format: claimName=myPVC mountPath=/data"
                 )
-            
+
             parsed_volumes.append(
                 {
                     "claimName": claim_name,
@@ -1428,21 +1436,21 @@ class ConnectorTemplates(Queryable):
                 }
             )
         return parsed_volumes
-    
+
     def _check_secret_sync_enabled(
         self,
         instance_name: str,
         resource_group_name: str,
     ) -> None:
         """Check if secret sync is enabled and fail if not.
-        
+
         Secrets require secret sync to be enabled on the instance. This method
         validates that the instance has a defaultSecretProviderClassRef configured.
-        
+
         Args:
             instance_name: Name of the IoT Operations instance
             resource_group_name: Resource group name
-            
+
         Raises:
             ValidationError: If secret sync is not enabled on the instance
         """
@@ -1451,10 +1459,10 @@ class ConnectorTemplates(Queryable):
                 instance_name=instance_name,
                 resource_group_name=resource_group_name,
             )
-            
+
             # Instance is returned as a dict
             default_spc_ref = instance.get("properties", {}).get("defaultSecretProviderClassRef")
-            
+
             if not default_spc_ref:
                 raise ValidationError(
                     f"Secrets cannot be configured because secret sync is not enabled on instance '{instance_name}'. "

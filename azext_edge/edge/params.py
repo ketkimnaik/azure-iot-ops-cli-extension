@@ -1690,7 +1690,8 @@ def load_iotops_arguments(self, _):
             "                3rd-party connectors:\n"
             "                - <registry>.azurecr.io/<path>-metadata:<version>\n\n"
             "                To list available versions for 1st-party connectors:\n"
-            "                curl https://mcr.microsoft.com/v2/azureiotoperations/akri-connectors/<type>-metadata/tags/list",
+            "                curl https://mcr.microsoft.com/v2/azureiotoperations/"
+            "akri-connectors/<type>-metadata/tags/list",
         )
         context.argument(
             "replicas",

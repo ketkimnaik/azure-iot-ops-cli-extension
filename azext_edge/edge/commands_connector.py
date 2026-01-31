@@ -4,7 +4,7 @@
 # Licensed under the MIT License. See License file in the project root for license information.
 # ----------------------------------------------------------------------------------------------
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 from .providers.orchestration.resources.connector.opcua.certs import (
     OPCUA_CLIENT_CERT_SECRET_SYNC_NAME,
     OPCUA_ISSUER_LIST_SECRET_SYNC_NAME,

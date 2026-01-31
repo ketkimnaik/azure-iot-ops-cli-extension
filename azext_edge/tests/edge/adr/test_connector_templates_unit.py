@@ -545,7 +545,7 @@ class TestExtractTemplateSummary:
             replicas=3,
         )
         summary = provider._extract_template_summary(template)
-        
+
         assert summary["name"] == "test-template"
         assert summary["connectorType"] == "Microsoft.Http"
         assert summary["version"] == "1.0"
@@ -558,7 +558,7 @@ class TestExtractTemplateSummary:
         provider = ConnectorTemplates(mocked_cmd)
         template = {"name": "test", "properties": {}}
         summary = provider._extract_template_summary(template)
-        
+
         assert summary["name"] == "test"
         assert summary["connectorType"] == ""
         assert summary["version"] == ""
@@ -603,11 +603,11 @@ class TestBuildTemplateProperties:
         provider = ConnectorTemplates(mocked_cmd)
         metadata = get_sample_metadata()
         metadata_ref = "mcr.microsoft.com/test/connector-metadata:1.0.0"
-        
+
         properties = provider._build_template_properties(
             metadata=metadata,
             connector_metadata_ref=metadata_ref,
-            
+
             replicas=3,
             log_level="debug",
             image_pull_policy="Always",
@@ -619,10 +619,10 @@ class TestBuildTemplateProperties:
             connector_config=None,
             trust_settings_secret_ref=None,
         )
-        
+
         assert properties["connectorMetadataRef"] == metadata_ref
         assert properties["diagnostics"]["logs"]["level"] == "debug"
-        
+
         managed_config = properties["runtimeConfiguration"]["managedConfigurationSettings"]
         image_config = managed_config["imageConfigurationSettings"]
         assert image_config["replicas"] == 3
@@ -633,7 +633,7 @@ class TestBuildTemplateProperties:
         provider = ConnectorTemplates(mocked_cmd)
         metadata = get_sample_metadata()
         metadata_ref = "myacr.azurecr.io/test/connector-metadata:1.0.0"
-        
+
         properties = provider._build_template_properties(
             metadata=metadata,
             connector_metadata_ref=metadata_ref,
@@ -648,11 +648,11 @@ class TestBuildTemplateProperties:
             connector_config=None,
             trust_settings_secret_ref=None,
         )
-        
+
         managed_config = properties["runtimeConfiguration"]["managedConfigurationSettings"]
         image_config = managed_config["imageConfigurationSettings"]
         registry_settings = image_config["registrySettings"]
-        
+
         assert registry_settings["registrySettingsType"] == "ContainerRegistry"
         assert registry_settings["containerRegistrySettings"]["registry"] == "myacr.azurecr.io"
 
@@ -660,11 +660,11 @@ class TestBuildTemplateProperties:
         provider = ConnectorTemplates(mocked_cmd)
         metadata = get_sample_metadata()
         metadata_ref = "mcr.microsoft.com/test/connector-metadata:1.0.0"
-        
+
         properties = provider._build_template_properties(
             metadata=metadata,
             connector_metadata_ref=metadata_ref,
-            
+
             replicas=None,
             log_level=None,
             image_pull_policy=None,
@@ -676,11 +676,11 @@ class TestBuildTemplateProperties:
             connector_config=None,
             trust_settings_secret_ref=None,
         )
-        
+
         managed_config = properties["runtimeConfiguration"]["managedConfigurationSettings"]
         image_config = managed_config["imageConfigurationSettings"]
         registry_settings = image_config["registrySettings"]
-        
+
         assert registry_settings["registrySettingsType"] == "ContainerRegistry"
         pull_secrets = registry_settings["containerRegistrySettings"]["imagePullSecrets"]
         assert len(pull_secrets) == 2
@@ -689,12 +689,12 @@ class TestBuildTemplateProperties:
     def test_invalid_image_pull_policy_fails(self, mocked_cmd, mocked_get_iotops_mgmt_client):
         provider = ConnectorTemplates(mocked_cmd)
         metadata = get_sample_metadata()
-        
+
         with pytest.raises(InvalidArgumentValueError) as exc:
             provider._build_template_properties(
                 metadata=metadata,
                 connector_metadata_ref="mcr.microsoft.com/test/connector-metadata:1.0.0",
-                
+
                 replicas=None,
                 log_level=None,
                 image_pull_policy="InvalidPolicy",
@@ -711,11 +711,11 @@ class TestBuildTemplateProperties:
     def test_image_pull_policy_case_insensitive(self, mocked_cmd, mocked_get_iotops_mgmt_client):
         provider = ConnectorTemplates(mocked_cmd)
         metadata = get_sample_metadata()
-        
+
         properties = provider._build_template_properties(
             metadata=metadata,
             connector_metadata_ref="mcr.microsoft.com/test/connector-metadata:1.0.0",
-            
+
             replicas=None,
             log_level=None,
             image_pull_policy="always",  # lowercase
@@ -727,7 +727,7 @@ class TestBuildTemplateProperties:
             connector_config=None,
             trust_settings_secret_ref=None,
         )
-        
+
         managed_config = properties["runtimeConfiguration"]["managedConfigurationSettings"]
         image_config = managed_config["imageConfigurationSettings"]
         assert image_config["imagePullPolicy"] == "Always"  # normalized
@@ -735,12 +735,12 @@ class TestBuildTemplateProperties:
     def test_invalid_allocation_policy_fails(self, mocked_cmd, mocked_get_iotops_mgmt_client):
         provider = ConnectorTemplates(mocked_cmd)
         metadata = get_sample_metadata()
-        
+
         with pytest.raises(InvalidArgumentValueError) as exc:
             provider._build_template_properties(
                 metadata=metadata,
                 connector_metadata_ref="mcr.microsoft.com/test/connector-metadata:1.0.0",
-                
+
                 replicas=None,
                 log_level=None,
                 image_pull_policy=None,
@@ -757,11 +757,11 @@ class TestBuildTemplateProperties:
     def test_with_connector_config(self, mocked_cmd, mocked_get_iotops_mgmt_client):
         provider = ConnectorTemplates(mocked_cmd)
         metadata = get_sample_metadata()
-        
+
         properties = provider._build_template_properties(
             metadata=metadata,
             connector_metadata_ref="mcr.microsoft.com/test/connector-metadata:1.0.0",
-            
+
             replicas=None,
             log_level=None,
             image_pull_policy=None,
@@ -773,7 +773,7 @@ class TestBuildTemplateProperties:
             connector_config=["key1=value1", "key2=value2"],
             trust_settings_secret_ref=None,
         )
-        
+
         managed_config = properties["runtimeConfiguration"]["managedConfigurationSettings"]
         assert "additionalConfiguration" in managed_config
         assert managed_config["additionalConfiguration"]["key1"] == "value1"
@@ -782,11 +782,11 @@ class TestBuildTemplateProperties:
     def test_with_trust_settings(self, mocked_cmd, mocked_get_iotops_mgmt_client):
         provider = ConnectorTemplates(mocked_cmd)
         metadata = get_sample_metadata()
-        
+
         properties = provider._build_template_properties(
             metadata=metadata,
             connector_metadata_ref="mcr.microsoft.com/test/connector-metadata:1.0.0",
-            
+
             replicas=None,
             log_level=None,
             image_pull_policy=None,
@@ -798,7 +798,7 @@ class TestBuildTemplateProperties:
             connector_config=None,
             trust_settings_secret_ref="my-trust-secret",
         )
-        
+
         managed_config = properties["runtimeConfiguration"]["managedConfigurationSettings"]
         assert managed_config["trustSettings"]["trustListSecretRef"] == "my-trust-secret"
 
@@ -806,11 +806,11 @@ class TestBuildTemplateProperties:
         provider = ConnectorTemplates(mocked_cmd)
         metadata = get_sample_metadata()
         metadata["recommendedReplicas"] = 5
-        
+
         properties = provider._build_template_properties(
             metadata=metadata,
             connector_metadata_ref="mcr.microsoft.com/test/connector-metadata:1.0.0",
-            
+
             replicas=None,  # Not specified
             log_level=None,
             image_pull_policy=None,
@@ -822,7 +822,7 @@ class TestBuildTemplateProperties:
             connector_config=None,
             trust_settings_secret_ref=None,
         )
-        
+
         managed_config = properties["runtimeConfiguration"]["managedConfigurationSettings"]
         image_config = managed_config["imageConfigurationSettings"]
         assert image_config["replicas"] == 5
@@ -830,11 +830,11 @@ class TestBuildTemplateProperties:
     def test_default_log_level(self, mocked_cmd, mocked_get_iotops_mgmt_client):
         provider = ConnectorTemplates(mocked_cmd)
         metadata = get_sample_metadata()
-        
+
         properties = provider._build_template_properties(
             metadata=metadata,
             connector_metadata_ref="mcr.microsoft.com/test/connector-metadata:1.0.0",
-            
+
             replicas=None,
             log_level=None,  # Not specified
             image_pull_policy=None,
@@ -846,7 +846,7 @@ class TestBuildTemplateProperties:
             connector_config=None,
             trust_settings_secret_ref=None,
         )
-        
+
         assert properties["diagnostics"]["logs"]["level"] == DEFAULT_LOG_LEVEL
 
 
@@ -889,7 +889,7 @@ def test_connector_template_create(
         resource_group=resource_group,
         instance_name=instance_name,
     )
-    
+
     mocked_wait_for_terminal_state.return_value = mock_template_record
 
     result = create_connector_template(
@@ -921,7 +921,7 @@ def test_connector_template_show(
         resource_group=resource_group,
         instance_name=instance_name,
     )
-    
+
     # Mock the get operation
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = mock_template_record
 
@@ -957,13 +957,13 @@ def test_connector_template_delete(
         resource_group=resource_group,
         instance_name=instance_name,
     )
-    
+
     # Mock get (for existence check)
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = mock_template_record
-    
+
     # Mock should_continue_prompt to return True
     mocked_should_continue_prompt.return_value = True
-    
+
     mocked_wait_for_terminal_state.return_value = None
 
     result = delete_connector_template(
@@ -974,6 +974,7 @@ def test_connector_template_delete(
         confirm_yes=True,
     )
 
+    assert result is None
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.begin_delete.assert_called_once()
 
 
@@ -992,7 +993,7 @@ def test_connector_template_delete_bails_on_no_confirm(
         resource_group=resource_group,
         instance_name=instance_name,
     )
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = mock_template_record
     mocked_should_continue_prompt.return_value = False
 
@@ -1026,8 +1027,9 @@ def test_connector_template_list(
         )
         for i in range(3)
     ]
-    
-    mocked_get_iotops_mgmt_client.return_value.akri_connector_template.list_by_instance_resource.return_value = mock_templates
+
+    mgmt_client = mocked_get_iotops_mgmt_client.return_value
+    mgmt_client.akri_connector_template.list_by_instance_resource.return_value = mock_templates
 
     result = list_connector_templates(
         cmd=mocked_cmd,
@@ -1064,9 +1066,9 @@ def test_connector_template_update(
         resource_group=resource_group,
         instance_name=instance_name,
     )
-    
+
     updated_template = deepcopy(existing_template)
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
     mocked_wait_for_terminal_state.return_value = updated_template
 
@@ -1101,7 +1103,7 @@ def test_connector_template_update_clears_secrets(
     existing_template["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]["secrets"] = [
         {"secretRef": "old", "secretKey": "key", "secretAlias": "alias"}
     ]
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
     mocked_wait_for_terminal_state.return_value = existing_template
 
@@ -1112,6 +1114,8 @@ def test_connector_template_update_clears_secrets(
         instance=instance_name,
         secrets=[""],  # Clear signal
     )
+
+    assert result == existing_template
 
     # Verify secrets were removed
     call_args = mocked_get_iotops_mgmt_client.return_value.akri_connector_template.begin_create_or_update.call_args
@@ -1137,10 +1141,10 @@ def test_connector_template_update_version_upgrade(
         instance_name=instance_name,
         version="1.0.0",
     )
-    
+
     new_metadata = get_sample_metadata(version="1.0.1")
     mocked_fetch_connector_metadata.return_value = new_metadata
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
     mocked_wait_for_terminal_state.return_value = existing_template
 
@@ -1152,6 +1156,7 @@ def test_connector_template_update_version_upgrade(
         connector_metadata_ref="mcr.microsoft.com/test/connector-metadata:1.0.1",
     )
 
+    assert result == existing_template
     mocked_fetch_connector_metadata.assert_called_once()
 
 
@@ -1171,10 +1176,10 @@ def test_connector_template_update_major_version_fails(
         instance_name=instance_name,
         version="1.0.0",
     )
-    
+
     new_metadata = get_sample_metadata(version="2.0.0")
     mocked_fetch_connector_metadata.return_value = new_metadata
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
 
     with pytest.raises(ValidationError) as exc:
@@ -1185,7 +1190,7 @@ def test_connector_template_update_major_version_fails(
             instance=instance_name,
             connector_metadata_ref="mcr.microsoft.com/test/connector-metadata:2.0.0",
         )
-    
+
     assert "major version" in str(exc.value).lower()
 
 
@@ -1205,11 +1210,11 @@ def test_connector_template_update_endpoint_type_mismatch_fails(
         instance_name=instance_name,
         endpoint_type="Microsoft.Http",
     )
-    
+
     new_metadata = get_sample_metadata(endpoint_type="Microsoft.Mqtt")
     new_metadata["version"] = "1.0.1"
     mocked_fetch_connector_metadata.return_value = new_metadata
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
 
     with pytest.raises(ValidationError) as exc:
@@ -1220,7 +1225,7 @@ def test_connector_template_update_endpoint_type_mismatch_fails(
             instance=instance_name,
             connector_metadata_ref="mcr.microsoft.com/test/connector-metadata:1.0.1",
         )
-    
+
     assert "endpoint type mismatch" in str(exc.value).lower()
 
 
@@ -1244,7 +1249,7 @@ def test_connector_template_update_with_allocation_policy(
         resource_group=resource_group,
         instance_name=instance_name,
     )
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
     mocked_wait_for_terminal_state.return_value = existing_template
 
@@ -1281,7 +1286,7 @@ def test_connector_template_update_invalid_allocation_policy(
         resource_group=resource_group,
         instance_name=instance_name,
     )
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
 
     with pytest.raises(InvalidArgumentValueError) as exc:
@@ -1292,7 +1297,7 @@ def test_connector_template_update_invalid_allocation_policy(
             instance=instance_name,
             allocation_policy="InvalidPolicy",
         )
-    
+
     assert "allocation policy" in str(exc.value).lower()
 
 
@@ -1312,14 +1317,15 @@ def test_connector_template_update_clears_image_pull_secrets(
         instance_name=instance_name,
     )
     # Add existing image pull secrets
-    existing_template["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]["imageConfigurationSettings"]["registrySettings"] = {
+    managed_config = existing_template["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]
+    managed_config["imageConfigurationSettings"]["registrySettings"] = {
         "registrySettingsType": "ContainerRegistry",
         "containerRegistrySettings": {
             "registry": "mcr.microsoft.com",
             "imagePullSecrets": [{"secretRef": "old-secret"}]
         }
     }
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
     mocked_wait_for_terminal_state.return_value = existing_template
 
@@ -1336,7 +1342,8 @@ def test_connector_template_update_clears_image_pull_secrets(
     # Verify image pull secrets were cleared
     call_args = mocked_get_iotops_mgmt_client.return_value.akri_connector_template.begin_create_or_update.call_args
     resource = call_args.kwargs["resource"]
-    image_config = resource["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]["imageConfigurationSettings"]
+    managed_settings = resource["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]
+    image_config = managed_settings["imageConfigurationSettings"]
     assert "imagePullSecrets" not in image_config.get("registrySettings", {}).get("containerRegistrySettings", {})
 
 
@@ -1355,7 +1362,7 @@ def test_connector_template_update_with_storage_volumes(
         resource_group=resource_group,
         instance_name=instance_name,
     )
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
     mocked_wait_for_terminal_state.return_value = existing_template
 
@@ -1394,10 +1401,11 @@ def test_connector_template_update_clears_storage_volumes(
         instance_name=instance_name,
     )
     # Add existing storage volumes
-    existing_template["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]["persistentVolumeClaims"] = [
+    managed_config = existing_template["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]
+    managed_config["persistentVolumeClaims"] = [
         {"claimName": "old-pvc", "mountPath": "/old-data"}
     ]
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
     mocked_wait_for_terminal_state.return_value = existing_template
 
@@ -1437,7 +1445,7 @@ def test_connector_template_update_clears_trust_settings(
     existing_template["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]["trustSettings"] = {
         "trustListSecretRef": "old-trust-secret"
     }
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
     mocked_wait_for_terminal_state.return_value = existing_template
 
@@ -1474,10 +1482,11 @@ def test_connector_template_update_clears_connector_config(
         instance_name=instance_name,
     )
     # Add existing additional configuration
-    existing_template["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]["additionalConfiguration"] = {
+    managed_config = existing_template["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]
+    managed_config["additionalConfiguration"] = {
         "oldKey": "oldValue"
     }
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
     mocked_wait_for_terminal_state.return_value = existing_template
 
@@ -1513,7 +1522,7 @@ def test_connector_template_update_with_new_image_pull_secrets(
         resource_group=resource_group,
         instance_name=instance_name,
     )
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
     mocked_wait_for_terminal_state.return_value = existing_template
 
@@ -1528,7 +1537,8 @@ def test_connector_template_update_with_new_image_pull_secrets(
     assert result == existing_template
     call_args = mocked_get_iotops_mgmt_client.return_value.akri_connector_template.begin_create_or_update.call_args
     resource = call_args.kwargs["resource"]
-    image_config = resource["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]["imageConfigurationSettings"]
+    managed_settings = resource["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]
+    image_config = managed_settings["imageConfigurationSettings"]
     pull_secrets = image_config["registrySettings"]["containerRegistrySettings"]["imagePullSecrets"]
     assert len(pull_secrets) == 2
     assert pull_secrets[0]["secretRef"] == "new-secret-1"
@@ -1552,13 +1562,13 @@ def test_connector_template_update_with_metadata_digest(
         instance_name=instance_name,
         version="1.0.0",
     )
-    
+
     new_metadata = get_sample_metadata(version="1.0.1")
     # Replace tag with digest
     del new_metadata["imageConfigurationSettings"]["tag"]
     new_metadata["imageConfigurationSettings"]["digest"] = "sha256:abc123"
     mocked_fetch_connector_metadata.return_value = new_metadata
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
     mocked_wait_for_terminal_state.return_value = existing_template
 
@@ -1574,7 +1584,8 @@ def test_connector_template_update_with_metadata_digest(
     # Verify digest was set
     call_args = mocked_get_iotops_mgmt_client.return_value.akri_connector_template.begin_create_or_update.call_args
     resource = call_args.kwargs["resource"]
-    image_config = resource["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]["imageConfigurationSettings"]
+    managed_settings = resource["properties"]["runtimeConfiguration"]["managedConfigurationSettings"]
+    image_config = managed_settings["imageConfigurationSettings"]
     assert image_config["tagDigestSettings"]["tagDigestType"] == "Digest"
     assert image_config["tagDigestSettings"]["digest"] == "sha256:abc123"
 
@@ -1606,7 +1617,7 @@ def test_connector_template_create_with_secrets_checks_secret_sync(
             connector_metadata_ref=metadata_ref,
             secrets=[["secretRef=my-secret", "secretKey=password", "secretAlias=dbPassword"]],
         )
-    
+
     assert "secret sync" in str(exc.value).lower()
 
 
@@ -1624,7 +1635,7 @@ def test_connector_template_update_with_secrets_checks_secret_sync(
         resource_group=resource_group,
         instance_name=instance_name,
     )
-    
+
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
     # Mock instance.get to return instance without secret sync enabled
     mocked_get_iotops_mgmt_client.return_value.instance.get.return_value = {
@@ -1639,7 +1650,7 @@ def test_connector_template_update_with_secrets_checks_secret_sync(
             instance=instance_name,
             secrets=[["secretRef=my-secret", "secretKey=password", "secretAlias=dbPassword"]],
         )
-    
+
     assert "secret sync" in str(exc.value).lower()
 
 
@@ -1647,16 +1658,16 @@ def test_build_template_properties_with_secrets(mocked_cmd, mocked_get_iotops_mg
     """Test building template properties with secrets."""
     provider = ConnectorTemplates(mocked_cmd)
     metadata = get_sample_metadata()
-    
+
     # Mock instance check for secret sync
     mocked_get_iotops_mgmt_client.return_value.instance.get.return_value = {
         "properties": {"defaultSecretProviderClassRef": "my-spc"}
     }
-    
+
     properties = provider._build_template_properties(
         metadata=metadata,
         connector_metadata_ref="mcr.microsoft.com/test/connector-metadata:1.0.0",
-        
+
         replicas=None,
         log_level=None,
         image_pull_policy=None,
@@ -1668,7 +1679,7 @@ def test_build_template_properties_with_secrets(mocked_cmd, mocked_get_iotops_mg
         connector_config=None,
         trust_settings_secret_ref=None,
     )
-    
+
     managed_config = properties["runtimeConfiguration"]["managedConfigurationSettings"]
     assert "secrets" in managed_config
     assert managed_config["secrets"][0]["secretRef"] == "my-secret"
@@ -1678,11 +1689,11 @@ def test_build_template_properties_with_storage_volumes(mocked_cmd, mocked_get_i
     """Test building template properties with storage volumes."""
     provider = ConnectorTemplates(mocked_cmd)
     metadata = get_sample_metadata()
-    
+
     properties = provider._build_template_properties(
         metadata=metadata,
         connector_metadata_ref="mcr.microsoft.com/test/connector-metadata:1.0.0",
-        
+
         replicas=None,
         log_level=None,
         image_pull_policy=None,
@@ -1694,7 +1705,7 @@ def test_build_template_properties_with_storage_volumes(mocked_cmd, mocked_get_i
         connector_config=None,
         trust_settings_secret_ref=None,
     )
-    
+
     managed_config = properties["runtimeConfiguration"]["managedConfigurationSettings"]
     assert "persistentVolumeClaims" in managed_config
     assert managed_config["persistentVolumeClaims"][0]["claimName"] == "myPVC"
@@ -1708,7 +1719,7 @@ def test_parse_storage_volumes_multiple(mocked_cmd, mocked_get_iotops_mgmt_clien
         "claimName=pvc2 mountPath=/data2",
     ]
     result = provider._parse_storage_volumes(volumes)
-    
+
     assert len(result) == 2
     assert result[0]["claimName"] == "pvc1"
     assert result[0]["mountPath"] == "/data1"
