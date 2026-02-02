@@ -399,8 +399,8 @@ class TestParseSecrets:
 
     def test_empty_list_returns_empty(self, mocked_cmd, mocked_get_iotops_mgmt_client):
         provider = ConnectorTemplates(mocked_cmd)
-        assert provider._parse_secrets([]) == []
-        assert provider._parse_secrets(None) == []
+        assert not provider._parse_secrets([])
+        assert not provider._parse_secrets(None)
 
     def test_valid_secret_parsed(self, mocked_cmd, mocked_get_iotops_mgmt_client):
         provider = ConnectorTemplates(mocked_cmd)
@@ -505,8 +505,8 @@ class TestParseStorageVolumes:
 
     def test_empty_list_returns_empty(self, mocked_cmd, mocked_get_iotops_mgmt_client):
         provider = ConnectorTemplates(mocked_cmd)
-        assert provider._parse_storage_volumes([]) == []
-        assert provider._parse_storage_volumes(None) == []
+        assert not provider._parse_storage_volumes([])
+        assert not provider._parse_storage_volumes(None)
 
     def test_valid_volume_parsed(self, mocked_cmd, mocked_get_iotops_mgmt_client):
         provider = ConnectorTemplates(mocked_cmd)
