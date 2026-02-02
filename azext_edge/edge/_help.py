@@ -393,7 +393,7 @@ def load_iotops_help():
                   {
                       "method": "Custom",
                       "customSettings": {
-                          "endpoint": "https://auth-server-template",
+                          "endpoint": "`https://auth-server-template`",
                           "caCertConfigMap": "custom-auth-ca",
                           "auth": {
                               "x509": {
@@ -944,7 +944,7 @@ def load_iotops_help():
           For more information on Azure Data Lake Storage Gen2 dataflow endpoint, see
           https://aka.ms/adlsv2.
           Note: When using user assigned managed identity authentication method,
-          scope will default to 'https://storage.azure.com/.default' if not
+          scope will default to `https://storage.azure.com/.default` if not
           specified by `--scope`.
 
         examples:
@@ -2296,7 +2296,7 @@ def load_iotops_help():
             az iot ops connector template create --name custom-plc-template
             --resource-group myResourceGroup --instance myAIOInstance
             --connector-metadata-ref contoso.azurecr.io/connectors/plc-metadata:1.0.0
-            --registry-endpoint contoso-acr
+            --image-pull-secrets acr-pull-secret
     """
 
     helps[

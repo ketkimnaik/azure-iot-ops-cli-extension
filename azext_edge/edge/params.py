@@ -549,7 +549,7 @@ def load_iotops_arguments(self, _):
                 options_list=["--host"],
                 help="Host of the Azure Data Explorer is "
                 "Azure Data Explorer cluster URI. In the form "
-                "of https://cluster.region.kusto.windows.net",
+                "of `https://cluster.region.kusto.windows.net`",
             )
             context.argument(
                 "authentication_type",
@@ -1682,16 +1682,16 @@ def load_iotops_arguments(self, _):
             options_list=["--connector-metadata-ref", "--ref"],
             help="URL to connector metadata artifact from container registry.\n\n"
             "                1st-party connectors (MCR):\n"
-            "                - mcr.microsoft.com/azureiotoperations/akri-connectors/rest-metadata:<version>\n"
-            "                - mcr.microsoft.com/azureiotoperations/akri-connectors/media-metadata:<version>\n"
-            "                - mcr.microsoft.com/azureiotoperations/akri-connectors/mqtt-metadata:<version>\n"
-            "                - mcr.microsoft.com/azureiotoperations/akri-connectors/sse-metadata:<version>\n"
-            "                - mcr.microsoft.com/azureiotoperations/akri-connectors/onvif-metadata:<version>\n\n"
+            "                - `mcr.microsoft.com/azureiotoperations/akri-connectors/rest-metadata:VERSION`\n"
+            "                - `mcr.microsoft.com/azureiotoperations/akri-connectors/media-metadata:VERSION`\n"
+            "                - `mcr.microsoft.com/azureiotoperations/akri-connectors/mqtt-metadata:VERSION`\n"
+            "                - `mcr.microsoft.com/azureiotoperations/akri-connectors/sse-metadata:VERSION`\n"
+            "                - `mcr.microsoft.com/azureiotoperations/akri-connectors/onvif-metadata:VERSION`\n\n"
             "                3rd-party connectors:\n"
-            "                - <registry>.azurecr.io/<path>-metadata:<version>\n\n"
+            "                - `REGISTRY.azurecr.io/PATH-metadata:VERSION`\n\n"
             "                To list available versions for 1st-party connectors:\n"
-            "                curl https://mcr.microsoft.com/v2/azureiotoperations/"
-            "akri-connectors/<type>-metadata/tags/list",
+            "                `curl https://mcr.microsoft.com/v2/azureiotoperations/"
+            "akri-connectors/TYPE-metadata/tags/list`",
         )
         context.argument(
             "replicas",
