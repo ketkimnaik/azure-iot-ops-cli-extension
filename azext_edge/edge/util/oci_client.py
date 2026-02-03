@@ -366,6 +366,15 @@ class OciRegistryClient:
 
         tenant_id = (cmd.cli_ctx.data or {}).get("tenant_id")
         if not tenant_id:
+            # Fallback to getting tenant from the subscription profile
+            from azext_edge.edge.util.az_client import get_tenant_id
+
+            try:
+                tenant_id = get_tenant_id()
+            except Exception as ex:  # pragma: no cover - profile access failures
+                logger.warning(f"Failed to get tenant ID from profile: {ex}")
+
+        if not tenant_id:
             logger.warning("Tenant ID not found in CLI context; cannot acquire ACR token.")
             return None
 

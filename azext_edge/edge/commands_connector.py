@@ -11,7 +11,7 @@ from .providers.orchestration.resources.connector.opcua.certs import (
     OPCUA_TRUST_LIST_SECRET_SYNC_NAME,
     OpcUACerts,
 )
-from .providers.adr.connector_templates import ConnectorTemplates
+from .providers.orchestration.resources.connector_templates import ConnectorTemplates
 
 
 def add_connector_opcua_trust(

@@ -13,11 +13,13 @@ ACR for 3rd-party connectors), automatically populating connector-specific confi
 while allowing user customization of deployment parameters.
 """
 
+import io
 import json
 import os
 import re
-import requests
-import subprocess
+import shutil
+import tarfile
+import tempfile
 from typing import TYPE_CHECKING, List, Optional
 
 from azure.cli.core.azclierror import (
@@ -30,16 +32,18 @@ from azure.cli.core.azclierror import (
 from knack.log import get_logger
 from rich.console import Console
 
-from ...util import assemble_nargs_to_dict
-from ...util.common import should_continue_prompt
-from ...util.az_client import (
+from ....util import assemble_nargs_to_dict
+from ....util.common import should_continue_prompt
+from ....util.az_client import (
     get_iotops_mgmt_client,
     wait_for_terminal_state,
 )
-from ...util.queryable import Queryable
+from ....util.oci_client import get_oci_client
+from ....util.queryable import Queryable
+from .instances import Instances
 
 if TYPE_CHECKING:
-    from ...vendor.clients.iotopsmgmt.operations import (
+    from ....vendor.clients.iotopsmgmt.operations import (
         AkriConnectorTemplateOperations,
     )
 
@@ -64,6 +68,7 @@ class ConnectorTemplates(Queryable):
         self.ops: "AkriConnectorTemplateOperations" = (
             self.iotops_mgmt_client.akri_connector_template
         )
+        self.instances = Instances(cmd=cmd)
 
     def create(
         self,
@@ -112,7 +117,7 @@ class ConnectorTemplates(Queryable):
         self._validate_metadata(metadata, connector_metadata_ref)
 
         # Get extended location for the instance
-        from .helpers import get_extended_location
+        from ...adr.helpers import get_extended_location
 
         extended_location = get_extended_location(
             cmd=self.cmd,
@@ -647,116 +652,9 @@ class ConnectorTemplates(Queryable):
                 "This field is required to specify the connector image path."
             )
 
-    def _get_acr_access_token(self, registry: str) -> str:
-        """
-        Get ACR access token for authentication using Azure AD token exchange.
-
-        Args:
-            registry: Registry hostname (e.g., myregistry.azurecr.io)
-
-        Returns:
-            str: Access token for ACR
-        """
-        import requests
-
-        try:
-            # Extract ACR name from hostname
-            acr_name = registry.split('.')[0]
-
-            logger.info("Getting ACR access token for: %s", acr_name)
-
-            # Get Azure AD token for ACR resource
-            logger.debug("Getting Azure AD token for ACR")
-            result = subprocess.run(
-                ["az", "account", "get-access-token", "--resource", "https://containerregistry.azure.net"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False
-            )
-
-            if result.returncode != 0:
-                error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-                raise CLIInternalError(f"Failed to get Azure AD token: {error_msg}")
-
-            # Parse the token
-            token_data = json.loads(result.stdout)
-            aad_token = token_data.get("accessToken")
-            if not aad_token:
-                raise CLIInternalError("Azure AD token response did not contain access token")
-
-            logger.debug("Successfully obtained Azure AD token, exchanging for ACR token")
-
-            # Exchange AAD token for ACR refresh token
-            exchange_url = f"https://{registry}/oauth2/exchange"
-            exchange_data = {
-                "grant_type": "access_token",
-                "service": registry,
-                "access_token": aad_token
-            }
-
-            logger.debug(f"Exchanging token at {exchange_url}")
-            exchange_response = requests.post(
-                exchange_url,
-                data=exchange_data,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=30
-            )
-
-            if exchange_response.status_code != 200:
-                raise CLIInternalError(
-                    f"Token exchange failed with status {exchange_response.status_code}: {exchange_response.text}"
-                )
-
-            refresh_token = exchange_response.json().get("refresh_token")
-            if not refresh_token:
-                raise CLIInternalError("Token exchange response did not contain refresh token")
-
-            logger.debug("Successfully exchanged for ACR refresh token, getting access token")
-
-            # Exchange refresh token for access token with repository scope
-            token_url = f"https://{registry}/oauth2/token"
-            token_data = {
-                "grant_type": "refresh_token",
-                "service": registry,
-                "refresh_token": refresh_token,
-                "scope": "repository:*:pull"
-            }
-
-            logger.debug(f"Getting access token from {token_url}")
-            token_response = requests.post(
-                token_url,
-                data=token_data,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=30
-            )
-
-            if token_response.status_code != 200:
-                raise CLIInternalError(
-                    f"Failed to get access token with status {token_response.status_code}: {token_response.text}"
-                )
-
-            access_token = token_response.json().get("access_token")
-            if not access_token:
-                raise CLIInternalError("Token response did not contain access token")
-
-            logger.debug("Successfully obtained ACR access token")
-            return access_token
-
-        except subprocess.TimeoutExpired:
-            raise CLIInternalError("ACR authentication timed out after 30 seconds")
-        except requests.RequestException as e:
-            raise CLIInternalError(f"ACR token exchange request failed: {str(e)}")
-        except requests.exceptions.RequestException as e:
-            raise CLIInternalError(f"Failed to exchange ACR token: {str(e)}")
-        except json.JSONDecodeError as e:
-            raise CLIInternalError(f"Failed to parse ACR token response: {str(e)}")
-        except Exception as e:
-            raise CLIInternalError(f"Failed to authenticate with ACR: {str(e)}")
-
     def _fetch_connector_metadata(self, metadata_ref: str) -> dict:
         """
-        Fetch connector metadata from the registry using REST API.
+        Fetch connector metadata from the registry using OciRegistryClient.
 
         Handles both public registries (MCR) and private registries (ACR).
         For MCR (1st-party connectors): Uses anonymous access
@@ -791,176 +689,102 @@ class ConnectorTemplates(Queryable):
         logger.info(f"Fetching connector metadata from: {metadata_ref}")
 
         try:
-            # Parse the metadata reference
-            # Format: registry/repository:tag
-            image_path, tag = metadata_ref.rsplit(":", 1)
-            registry = image_path.split("/")[0]
-            is_acr = ".azurecr.io" in registry
-            is_mcr = registry.startswith("mcr.microsoft.com")
+            # Use OciRegistryClient to fetch the first layer (metadata blob)
+            oci_client = get_oci_client()
+            artifact_info = oci_client.fetch_first_layer(
+                image_ref=metadata_ref,
+                cmd=self.cmd,
+            )
 
-            logger.debug(f"Registry: {registry}, MCR: {is_mcr}, ACR: {is_acr}")
+            # Extract metadata from the blob content
+            return self._parse_metadata_blob(artifact_info.content, metadata_ref)
 
-            # Use REST API for all registries (ACR with auth, MCR without auth)
-            return self._fetch_metadata_from_registry(metadata_ref, registry, image_path, tag, is_acr)
-
-        except (ValidationError, InvalidArgumentValueError, CLIInternalError):
-            # Re-raise known errors
+        except ValidationError:
+            # Re-raise validation errors from OciRegistryClient
             raise
         except Exception as e:
+            if isinstance(e, (ValidationError, InvalidArgumentValueError, CLIInternalError)):
+                raise
             logger.error(f"Unexpected error fetching metadata: {str(e)}")
             raise CLIInternalError(
                 f"Failed to fetch connector metadata from {metadata_ref}: {str(e)}"
             )
 
-    def _fetch_metadata_from_registry(  # noqa: C901
-        self, metadata_ref: str, registry: str, image_path: str, tag: str, is_acr: bool
-    ) -> dict:
+    def _parse_metadata_blob(self, blob_content: bytes, metadata_ref: str) -> dict:
         """
-        Fetch metadata from container registry using REST API.
-        Uses Azure AD authentication for ACR, no auth for public registries like MCR.
+        Parse connector metadata from blob content.
+
+        Handles multiple formats:
+        - Direct JSON content
+        - tar.gz archive containing connector-metadata.json
+        - tar archive containing connector-metadata.json
 
         Args:
-            metadata_ref: Full metadata reference
-            registry: Registry hostname
-            image_path: Image path without tag
-            tag: Image tag
-            is_acr: Whether this is an Azure Container Registry
+            blob_content: Raw blob content from registry
+            metadata_ref: Original metadata reference (for error messages)
 
         Returns:
             dict: Parsed connector metadata JSON
         """
-        import tempfile
-        import shutil
-        import tarfile
-        import io
+        logger.debug(f"Parsing metadata blob, size: {len(blob_content)} bytes")
 
-        logger.info(f"Fetching metadata from registry: {metadata_ref}")
+        # First, check if it's already a JSON file
+        try:
+            metadata = json.loads(blob_content.decode('utf-8'))
+            if "name" in metadata:
+                logger.info(f"Blob is already JSON metadata for connector: {metadata.get('name')}")
+                return metadata
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+
+        # Try to extract from tar archive
+        temp_dir = tempfile.mkdtemp(prefix="akri_metadata_")
 
         try:
-            # Extract repository path (everything except registry and tag)
-            repository = image_path.replace(registry + "/", "")
-
-            logger.debug(f"Repository: {repository}, Tag: {tag}")
-
-            # Prepare headers
-            headers = {
-                "Accept": "application/vnd.oci.image.manifest.v1+json"
-            }
-
-            # For ACR, get access token and add to headers
-            if is_acr:
-                access_token = self._get_acr_access_token(registry)
-                headers["Authorization"] = f"Bearer {access_token}"
-
-            # Get manifest from registry
-            manifest_url = f"https://{registry}/v2/{repository}/manifests/{tag}"
-
-            logger.debug(f"Fetching manifest from: {manifest_url}")
-            manifest_response = requests.get(manifest_url, headers=headers, timeout=30)
-
-            logger.debug(f"Manifest response status: {manifest_response.status_code}")
-            if manifest_response.status_code == 401:
-                logger.debug(f"401 response body: {manifest_response.text}")
-
-            if manifest_response.status_code == 404:
-                raise ResourceNotFoundError(
-                    f"Metadata artifact not found: {metadata_ref}. "
-                    "Make sure the connector metadata has been pushed to the registry."
-                )
-            elif manifest_response.status_code == 401:
-                registry_type = "ACR" if is_acr else "registry"
-                raise ValidationError(
-                    f"Authentication failed for {registry_type}: {registry}. "
-                    "Check your credentials and registry access permissions."
-                )
-
-            manifest_response.raise_for_status()
-            manifest = manifest_response.json()
-
-            # Get the blob digest (typically the first/only layer)
-            if "layers" not in manifest or not manifest["layers"]:
-                raise CLIInternalError(f"No layers found in manifest for {metadata_ref}")
-
-            blob_digest = manifest["layers"][0]["digest"]
-            logger.debug(f"Blob digest: {blob_digest}")
-
-            # Download the blob
-            blob_url = f"https://{registry}/v2/{repository}/blobs/{blob_digest}"
-            logger.debug(f"Downloading blob from: {blob_url}")
-
-            blob_response = requests.get(blob_url, headers=headers, timeout=60)
-            blob_response.raise_for_status()
-
-            # Extract metadata from the blob
-            temp_dir = tempfile.mkdtemp(prefix="akri_metadata_")
-
+            # Try to extract as tar.gz
             try:
-                # Try to extract as tar.gz, then as plain tar, then check if it's already JSON
-                blob_content = blob_response.content
-                logger.debug(f"Blob size: {len(blob_content)} bytes")
-
-                # First, check if it's already a JSON file
+                logger.debug("Attempting to extract as tar.gz")
+                with tarfile.open(fileobj=io.BytesIO(blob_content), mode="r:gz") as tar:
+                    tar.extractall(temp_dir)
+            except (tarfile.ReadError, OSError):
+                # Try as plain tar
                 try:
-                    metadata = json.loads(blob_content.decode('utf-8'))
-                    if "name" in metadata:
-                        logger.info(f"Blob is already JSON metadata for connector: {metadata.get('name')}")
-                        return metadata
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    pass
-
-                # Try to extract as tar.gz
-                try:
-                    logger.debug("Attempting to extract as tar.gz")
-                    with tarfile.open(fileobj=io.BytesIO(blob_content), mode="r:gz") as tar:
+                    logger.debug("tar.gz failed, attempting to extract as plain tar")
+                    with tarfile.open(fileobj=io.BytesIO(blob_content), mode="r") as tar:
                         tar.extractall(temp_dir)
-                except (tarfile.ReadError, OSError):
-                    # Try as plain tar
-                    try:
-                        logger.debug("tar.gz failed, attempting to extract as plain tar")
-                        with tarfile.open(fileobj=io.BytesIO(blob_content), mode="r") as tar:
-                            tar.extractall(temp_dir)
-                    except (tarfile.ReadError, OSError) as e:
-                        raise CLIInternalError(
-                            f"Failed to extract artifact from {metadata_ref}. "
-                            f"The blob format is not recognized (not JSON, tar, or tar.gz): {str(e)}"
-                        )
-
-                # Find connector-metadata.json
-                metadata_file = None
-                for root, _dirs, files in os.walk(temp_dir):
-                    for file in files:
-                        if file == "connector-metadata.json":
-                            metadata_file = os.path.join(root, file)
-                            break
-                    if metadata_file:
-                        break
-
-                if not metadata_file:
+                except (tarfile.ReadError, OSError) as e:
                     raise CLIInternalError(
-                        f"Could not find connector-metadata.json in artifact from {metadata_ref}"
+                        f"Failed to extract artifact from {metadata_ref}. "
+                        f"The blob format is not recognized (not JSON, tar, or tar.gz): {str(e)}"
                     )
 
-                # Read and parse metadata
-                logger.debug(f"Reading metadata from {metadata_file}")
-                with open(metadata_file, 'r', encoding='utf-8') as f:
-                    metadata = json.load(f)
+            # Find connector-metadata.json
+            metadata_file = None
+            for root, _dirs, files in os.walk(temp_dir):
+                for file in files:
+                    if file == "connector-metadata.json":
+                        metadata_file = os.path.join(root, file)
+                        break
+                if metadata_file:
+                    break
 
-                logger.info(f"Successfully fetched metadata for connector: {metadata.get('name', 'unknown')}")
-                return metadata
+            if not metadata_file:
+                raise CLIInternalError(
+                    f"Could not find connector-metadata.json in artifact from {metadata_ref}"
+                )
 
-            finally:
-                # Clean up
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir)
+            # Read and parse metadata
+            logger.debug(f"Reading metadata from {metadata_file}")
+            with open(metadata_file, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
 
-        except requests.exceptions.RequestException as e:
-            raise CLIInternalError(f"Failed to fetch metadata from registry: {str(e)}")
-        except Exception as e:
-            if isinstance(e, (ValidationError, ResourceNotFoundError, CLIInternalError)):
-                raise
-            raise CLIInternalError(
-                f"Failed to fetch connector metadata from {metadata_ref}: {str(e)}"
-            )
+            logger.info(f"Successfully fetched metadata for connector: {metadata.get('name', 'unknown')}")
+            return metadata
+
+        finally:
+            # Clean up
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
 
     def _split_image_reference(self, metadata_ref: str) -> tuple:
         """Split image reference into registry and image name.
@@ -1012,29 +836,19 @@ class ConnectorTemplates(Queryable):
         - Major updates: 1.0.6 -> 2.0.0
         - Downgrades: 1.0.6 -> 1.0.5
         """
+        from ....util.machinery import scoped_semver_import
+
         try:
-            current_parts = [int(x) for x in current_version.split(".")]
-            new_parts = [int(x) for x in new_version.split(".")]
-
-            # Ensure we have at least major.minor.patch
-            while len(current_parts) < 3:
-                current_parts.append(0)
-            while len(new_parts) < 3:
-                new_parts.append(0)
-
-            current_major, current_minor, current_patch = current_parts[:3]
-            new_major, new_minor, new_patch = new_parts[:3]
+            semver = scoped_semver_import()
+            current_semver = semver.parse(current_version)
+            new_semver = semver.parse(new_version)
 
             # Block major version changes
-            if new_major != current_major:
+            if new_semver.major != current_semver.major:
                 return False
 
             # Block downgrades (but allow same version for re-applying metadata ref)
-            if (new_major, new_minor, new_patch) < (
-                current_major,
-                current_minor,
-                current_patch,
-            ):
+            if new_semver < current_semver:
                 return False
 
             return True
@@ -1454,28 +1268,8 @@ class ConnectorTemplates(Queryable):
         Raises:
             ValidationError: If secret sync is not enabled on the instance
         """
-        try:
-            instance = self.iotops_mgmt_client.instance.get(
-                instance_name=instance_name,
-                resource_group_name=resource_group_name,
-            )
-
-            # Instance is returned as a dict
-            default_spc_ref = instance.get("properties", {}).get("defaultSecretProviderClassRef")
-
-            if not default_spc_ref:
-                raise ValidationError(
-                    f"Secrets cannot be configured because secret sync is not enabled on instance '{instance_name}'. "
-                    "Enable secret sync first using: az iot ops secretsync enable "
-                    f"--instance {instance_name} --resource-group {resource_group_name} "
-                    "--mi-user-assigned <MI_RESOURCE_ID> --kv-resource-id <KEYVAULT_RESOURCE_ID>"
-                )
-        except ValidationError:
-            # Re-raise validation errors
-            raise
-        except Exception as e:
-            # If we can't check, fail safely - assume secret sync is required
-            raise ValidationError(
-                f"Unable to verify secret sync configuration for instance '{instance_name}'. "
-                f"Error: {str(e)}. Ensure secret sync is enabled before configuring secrets."
-            )
+        # get_default_spc raises ValidationError if secret sync is not enabled
+        self.instances.get_default_spc(
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+        )

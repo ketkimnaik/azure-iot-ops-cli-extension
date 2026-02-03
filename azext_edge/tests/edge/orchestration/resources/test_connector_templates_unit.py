@@ -16,6 +16,7 @@ from azure.cli.core.azclierror import (
     RequiredArgumentMissingError,
     ValidationError,
 )
+from azext_edge.edge.util.az_client import parse_resource_id
 from azext_edge.edge.commands_connector import (
     create_connector_template,
     update_connector_template,
@@ -23,16 +24,16 @@ from azext_edge.edge.commands_connector import (
     delete_connector_template,
     list_connector_templates,
 )
-from azext_edge.edge.providers.adr.connector_templates import (
+from azext_edge.edge.providers.orchestration.resources.connector_templates import (
     ConnectorTemplates,
     DEFAULT_LOG_LEVEL,
 )
 
-from ...generators import generate_random_string, get_zeroed_subscription
+from ....generators import generate_random_string, get_zeroed_subscription
 
 
 # Path for mocking
-CONNECTOR_TEMPLATES_PATH = "azext_edge.edge.providers.adr.connector_templates"
+CONNECTOR_TEMPLATES_PATH = "azext_edge.edge.providers.orchestration.resources.connector_templates"
 
 
 # =====================
@@ -47,6 +48,27 @@ def mocked_get_resource_client(mocker):
         "azext_edge.edge.util.queryable.get_resource_client",
     )
     yield patched
+
+
+@pytest.fixture()
+def mocked_get_extended_location(mocker):
+    """Mock get_extended_location to prevent actual API calls."""
+    result = {
+        "type": "CustomLocation",
+        "name": generate_random_string(),
+        "cluster_location": generate_random_string(),
+        "namespace": parse_resource_id(
+            f"/subscriptions/{get_zeroed_subscription()}/resourceGroups/{generate_random_string()}"
+            f"/providers/Microsoft.DeviceRegistry/namespaces/{generate_random_string()}"
+        )
+    }
+    mock = mocker.patch(
+        "azext_edge.edge.providers.adr.helpers.get_extended_location",
+        return_value=result,
+        autospec=True
+    )
+    mock.original_return_value = deepcopy(result)
+    yield mock
 
 
 @pytest.fixture()
@@ -106,6 +128,17 @@ def mocked_should_continue_prompt(mocker):
         return_value=True,
     )
     yield mock
+
+
+@pytest.fixture()
+def mocked_instances(mocker, mocked_get_resource_client):
+    """Mock the Instances class for secret sync validation."""
+    mock_instances = mocker.MagicMock()
+    mocker.patch(
+        f"{CONNECTOR_TEMPLATES_PATH}.Instances",
+        return_value=mock_instances,
+    )
+    yield mock_instances
 
 
 # =====================
@@ -333,10 +366,11 @@ class TestIsValidVersionUpgrade:
         provider = ConnectorTemplates(mocked_cmd)
         assert provider._is_valid_version_upgrade("1.0.6", "1.0.6") is True
 
-    def test_short_versions(self, mocked_cmd, mocked_get_iotops_mgmt_client):
+    def test_short_versions_rejected(self, mocked_cmd, mocked_get_iotops_mgmt_client):
         provider = ConnectorTemplates(mocked_cmd)
-        # Versions with missing patch should work
-        assert provider._is_valid_version_upgrade("1.0", "1.1") is True
+        # Versions must be in full semver format (major.minor.patch)
+        assert provider._is_valid_version_upgrade("1.0", "1.1") is False
+        assert provider._is_valid_version_upgrade("1", "2") is False
 
     def test_invalid_version_format(self, mocked_cmd, mocked_get_iotops_mgmt_client):
         provider = ConnectorTemplates(mocked_cmd)
@@ -1596,6 +1630,7 @@ def test_connector_template_create_with_secrets_checks_secret_sync(
     mocked_get_iotops_mgmt_client,
     mocked_fetch_connector_metadata,
     mocked_wait_for_terminal_state,
+    mocked_instances,
 ):
     """Test that creating with secrets validates secret sync is enabled."""
     template_name = generate_random_string()
@@ -1603,10 +1638,8 @@ def test_connector_template_create_with_secrets_checks_secret_sync(
     instance_name = generate_random_string()
     metadata_ref = "mcr.microsoft.com/test/connector-metadata:1.0.0"
 
-    # Mock instance.get to return instance without secret sync enabled
-    mocked_get_iotops_mgmt_client.return_value.instance.get.return_value = {
-        "properties": {}  # No defaultSecretProviderClassRef
-    }
+    # Mock get_default_spc to raise ValidationError (secret sync not enabled)
+    mocked_instances.get_default_spc.side_effect = ValidationError("Secret sync not enabled.")
 
     with pytest.raises(ValidationError) as exc:
         create_connector_template(
@@ -1624,6 +1657,7 @@ def test_connector_template_create_with_secrets_checks_secret_sync(
 def test_connector_template_update_with_secrets_checks_secret_sync(
     mocked_cmd,
     mocked_get_iotops_mgmt_client,
+    mocked_instances,
 ):
     """Test that updating with secrets validates secret sync is enabled."""
     template_name = generate_random_string()
@@ -1637,10 +1671,8 @@ def test_connector_template_update_with_secrets_checks_secret_sync(
     )
 
     mocked_get_iotops_mgmt_client.return_value.akri_connector_template.get.return_value = existing_template
-    # Mock instance.get to return instance without secret sync enabled
-    mocked_get_iotops_mgmt_client.return_value.instance.get.return_value = {
-        "properties": {}  # No defaultSecretProviderClassRef
-    }
+    # Mock get_default_spc to raise ValidationError (secret sync not enabled)
+    mocked_instances.get_default_spc.side_effect = ValidationError("Secret sync not enabled.")
 
     with pytest.raises(ValidationError) as exc:
         update_connector_template(
@@ -1654,15 +1686,13 @@ def test_connector_template_update_with_secrets_checks_secret_sync(
     assert "secret sync" in str(exc.value).lower()
 
 
-def test_build_template_properties_with_secrets(mocked_cmd, mocked_get_iotops_mgmt_client):
+def test_build_template_properties_with_secrets(mocked_cmd, mocked_get_iotops_mgmt_client, mocked_instances):
     """Test building template properties with secrets."""
     provider = ConnectorTemplates(mocked_cmd)
     metadata = get_sample_metadata()
 
-    # Mock instance check for secret sync
-    mocked_get_iotops_mgmt_client.return_value.instance.get.return_value = {
-        "properties": {"defaultSecretProviderClassRef": "my-spc"}
-    }
+    # Mock get_default_spc to succeed (secret sync is enabled)
+    mocked_instances.get_default_spc.return_value = {"name": "my-spc"}
 
     properties = provider._build_template_properties(
         metadata=metadata,
