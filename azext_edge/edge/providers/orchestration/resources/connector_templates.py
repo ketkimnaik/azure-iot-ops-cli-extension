@@ -34,10 +34,7 @@ from rich.console import Console
 
 from ....util import assemble_nargs_to_dict
 from ....util.common import should_continue_prompt
-from ....util.az_client import (
-    get_iotops_mgmt_client,
-    wait_for_terminal_state,
-)
+from ....util.az_client import wait_for_terminal_state
 from ....util.oci_client import get_oci_client
 from ....util.queryable import Queryable
 from .instances import Instances
@@ -62,13 +59,11 @@ class ConnectorTemplates(Queryable):
 
     def __init__(self, cmd):
         super().__init__(cmd=cmd)
-        self.iotops_mgmt_client = get_iotops_mgmt_client(
-            subscription_id=self.default_subscription_id
-        )
+        self.instances = Instances(cmd=cmd)
+        self.iotops_mgmt_client = self.instances.iotops_mgmt_client
         self.ops: "AkriConnectorTemplateOperations" = (
             self.iotops_mgmt_client.akri_connector_template
         )
-        self.instances = Instances(cmd=cmd)
 
     def create(
         self,

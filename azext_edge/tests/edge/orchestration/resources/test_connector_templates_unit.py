@@ -72,13 +72,11 @@ def mocked_get_extended_location(mocker):
 
 
 @pytest.fixture()
-def mocked_get_iotops_mgmt_client(mocker, mocked_get_resource_client):
-    """Mock the IoT Operations management client."""
-    mock_client = mocker.MagicMock()
-    mock = mocker.patch(
-        f"{CONNECTOR_TEMPLATES_PATH}.get_iotops_mgmt_client",
-        return_value=mock_client,
-    )
+def mocked_get_iotops_mgmt_client(mocker, mocked_get_resource_client, mocked_instances):
+    """Mock the IoT Operations management client via Instances."""
+    # Return a mock that exposes the iotops_mgmt_client from mocked_instances
+    mock = mocker.MagicMock()
+    mock.return_value = mocked_instances.iotops_mgmt_client
     yield mock
 
 
@@ -132,8 +130,10 @@ def mocked_should_continue_prompt(mocker):
 
 @pytest.fixture()
 def mocked_instances(mocker, mocked_get_resource_client):
-    """Mock the Instances class for secret sync validation."""
+    """Mock the Instances class for secret sync validation and iotops_mgmt_client."""
     mock_instances = mocker.MagicMock()
+    # Set up a mock iotops_mgmt_client on the instances mock
+    mock_instances.iotops_mgmt_client = mocker.MagicMock()
     mocker.patch(
         f"{CONNECTOR_TEMPLATES_PATH}.Instances",
         return_value=mock_instances,

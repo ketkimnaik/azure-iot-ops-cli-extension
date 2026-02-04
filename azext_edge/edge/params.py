@@ -1772,12 +1772,6 @@ def load_iotops_arguments(self, _):
             "--cc brokerAddress=mqtt://broker:1883 --cc qos=1 --cc keepAlive=60. "
             "Use '' to clear existing configurations.",
         )
-        context.argument(
-            "confirm_yes",
-            options_list=["--yes", "-y"],
-            arg_type=get_three_state_flag(),
-            help="Skip confirmation prompts.",
-        )
 
     with self.argument_context("iot ops connector opcua") as context:
         context.argument(
