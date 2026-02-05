@@ -207,7 +207,6 @@ def create_connector_template(
     connector_config: Optional[List[str]] = None,
     trust_settings_secret_ref: Optional[str] = None,
 ) -> dict:
-    """Create a new connector template."""
     return ConnectorTemplates(cmd).create(
         template_name=name,
         resource_group_name=resource_group,
@@ -243,7 +242,6 @@ def update_connector_template(
     connector_config: Optional[List[str]] = None,
     trust_settings_secret_ref: Optional[str] = None,
 ) -> dict:
-    """Update an existing connector template."""
     return ConnectorTemplates(cmd).update(
         template_name=name,
         resource_group_name=resource_group,
@@ -268,7 +266,6 @@ def show_connector_template(
     resource_group: str,
     instance: str,
 ) -> dict:
-    """Display a connector template."""
     return ConnectorTemplates(cmd).show(
         template_name=name,
         resource_group_name=resource_group,
@@ -283,7 +280,6 @@ def delete_connector_template(
     instance: str,
     confirm_yes: Optional[bool] = False,
 ) -> dict:
-    """Delete a connector template."""
     return ConnectorTemplates(cmd).delete(
         template_name=name,
         resource_group_name=resource_group,
@@ -297,7 +293,6 @@ def list_connector_templates(
     resource_group: str,
     instance: str,
 ) -> List[dict]:
-    """List all connector templates."""
     return ConnectorTemplates(cmd).list(
         resource_group_name=resource_group,
         instance_name=instance,

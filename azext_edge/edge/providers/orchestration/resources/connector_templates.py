@@ -348,26 +348,15 @@ class ConnectorTemplates(Queryable):
             # Handle bucket size for Bucketized policy
             current_policy = allocation_dict.get("policy", "")
             if current_policy == "Bucketized" or (allocation_policy is not None and allocation_policy == "Bucketized"):
-                # Use provided bucket size or prompt for it
+                # Use provided bucket size or fail if missing
                 final_bucket_size = bucket_size
 
                 if final_bucket_size is None and allocation_policy is not None:
-                    # Only prompt if we're setting/changing to Bucketized
-                    from knack.prompting import prompt
-                    try:
-                        bucket_size_input = prompt(
-                            "Allocation policy is 'Bucketized' but bucket size not specified. "
-                            "Enter bucket size (number of endpoints per connector instance): "
-                        )
-                        final_bucket_size = int(bucket_size_input)
-                        if final_bucket_size <= 0:
-                            raise ValueError("Bucket size must be a positive integer")
-                    except (ValueError, KeyboardInterrupt) as e:
-                        raise RequiredArgumentMissingError(
-                            "Bucket size is required when allocation policy is 'Bucketized'. "
-                            "Provide it via --bucket-size parameter or when prompted. "
-                            f"Error: {str(e)}"
-                        )
+                    # Bucket size is required when setting allocation policy to Bucketized
+                    raise RequiredArgumentMissingError(
+                        "Bucket size is required when allocation policy is 'Bucketized'. "
+                        "Provide it via --bucket-size parameter."
+                    )
 
                 if final_bucket_size is not None:
                     allocation_dict["bucketSize"] = final_bucket_size
@@ -977,28 +966,14 @@ class ConnectorTemplates(Queryable):
 
             # Add bucketSize if policy is Bucketized
             if allocation_policy == "Bucketized":
-                # Use user-provided bucket size or prompt for it
-                final_bucket_size = bucket_size
+                if bucket_size is None:
+                    # Bucket size is required when allocation policy is Bucketized
+                    raise RequiredArgumentMissingError(
+                        "Bucket size is required when allocation policy is 'Bucketized'. "
+                        "Provide it via --bucket-size parameter."
+                    )
 
-                if final_bucket_size is None:
-                    # Prompt user for bucket size
-                    from knack.prompting import prompt
-                    try:
-                        bucket_size_input = prompt(
-                            "Allocation policy is 'Bucketized' but bucket size not specified. "
-                            "Enter bucket size (number of endpoints per connector instance): "
-                        )
-                        final_bucket_size = int(bucket_size_input)
-                        if final_bucket_size <= 0:
-                            raise ValueError("Bucket size must be a positive integer")
-                    except (ValueError, KeyboardInterrupt) as e:
-                        raise RequiredArgumentMissingError(
-                            "Bucket size is required when allocation policy is 'Bucketized'. "
-                            "Provide it via --bucket-size parameter or when prompted. "
-                            f"Error: {str(e)}"
-                        )
-
-                allocation_dict["bucketSize"] = final_bucket_size
+                allocation_dict["bucketSize"] = bucket_size
 
         if allocation_dict:
             managed_config["allocation"] = allocation_dict

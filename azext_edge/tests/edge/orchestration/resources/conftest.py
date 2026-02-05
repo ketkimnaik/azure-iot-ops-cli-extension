@@ -12,7 +12,6 @@ import pytest
 import requests
 
 from ....generators import generate_random_string, get_zeroed_subscription
-from ....helpers import run
 from azext_edge.edge.util.az_client import DEFAULT_IOTOPS_MGMT_API_VERSION, DeviceRegistryMgmtApiVersion
 
 ZEROED_SUBSCRIPTION = get_zeroed_subscription()
@@ -194,16 +193,3 @@ def append_role_assignment_endpoint(
 
 def echo_callback(request: requests.PreparedRequest) -> tuple[int, dict, Optional[dict]]:
     return (200, {"Content-Type": "application/json"}, request.body)
-
-
-@pytest.fixture()
-def require_init(init_setup):
-    # get the custom location used for tests.
-    if not all([init_setup.get("instanceName"), init_setup.get("resourceGroup")]):
-        pytest.skip("Cannot run this test without knowing the instance information.")
-
-    cluster_result = run(
-        f"az iot ops show -n {init_setup['instanceName']} -g {init_setup['resourceGroup']} "
-    )
-    init_setup["customLocationId"] = cluster_result["extendedLocation"]["name"]
-    yield init_setup

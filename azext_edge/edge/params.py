@@ -1698,7 +1698,7 @@ def load_iotops_arguments(self, _):
             options_list=["--replicas", "-r"],
             type=int,
             help="Number of connector pod replicas to deploy. "
-            "Default is taken from recommendedReplicas in metadata (default: 1).",
+            "Default is taken from recommendedReplicas in metadata, or 1 if not specified.",
         )
         context.argument(
             "log_level",
@@ -1729,8 +1729,8 @@ def load_iotops_arguments(self, _):
             "bucket_size",
             options_list=["--bucket-size", "--bs"],
             type=int,
-            help="Number of endpoints per connector instance bucket (required when allocation policy is 'Bucketized'). "
-            "If not provided, you will be prompted to enter a value.",
+            help="Number of endpoints per connector instance bucket. "
+            "Required when allocation policy is 'Bucketized'.",
         )
         context.argument(
             "secrets",
