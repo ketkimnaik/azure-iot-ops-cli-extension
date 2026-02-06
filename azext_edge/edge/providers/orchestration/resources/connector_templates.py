@@ -689,7 +689,7 @@ class ConnectorTemplates(Queryable):
         except Exception as e:
             if isinstance(e, (ValidationError, InvalidArgumentValueError, CLIInternalError)):
                 raise
-            logger.error(f"Unexpected error fetching metadata: {str(e)}")
+            logger.debug(f"Unexpected error fetching metadata: {str(e)}")
             raise CLIInternalError(
                 f"Failed to fetch connector metadata from {metadata_ref}: {str(e)}"
             )
