@@ -32,6 +32,7 @@ from azure.cli.core.azclierror import (
 from knack.log import get_logger
 from rich.console import Console
 
+from .....constants import DEFAULT_REGISTRY_HOST
 from ....util import assemble_nargs_to_dict
 from ....util.common import should_continue_prompt
 from ....util.az_client import wait_for_terminal_state
@@ -52,6 +53,98 @@ DEFAULT_LOG_LEVEL = "info"
 # Valid enum values
 VALID_IMAGE_PULL_POLICIES = ["Always", "IfNotPresent", "Never"]
 VALID_ALLOCATION_POLICIES = ["Bucketized"]
+
+
+def get_endpoint_version_from_template(
+    cmd,
+    instance_name: str,
+    instance_resource_group: str,
+    endpoint_type: str,
+    is_custom_command: bool = False,
+) -> Optional[str]:
+    """
+    Returns the endpoint version from a connector template if one exists for the endpoint type.
+
+    Looks up connector templates for the specified instance and returns the version
+    from the matching template's deviceInboundEndpointTypes. Returns None if no
+    matching template exists (e.g., for 3rd-party connectors without templates).
+
+    For 1P commands (opcua, rest, mqtt, etc.), only MCR templates are considered.
+    For custom commands (is_custom_command=True), only non-MCR (3P) templates are considered.
+
+    Args:
+        cmd: Azure CLI command context.
+        instance_name: IoT Operations instance name.
+        instance_resource_group: Resource group containing the instance.
+        endpoint_type: The device endpoint type (e.g., "Microsoft.OpcUa").
+        is_custom_command: If True, this is the 'custom' command which should look for 3P templates.
+                           If False, this is a 1P command (rest, opcua, etc.) which should look for MCR templates.
+
+    Returns:
+        The endpoint version string if found in a connector template, None otherwise.
+    """
+    from azure.cli.core.commands.client_factory import get_subscription_id
+    from ....util.az_client import get_iotops_mgmt_client
+
+    # Custom command always looks for 3P templates, 1P commands look for MCR templates
+    look_for_mcr = not is_custom_command
+
+    try:
+        iotops_client = get_iotops_mgmt_client(
+            subscription_id=get_subscription_id(cli_ctx=cmd.cli_ctx),
+        )
+
+        connector_templates = list(
+            iotops_client.akri_connector_template.list_by_instance_resource(
+                resource_group_name=instance_resource_group,
+                instance_name=instance_name,
+            )
+        )
+
+        for template in connector_templates:
+            template_name = template.get("name")
+            properties = template.get("properties", {})
+            connector_metadata_ref = properties.get("connectorMetadataRef", "")
+            device_endpoint_types = properties.get("deviceInboundEndpointTypes", [])
+
+            # Filter templates based on whether we're looking for 1P (MCR) or 3P (non-MCR)
+            is_mcr_template = connector_metadata_ref.startswith(DEFAULT_REGISTRY_HOST)
+            if look_for_mcr and not is_mcr_template:
+                continue
+            if not look_for_mcr and is_mcr_template:
+                continue
+
+            for endpoint_type_info in device_endpoint_types:
+                et = endpoint_type_info.get("endpointType")
+
+                # Match endpoint type (case-insensitive)
+                if et and et.lower() == endpoint_type.lower():
+                    # First check if version is in the endpoint type info
+                    ev = endpoint_type_info.get("version")
+
+                    # If not, get version from tagDigestSettings.tag
+                    if not ev:
+                        runtime_config = properties.get("runtimeConfiguration", {})
+                        managed_config = runtime_config.get("managedConfigurationSettings", {})
+                        image_config = managed_config.get("imageConfigurationSettings", {})
+                        tag_settings = image_config.get("tagDigestSettings", {})
+                        ev = tag_settings.get("tag")
+
+                    logger.info(
+                        f"Found endpoint version '{ev}' from connector template "
+                        f"'{template_name}' for endpoint type '{endpoint_type}'"
+                    )
+                    return ev
+
+        logger.info(
+            f"No connector template found for endpoint type '{endpoint_type}'. "
+            "Endpoint version will be None."
+        )
+        return None
+
+    except Exception as e:
+        logger.warning(f"Failed to retrieve connector templates: {e}. Endpoint version will be None.")
+        return None
 
 
 class ConnectorTemplates(Queryable):
