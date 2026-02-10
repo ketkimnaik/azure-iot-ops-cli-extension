@@ -22,7 +22,7 @@ from rich.progress import (
 )
 from rich.table import Table, box
 
-from ....constants import DEFAULT_REGISTRY_HOST
+from .common import DEFAULT_REGISTRY_HOST
 from ...util import parse_kvp_nargs, should_continue_prompt
 from ...util.machinery import scoped_semver_import
 from .common import (

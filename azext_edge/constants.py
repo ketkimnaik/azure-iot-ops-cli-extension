@@ -12,4 +12,3 @@ EXTENSION_NAME = "azure-iot-ops"
 EXTENSION_ROOT = os.path.dirname(os.path.abspath(__file__))
 USER_AGENT = "IotOperationsCliExtension/{}".format(VERSION)
 AIO_RELEASE = "2602"
-DEFAULT_REGISTRY_HOST = "mcr.microsoft.com"

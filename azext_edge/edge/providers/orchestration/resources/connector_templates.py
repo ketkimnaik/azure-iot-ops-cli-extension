@@ -32,7 +32,7 @@ from azure.cli.core.azclierror import (
 from knack.log import get_logger
 from rich.console import Console
 
-from .....constants import DEFAULT_REGISTRY_HOST
+from ..common import DEFAULT_REGISTRY_HOST
 from ....util import assemble_nargs_to_dict
 from ....util.common import should_continue_prompt
 from ....util.az_client import wait_for_terminal_state
