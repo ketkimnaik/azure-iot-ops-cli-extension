@@ -20,7 +20,7 @@ from ...util.az_client import (
 from ...util.common import parse_kvp_nargs, should_continue_prompt
 from ...util.id_tools import parse_resource_id
 from ...util.queryable import Queryable
-from ..orchestration.resources.connector_templates import get_endpoint_version_from_template
+from ..orchestration.resources.connector_templates import ConnectorTemplates
 
 if TYPE_CHECKING:
     from ...vendor.clients.deviceregistrymgmt.operations import (
@@ -325,8 +325,8 @@ class NamespaceDevices(Queryable):
 
         # Set version from connector template if not provided by user
         if endpoint_version is None:
-            endpoint_version = get_endpoint_version_from_template(
-                cmd=self.cmd,
+            connector_templates = ConnectorTemplates(cmd=self.cmd)
+            endpoint_version = connector_templates.get_endpoint_version_for_type(
                 instance_name=instance_name,
                 instance_resource_group=instance_resource_group,
                 endpoint_type=endpoint_type,

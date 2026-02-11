@@ -101,14 +101,16 @@ def mocked_get_namespace_for_instance(mocker):
 @pytest.fixture()
 def mocked_get_endpoint_version_from_template(mocker):
     """
-    Mock get_endpoint_version_from_template to return None by default.
-    This prevents the function from making API calls during unit tests.
+    Mock ConnectorTemplates to return None from get_endpoint_version_for_type by default.
+    This prevents the class from making API calls during unit tests.
     """
     mock = mocker.patch(
-        "azext_edge.edge.providers.adr.namespace_devices.get_endpoint_version_from_template",
-        return_value=None
+        "azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates"
     )
-    yield mock
+    # Configure the mock instance's get_endpoint_version_for_type method
+    mock.return_value.get_endpoint_version_for_type.return_value = None
+    # Yield the method mock so tests can configure return values
+    yield mock.return_value.get_endpoint_version_for_type
 
 
 def get_asset_id(
