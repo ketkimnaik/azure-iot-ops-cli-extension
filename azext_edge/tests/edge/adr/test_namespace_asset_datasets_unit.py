@@ -153,7 +153,7 @@ def test_add_namespace_asset_dataset(
         "name": dataset_name,
         "dataPoints": []
     }
-    if data_source is not None:
+    if data_source:
         expected_dataset["dataSource"] = data_source
 
     config_params = deepcopy(config_params)
@@ -299,7 +299,7 @@ def test_add_namespace_asset_dataset(
     # Find our dataset in the list
     added_dataset = next((d for d in datasets if d["name"] == dataset_name), None)
     assert added_dataset is not None, "Added dataset not found in the list of datasets"
-    if data_source is not None:
+    if data_source:
         assert added_dataset["dataSource"] == data_source
     else:
         assert "dataSource" not in added_dataset

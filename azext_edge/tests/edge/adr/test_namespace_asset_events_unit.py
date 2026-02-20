@@ -284,7 +284,7 @@ def test_add_namespace_asset_event_group(
     # Find our event in the list
     added_group = next((e for e in groups if e["name"] == group_name), None)
     assert added_group is not None, "Added event group not found in the list of event groups"
-    if data_source is not None:
+    if data_source:
         assert added_group["dataSource"] == data_source
     else:
         assert "dataSource" not in added_group
@@ -1003,7 +1003,7 @@ def test_add_namespace_asset_event_group_event(
     expected_event = {
         "name": event_name,
     }
-    if data_source is not None:
+    if data_source:
         expected_event["dataSource"] = data_source
 
     # Add configuration based on asset type
@@ -1091,7 +1091,7 @@ def test_add_namespace_asset_event_group_event(
     # check the added datapoint
     patched_event = next((p for p in patch_group["events"] if p["name"] == event_name), None)
     assert patched_event is not None, f"Data point '{event_name}' not found in PATCH request"
-    if data_source is not None:
+    if data_source:
         assert patched_event["dataSource"] == data_source
     else:
         assert "dataSource" not in patched_event

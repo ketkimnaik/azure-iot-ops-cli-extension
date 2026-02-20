@@ -275,7 +275,7 @@ def test_add_namespace_asset_management_group(
 
     # Verify management group properties
     assert added_group["name"] == group_name
-    if data_source is not None:
+    if data_source:
         assert added_group["dataSource"] == data_source
     else:
         assert "dataSource" not in added_group

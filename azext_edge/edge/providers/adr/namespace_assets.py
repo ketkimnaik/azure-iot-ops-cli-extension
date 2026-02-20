@@ -428,7 +428,7 @@ class NamespaceAssets(Queryable):
             "dataPoints": [],  # TODO: future pr, add datapoints
             "typeRef": type_ref
         }
-        if data_source is not None:
+        if data_source:
             new_dataset["dataSource"] = data_source
 
         # Validate the dataset configuration against connector metadata
@@ -794,7 +794,7 @@ class NamespaceAssets(Queryable):
             "events": [],
             "typeRef": type_ref
         }
-        if data_source is not None:
+        if data_source:
             new_eg["dataSource"] = data_source
         new_egs.append(new_eg)
 
@@ -1307,7 +1307,7 @@ class NamespaceAssets(Queryable):
             "typeRef": type_ref,
             "actions": []  # TODO: future, add actions in add_management_group
         }
-        if data_source is not None:
+        if data_source:
             new_mgmt_group["dataSource"] = data_source
         remaining_mgmt_groups.append(new_mgmt_group)
         update_payload = {
@@ -1835,7 +1835,7 @@ def _create_event(
     event = {
         "name": event_name,
     }
-    if data_source is not None:
+    if data_source:
         event["dataSource"] = data_source
     if type_ref:
         event["typeRef"] = type_ref
