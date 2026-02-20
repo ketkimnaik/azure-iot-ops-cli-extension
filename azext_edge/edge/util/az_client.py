@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from ..vendor.clients.resourcehealthmgmt import MicrosoftResourceHealth
     from ..vendor.clients.secretsyncmgmt import MicrosoftSecretSyncController
     from ..vendor.clients.storagemgmt import StorageManagementClient
+    from ..vendor.clients.eventgridmgmt import EventGridManagementClient
 
 
 # TODO @digimaun - simplify client init pattern. Consider multi-profile vs static API client.
@@ -138,6 +139,20 @@ def get_storage_mgmt_client(subscription_id: str, **kwargs) -> "StorageManagemen
     )
 
 
+def get_eventgrid_mgmt_client(subscription_id: str, **kwargs) -> "EventGridManagementClient":
+    from ..vendor.clients.eventgridmgmt import EventGridManagementClient
+
+    if "http_logging_policy" not in kwargs:
+        kwargs["http_logging_policy"] = get_default_logging_policy()
+
+    return EventGridManagementClient(
+        credential=AZURE_CLI_CREDENTIAL,
+        subscription_id=subscription_id,
+        user_agent_policy=UserAgentPolicy(user_agent=USER_AGENT),
+        **kwargs,
+    )
+
+
 class DeviceRegistryMgmtApiVersion(Enum):
     V20251001 = "2025-10-01"
     V20250701_preview = "2025-07-01-preview"
@@ -170,12 +185,13 @@ def get_registry_mgmt_client(
 
 
 class IoTOpsMgmtApiVersion(Enum):
+    V20260301 = "2026-03-01"
     V20251001 = "2025-10-01"
     V20250401 = "2025-04-01"
     V20241101 = "2024-11-01"
 
 
-DEFAULT_IOTOPS_MGMT_API_VERSION = IoTOpsMgmtApiVersion.V20251001
+DEFAULT_IOTOPS_MGMT_API_VERSION = IoTOpsMgmtApiVersion.V20260301
 
 
 def get_iotops_mgmt_client(
