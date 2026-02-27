@@ -57,7 +57,7 @@ def test_client_add_opcua_disabled(
         )
 
     exc_str = str(exc_info.value)
-    assert "OPC UA is disabled" in exc_str
+    assert "OPC UA connector is disabled" in exc_str
     assert instance_name in exc_str
     assert "az iot ops update" in exc_str
     assert "opcua.mode=Stable" in exc_str

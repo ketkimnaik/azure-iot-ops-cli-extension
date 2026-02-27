@@ -74,8 +74,8 @@ class OpcUACerts(Queryable):
         """Raise ValidationError if OPC UA is explicitly disabled on the instance."""
         if self.opcua_mode == "Disabled":
             raise ValidationError(
-                f"OPC UA is disabled for instance '{self.instance_name}'. "
-                "Enable it before managing OPC UA certificates:\n"
+                f"OPC UA connector is disabled for instance '{self.instance_name}'. "
+                "Enable it before managing OPC UA connector certificates:\n"
                 f"  az iot ops update -n {self.instance_name} -g {self.resource_group_name} "
                 "--feature opcua.mode=Stable"
             )
