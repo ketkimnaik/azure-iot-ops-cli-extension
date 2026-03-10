@@ -834,6 +834,13 @@ def load_adr_arguments(self, _):
             arg_type=get_three_state_flag(),
             arg_group="ONVIF Configuration",
         )
+        context.argument(
+            "fallback_to_username_token_auth",
+            options_list=["--fallback-username-token", "--fut"],
+            help="Fallback to username token authentication if more secure methods are unavailable.",
+            arg_type=get_three_state_flag(),
+            arg_group="ONVIF Configuration",
+        )
 
     with self.argument_context("iot ops ns device endpoint inbound add opcua") as context:
         context.argument(
@@ -953,6 +960,34 @@ def load_adr_arguments(self, _):
             help="Enable asset discovery after connecting to the endpoint.",
             arg_type=get_three_state_flag(),
             arg_group="Configuration",
+        )
+        context.argument(
+            "sync_properties_into_state_store",
+            options_list=["--sync-state-store", "--sss"],
+            help="Sync OPC UA properties into the state store.",
+            arg_type=get_three_state_flag(),
+            arg_group="Configuration",
+        )
+
+    with self.argument_context("iot ops ns device endpoint inbound add mqtt") as context:
+        context.argument(
+            "asset_level",
+            options_list=["--asset-level", "--al"],
+            help="Asset level for topic-based asset identification.",
+            type=int,
+            arg_group="MQTT Configuration",
+        )
+        context.argument(
+            "topic_filter",
+            options_list=["--topic-filter", "--tf"],
+            help="Topic filter for the MQTT endpoint.",
+            arg_group="MQTT Configuration",
+        )
+        context.argument(
+            "topic_mapping_prefix",
+            options_list=["--topic-mapping-prefix", "--tmp"],
+            help="Topic mapping prefix for the MQTT endpoint.",
+            arg_group="MQTT Configuration",
         )
 
     with self.argument_context("iot ops ns asset") as context:

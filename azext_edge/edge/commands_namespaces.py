@@ -268,6 +268,7 @@ def add_inbound_onvif_device_endpoint(
     endpoint_version: Optional[str] = None,
     accept_invalid_hostnames: Optional[bool] = False,
     accept_invalid_certificates: Optional[bool] = False,
+    fallback_to_username_token_auth: Optional[bool] = False,
     password_reference: Optional[str] = None,
     username_reference: Optional[str] = None,
     replace: Optional[bool] = False,
@@ -285,6 +286,7 @@ def add_inbound_onvif_device_endpoint(
         username_reference=username_reference,
         accept_invalid_hostnames=accept_invalid_hostnames,
         accept_invalid_certificates=accept_invalid_certificates,
+        fallback_to_username_token_auth=fallback_to_username_token_auth,
         replace=replace,
         **kwargs
     )
@@ -315,6 +317,7 @@ def add_inbound_opcua_device_endpoint(
     security_policy: Optional[str] = None,
     security_mode: Optional[str] = None,
     run_asset_discovery: Optional[bool] = False,
+    sync_properties_into_state_store: Optional[bool] = False,
     password_reference: Optional[str] = None,
     username_reference: Optional[str] = None,
     replace: Optional[bool] = False,
@@ -347,6 +350,7 @@ def add_inbound_opcua_device_endpoint(
         security_policy=security_policy,
         security_mode=security_mode,
         run_asset_discovery=run_asset_discovery,
+        sync_properties_into_state_store=sync_properties_into_state_store,
         replace=replace,
         **kwargs
     )
@@ -428,6 +432,9 @@ def add_inbound_mqtt_device_endpoint(
     endpoint_name: str,
     endpoint_address: str,
     endpoint_version: Optional[str] = None,
+    asset_level: Optional[int] = 1,
+    topic_filter: Optional[str] = None,
+    topic_mapping_prefix: Optional[str] = None,
     replace: Optional[bool] = False,
     **kwargs
 ):
@@ -439,6 +446,9 @@ def add_inbound_mqtt_device_endpoint(
         endpoint_type=DeviceEndpointType.MQTT.value,
         endpoint_address=endpoint_address,
         endpoint_version=endpoint_version,
+        asset_level=asset_level,
+        topic_filter=topic_filter,
+        topic_mapping_prefix=topic_mapping_prefix,
         replace=replace,
         **kwargs
     )
