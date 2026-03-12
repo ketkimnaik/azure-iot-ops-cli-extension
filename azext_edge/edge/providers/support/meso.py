@@ -29,6 +29,8 @@ MESO_NAME_LABEL = NAME_LABEL_FORMAT.format(label="microsoft-iotoperations-observ
 MESO_CLUSTER_METRICS_LABEL = NAME_LABEL_FORMAT.format(label="microsoft-iotoperations-observability-cluster-metrics")
 MESO_OPERATOR_MANAGER_FIELD_SELECTOR = RESOURCE_NAME_FIELD_FORMAT.format(name="aio-observability-operator-manager-role")
 MESO_DIRECTORY_PATH = "meso"
+# azure-iot-operations-observability-trust-bundle does not have the common label
+MESO_TRUST_BUNDLE_FIELD_SELECTOR = RESOURCE_NAME_FIELD_FORMAT.format(name="azure-iot-operations-observability-trust-bundle")
 
 # List of label selectors to iterate through for most resources
 MESO_LABEL_SELECTORS = [MESO_NAME_LABEL, MESO_CLUSTER_METRICS_LABEL]
@@ -92,6 +94,12 @@ def fetch_config_maps():
                 label_selector=label_selector,
             )
         )
+    results.extend(
+        process_config_maps(
+            directory_path=MESO_DIRECTORY_PATH,
+            field_selector=MESO_TRUST_BUNDLE_FIELD_SELECTOR,
+        )
+    )
     return results
 
 
