@@ -963,7 +963,7 @@ def load_adr_arguments(self, _):
         )
         context.argument(
             "sync_properties_into_state_store",
-            options_list=["--sync-properties-into-dss", "--spidss"],
+            options_list=["--sync-props-into-dss", "--spidss"],
             help="Sync OPC UA properties into the state store.",
             arg_type=get_three_state_flag(),
             arg_group="Configuration",
