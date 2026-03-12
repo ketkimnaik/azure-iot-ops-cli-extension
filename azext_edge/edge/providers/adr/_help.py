@@ -851,7 +851,7 @@ def load_iotops_adr_help():
 
         - name: Add an OPC UA endpoint with asset discovery and property sync to state store enabled
           text: >
-            az iot ops ns device endpoint inbound add opcua --device mydevice --instance myInstance -g myInstanceResourceGroup --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --run-asset-discovery --sync-props-into-dss true
+            az iot ops ns device endpoint inbound add opcua --device mydevice --instance myInstance -g myInstanceResourceGroup --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --run-asset-discovery --sync-props-into-dss
     """
 
     helps[
@@ -2030,11 +2030,11 @@ def load_iotops_adr_help():
             -g myInstanceResourceGroup --event-group motionEvents --name intrusion --data-source "camera.intrusion"
             --dest topic="factory/onvif/events" retain=Keep qos=Qos1 ttl=3600
 
-        - name: Replace an ONVIF event with same name
+        - name: Replace an ONVIF event with same name (all properties must be re-specified)
           text: >
             az iot ops ns asset onvif event add --asset myonvifasset --instance myInstance
-            -g myInstanceResourceGroup --event-group motionEvents --name motion --data-source "camera.motion.updated"
-            --replace
+            -g myInstanceResourceGroup --event-group motionEvents --name intrusion --data-source "camera.intrusion.v2"
+            --dest topic="factory/onvif/events" retain=Keep qos=Qos1 ttl=3600 --replace
     """
 
     helps[
