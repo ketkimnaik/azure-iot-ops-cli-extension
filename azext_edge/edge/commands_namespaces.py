@@ -1971,6 +1971,8 @@ def update_namespace_opcua_asset_event_group(
     opcua_event_publishing_interval: Optional[int] = None,
     opcua_event_queue_size: Optional[int] = None,
     opcua_event_start_instance: Optional[str] = None,
+    opcua_event_filter_type: Optional[str] = None,
+    opcua_event_filter_clauses: Optional[List[List[str]]] = None,
     **kwargs
 ) -> dict:
     return NamespaceAssets(cmd).update_event_group(
@@ -1984,6 +1986,8 @@ def update_namespace_opcua_asset_event_group(
         opcua_event_publishing_interval=opcua_event_publishing_interval,
         opcua_event_queue_size=opcua_event_queue_size,
         opcua_event_start_instance=opcua_event_start_instance,
+        opcua_event_filter_type=opcua_event_filter_type,
+        opcua_event_filter_clauses=opcua_event_filter_clauses,
         **kwargs
     )
 

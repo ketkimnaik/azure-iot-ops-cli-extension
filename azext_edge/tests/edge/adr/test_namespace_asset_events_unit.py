@@ -703,6 +703,11 @@ def test_remove_namespace_asset_event_group(
     ("opcua", update_namespace_opcua_asset_event_group, {
         "opcua_event_start_instance": "ns=2;i=4001",
     }),
+    # OPCUA asset event group with filter type and clauses
+    ("opcua", update_namespace_opcua_asset_event_group, {
+        "opcua_event_filter_type": "ns=2;i=5002",
+        "opcua_event_filter_clauses": [["path=/Severity", "type=ns=2;i=5002"]],
+    }),
     # ONVIF asset event
     ("onvif", update_namespace_onvif_asset_event_group, {}),
     # SSE asset event group (event-driven, no sampling intervals)
