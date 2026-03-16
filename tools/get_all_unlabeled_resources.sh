@@ -163,7 +163,7 @@ for keywords_pattern in "${!KEYWORD_LABEL_MAP[@]}"; do
         
         if [[ $? -eq 0 ]] && [[ -n "${all_resources}" ]]; then
             # Check each line for matching keywords
-            echo "${all_resources}" | tail -n +2 | while read -r line; do
+            while IFS= read -r line; do
                 # Extract namespace and name from the line
                 namespace=$(echo "${line}" | awk '{print $1}')
                 name=$(echo "${line}" | awk '{print $2}')
@@ -191,10 +191,10 @@ for keywords_pattern in "${!KEYWORD_LABEL_MAP[@]}"; do
                         echo -e "  ${GREEN}~ ${BOLD}${resource}${RESET}${GREEN} ${namespace}/${name} is a known exclusion (no label needed by CLI)${RESET}"
                     else
                         echo -e "  ${RED}✗ ${BOLD}${resource}${RESET}${RED} ${namespace}/${name} does NOT have label ${BOLD}app.kubernetes.io/name=${expected_label}${RESET}${RED} (current: ${label_value})${RESET}"
-                        UNLABELED_RESOURCES+=("${resource}\t${namespace}\t${name}\t${expected_label}\t${label_value}")
+                        UNLABELED_RESOURCES+=("${resource}|${namespace}|${name}|${expected_label}|${label_value}")
                     fi
                 fi
-            done
+            done < <(echo "${all_resources}" | tail -n +2)
         fi
     done
     echo ""
@@ -207,7 +207,7 @@ for keywords_pattern in "${!KEYWORD_LABEL_MAP[@]}"; do
     all_crds=$(kubectl get crd 2>/dev/null)
     
     if [[ -n "${all_crds}" ]]; then
-        echo "${all_crds}" | tail -n +2 | while read -r line; do
+        while IFS= read -r line; do
             # Extract CRD name
             crd_name=$(echo "${line}" | awk '{print $1}')
             
@@ -226,23 +226,29 @@ for keywords_pattern in "${!KEYWORD_LABEL_MAP[@]}"; do
                     echo -e "  ${GREEN}✓ ${BOLD}CRD${RESET}${GREEN} ${crd_name} has correct label ${BOLD}app.kubernetes.io/name=${label_value}${RESET}"
                 else
                     echo -e "  ${YELLOW}! ${BOLD}CRD${RESET}${YELLOW} ${crd_name} does NOT have label ${BOLD}app.kubernetes.io/name=${expected_label}${RESET}${YELLOW} (current: ${label_value}) [service team]${RESET}"
-                    CRD_DEFINITION_VIOLATIONS+=("CustomResourceDefinition\tcluster-wide\t${crd_name}\t${expected_label}\t${label_value}")
+                    CRD_DEFINITION_VIOLATIONS+=("CustomResourceDefinition|cluster-wide|${crd_name}|${expected_label}|${label_value}")
                 fi
             fi
-        done
+        done < <(echo "${all_crds}" | tail -n +2)
     fi
     echo ""
     
     # Check instances of all CRDs
     echo "Checking Custom Resource instances..."
-    kubectl get crd -o name 2>/dev/null | while read crd; do
+    while IFS= read -r crd; do
         crd_name=${crd#customresourcedefinition.apiextensions.k8s.io/}
-        
+
+        # Skip instances of AIO's own CRDs — these are user/operator configuration resources
+        # (dataflows, assets, brokers, etc.) that won't have the system label.
+        if echo "${crd_name}" | grep -qE "\.iotoperations\.azure\.com$|\.deviceregistry\.microsoft\.com$"; then
+            continue
+        fi
+
         # Get all instances of this CRD
         all_instances=$(kubectl get ${crd_name} --all-namespaces 2>/dev/null)
         
         if [[ -n "${all_instances}" ]]; then
-            echo "${all_instances}" | tail -n +2 | while read -r line; do
+            while IFS= read -r line; do
                 # Extract namespace and name
                 namespace=$(echo "${line}" | awk '{print $1}')
                 name=$(echo "${line}" | awk '{print $2}')
@@ -269,12 +275,12 @@ for keywords_pattern in "${!KEYWORD_LABEL_MAP[@]}"; do
                         echo -e "  ${GREEN}~ ${BOLD}${crd_name}${RESET}${GREEN} ${namespace}/${name} is a known exclusion (no label needed by CLI)${RESET}"
                     else
                         echo -e "  ${RED}✗ ${BOLD}${crd_name}${RESET}${RED} ${namespace}/${name} does NOT have label ${BOLD}app.kubernetes.io/name=${expected_label}${RESET}${RED} (current: ${label_value})${RESET}"
-                        UNLABELED_RESOURCES+=("${crd_name}\t${namespace}\t${name}\t${expected_label}\t${label_value}")
+                        UNLABELED_RESOURCES+=("${crd_name}|${namespace}|${name}|${expected_label}|${label_value}")
                     fi
                 fi
-            done
+            done < <(echo "${all_instances}" | tail -n +2)
         fi
-    done
+    done < <(kubectl get crd -o name 2>/dev/null)
     echo ""
     echo ""
 done
@@ -293,7 +299,7 @@ else
     echo -e "${RED}Found ${BOLD}${#UNLABELED_RESOURCES[@]}${RESET}${RED} resource(s) missing from support bundle:${RESET}"
     echo ""
     for resource in "${UNLABELED_RESOURCES[@]}"; do
-        IFS=$'\t' read -r kind namespace name expected_label current_label <<< "${resource}"
+        IFS='|' read -r kind namespace name expected_label current_label <<< "${resource}"
         echo -e "  ${BOLD}${namespace}/${name}${RESET} (${kind}) - Expected: ${BOLD}app.kubernetes.io/name=${expected_label}${RESET}, Current: ${current_label}"
     done
     echo ""
@@ -312,7 +318,7 @@ else
     echo -e "${YELLOW}Found ${BOLD}${#CRD_DEFINITION_VIOLATIONS[@]}${RESET}${YELLOW} CRD definition(s) missing the common label (service team to fix):${RESET}"
     echo ""
     for resource in "${CRD_DEFINITION_VIOLATIONS[@]}"; do
-        IFS=$'\t' read -r kind namespace name expected_label current_label <<< "${resource}"
+        IFS='|' read -r kind namespace name expected_label current_label <<< "${resource}"
         echo -e "  ${BOLD}${name}${RESET} (${kind}) - Expected: ${BOLD}app.kubernetes.io/name=${expected_label}${RESET}, Current: ${current_label}"
     done
     echo ""
