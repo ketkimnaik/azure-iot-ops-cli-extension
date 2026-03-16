@@ -988,4 +988,4 @@ def test_get_resources_grouped_by_namespace_none_or_empty(resources):
     """Regression test: when cluster returns 403, get_namespaced_pods_by_prefix returns None.
     get_resources_grouped_by_namespace must not raise AttributeError on None or []."""
     result = list(get_resources_grouped_by_namespace(resources))
-    assert result == []
+    assert not result
