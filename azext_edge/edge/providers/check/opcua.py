@@ -7,6 +7,7 @@
 from rich.padding import Padding
 from typing import Any, Dict, List
 
+from ...common import CheckTaskStatus
 from ..base import get_namespaced_pods_by_prefix
 
 from .base import (
@@ -75,6 +76,20 @@ def evaluate_core_service_runtime(
                 target_name=CoreServiceResourceKinds.RUNTIME_RESOURCE.value,
                 display=Padding("Unable to fetch pods.", (0, 0, 0, padding + 2)),
             )
+
+    if not opcua_runtime_resources:
+        no_pods_text = "No OPC UA broker pods detected."
+        check_manager.add_target(target_name=CoreServiceResourceKinds.RUNTIME_RESOURCE.value)
+        check_manager.add_target_eval(
+            target_name=CoreServiceResourceKinds.RUNTIME_RESOURCE.value,
+            status=CheckTaskStatus.skipped.value,
+            value=no_pods_text,
+        )
+        check_manager.add_display(
+            target_name=CoreServiceResourceKinds.RUNTIME_RESOURCE.value,
+            display=Padding(no_pods_text, (0, 0, 0, padding)),
+        )
+        return check_manager.as_dict(as_list)
 
     for namespace, pods in get_resources_grouped_by_namespace(opcua_runtime_resources):
         check_manager.add_target(target_name=CoreServiceResourceKinds.RUNTIME_RESOURCE.value, namespace=namespace)

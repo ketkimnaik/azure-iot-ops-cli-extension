@@ -105,3 +105,22 @@ def test_evaluate_core_service_runtime(
         target[namespace]["conditions"] = [] if not target[namespace]["conditions"] else target[namespace]["conditions"]
         assert_conditions(target[namespace], namespace_conditions)
         assert_evaluations(target[namespace], namespace_evaluations)
+
+
+def test_evaluate_core_service_runtime_no_pods(mocker):
+    """When OPC UA is disabled or not installed, no pods are found.
+    The check should return a skipped eval with an informative message instead of 0 checks."""
+    mocker.patch(
+        "azext_edge.edge.providers.check.opcua.get_namespaced_pods_by_prefix",
+        return_value=[],
+    )
+    result = evaluate_core_service_runtime()
+
+    assert result["name"] == "evalCoreServiceRuntime"
+    target = result["targets"][CoreServiceResourceKinds.RUNTIME_RESOURCE.value]
+    assert "_all_" in target
+    assert target["_all_"]["status"] == "skipped"
+    assert any(
+        "No OPC UA broker pods detected." in str(e.get("value", ""))
+        for e in target["_all_"]["evaluations"]
+    )
