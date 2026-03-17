@@ -232,56 +232,6 @@ for keywords_pattern in "${!KEYWORD_LABEL_MAP[@]}"; do
         done < <(echo "${all_crds}" | tail -n +2)
     fi
     echo ""
-    
-    # Check instances of all CRDs
-    echo "Checking Custom Resource instances..."
-    while IFS= read -r crd; do
-        crd_name=${crd#customresourcedefinition.apiextensions.k8s.io/}
-
-        # Skip instances of AIO's own CRDs — these are user/operator configuration resources
-        # (dataflows, assets, brokers, etc.) that won't have the system label.
-        if echo "${crd_name}" | grep -qE "\.iotoperations\.azure\.com$|\.deviceregistry\.microsoft\.com$"; then
-            continue
-        fi
-
-        # Get all instances of this CRD
-        all_instances=$(kubectl get ${crd_name} --all-namespaces 2>/dev/null)
-        
-        if [[ -n "${all_instances}" ]]; then
-            while IFS= read -r line; do
-                # Extract namespace and name
-                namespace=$(echo "${line}" | awk '{print $1}')
-                name=$(echo "${line}" | awk '{print $2}')
-                
-                # Skip if empty
-                if [[ -z "${namespace}" ]] || [[ -z "${name}" ]]; then
-                    continue
-                fi
-                
-                # Check if name matches any keyword in the pattern
-                if matches_keyword "${name}" "${keywords_pattern}"; then
-                    # Get labels for this instance
-                    if [[ "${namespace}" == "" ]] || [[ "${namespace}" == "<none>" ]]; then
-                        labels=$(kubectl get ${crd_name} ${name} -o jsonpath='{.metadata.labels}' 2>/dev/null)
-                    else
-                        labels=$(kubectl get ${crd_name} ${name} -n ${namespace} -o jsonpath='{.metadata.labels}' 2>/dev/null)
-                    fi
-                    
-                    label_value=$(echo "${labels}" | jq -r '.["app.kubernetes.io/name"] // "no-label"' 2>/dev/null)
-                    
-                    if is_label_valid "${name}" "${label_value}" "${expected_label}"; then
-                        echo -e "  ${GREEN}✓ ${BOLD}${crd_name}${RESET}${GREEN} ${namespace}/${name} has correct label ${BOLD}app.kubernetes.io/name=${label_value}${RESET}"
-                    elif is_excluded "${namespace}" "${name}"; then
-                        echo -e "  ${GREEN}~ ${BOLD}${crd_name}${RESET}${GREEN} ${namespace}/${name} is a known exclusion (no label needed by CLI)${RESET}"
-                    else
-                        echo -e "  ${RED}✗ ${BOLD}${crd_name}${RESET}${RED} ${namespace}/${name} does NOT have label ${BOLD}app.kubernetes.io/name=${expected_label}${RESET}${RED} (current: ${label_value})${RESET}"
-                        UNLABELED_RESOURCES+=("${crd_name}|${namespace}|${name}|${expected_label}|${label_value}")
-                    fi
-                fi
-            done < <(echo "${all_instances}" | tail -n +2)
-        fi
-    done < <(kubectl get crd -o name 2>/dev/null)
-    echo ""
     echo ""
 done
 
