@@ -133,7 +133,7 @@ def test_evaluate_core_service_runtime_no_pods(mocker):
     assert result["name"] == "evalCoreServiceRuntime"
     target = result["targets"][CoreServiceResourceKinds.RUNTIME_RESOURCE.value]
     assert "_all_" in target
-    assert target["_all_"]["status"] == "warning"
+    assert target["_all_"]["status"] == "error"
     assert any(
         "No Akri runtime pods detected." in str(e.get("value", ""))
         for e in target["_all_"]["evaluations"]

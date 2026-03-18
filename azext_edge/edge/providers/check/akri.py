@@ -73,7 +73,7 @@ def evaluate_core_service_runtime(
         check_manager.add_target(target_name=CoreServiceResourceKinds.RUNTIME_RESOURCE.value)
         check_manager.add_target_eval(
             target_name=CoreServiceResourceKinds.RUNTIME_RESOURCE.value,
-            status=CheckTaskStatus.warning.value,
+            status=CheckTaskStatus.error.value,
             value=no_pods_text,
         )
         check_manager.add_display(
