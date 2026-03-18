@@ -22,7 +22,6 @@ from .meso import MesoResourceKinds
 from .keyvault import KEYVAULT_API_V1, KeyVaultResourceKinds
 from .meta import META_ACTIVE_API, META_API_V1, META_API_V1B1, MetaResourceKinds
 from .mq import MQ_ACTIVE_API, MQTT_BROKER_API_V1, MQTT_BROKER_API_V1B1, MqResourceKinds
-from .iotops import IOTOPS_ACTIVE_API, IOTOPS_API_V1, IoTOpsResourceKinds
 from .secretstore import SECRETSTORE_API_V1, SECRETSYNC_API_V1
 
 __all__ = [
@@ -60,7 +59,4 @@ __all__ = [
     "SECRETSYNC_API_V1",
     "SECRETSTORE_API_V1",
     "TRUSTMANAGER_API_V1",
-    "IOTOPS_ACTIVE_API",
-    "IOTOPS_API_V1",
-    "IoTOpsResourceKinds",
 ]

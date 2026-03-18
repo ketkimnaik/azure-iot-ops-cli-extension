@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 
 from ...common import CheckTaskStatus
 from ..base import get_namespaced_pods_by_prefix
-from ..edge_api.iotops import IOTOPS_ACTIVE_API, IoTOpsResourceKinds
+from ..edge_api.meta import META_API_V1, MetaResourceKinds
 
 from .base import (
     CheckManager,
@@ -82,8 +82,8 @@ def evaluate_core_service_runtime(
     if not opcua_runtime_resources:
         # Check if OPC UA is explicitly disabled via the instance feature flag
         instances = get_resources_by_name(
-            api_info=IOTOPS_ACTIVE_API,
-            kind=IoTOpsResourceKinds.INSTANCE,
+            api_info=META_API_V1,
+            kind=MetaResourceKinds.Instance,
             resource_name=None,
         )
         opcua_mode = None
