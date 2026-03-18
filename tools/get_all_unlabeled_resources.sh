@@ -6,7 +6,6 @@
 # Color codes
 GREEN='\033[0;32m'      # Green for correct labels
 RED='\033[0;31m'        # Red for missing labels (CLI gaps)
-YELLOW='\033[0;33m'     # Yellow for service team concerns
 BOLD='\033[1m'          # Bold for titles
 RESET='\033[0m'         # Reset colors
 
@@ -28,6 +27,7 @@ declare -A KEYWORD_LABEL_MAP=(
 # If a resource already has any of these, it is owned by another AIO service
 # and should not be flagged as unlabeled (prevents cross-service name collision false positives).
 VALID_AIO_LABELS=(
+    "microsoft-iotoperations"
     "microsoft-iotoperations-mqttbroker"
     "microsoft-iotoperations-opcuabroker"
     "microsoft-iotoperations-akri"
@@ -68,7 +68,6 @@ RESOURCE_TYPES=(
 )
 
 UNLABELED_RESOURCES=()
-CRD_DEFINITION_VIOLATIONS=()
 
 # Function to check if a name matches any keyword pattern
 matches_keyword() {
@@ -198,40 +197,6 @@ for keywords_pattern in "${!KEYWORD_LABEL_MAP[@]}"; do
         fi
     done
     echo ""
-    
-    # Check CRDs
-    # NOTE: CRD definition objects lacking app.kubernetes.io/name is a SERVICE TEAM concern.
-    # CRD definitions are already captured by the support bundle via a separate CRD sweep
-    # regardless of labels. Violations here do NOT indicate a CLI support bundle gap.
-    echo "Checking Custom Resource Definitions (service team concern — not a CLI gap)..."
-    all_crds=$(kubectl get crd 2>/dev/null)
-    
-    if [[ -n "${all_crds}" ]]; then
-        while IFS= read -r line; do
-            # Extract CRD name
-            crd_name=$(echo "${line}" | awk '{print $1}')
-            
-            # Skip if empty
-            if [[ -z "${crd_name}" ]]; then
-                continue
-            fi
-            
-            # Check if name matches any keyword in the pattern
-            if matches_keyword "${crd_name}" "${keywords_pattern}"; then
-                # Get labels for this CRD
-                labels=$(kubectl get crd ${crd_name} -o jsonpath='{.metadata.labels}' 2>/dev/null)
-                label_value=$(echo "${labels}" | jq -r '.["app.kubernetes.io/name"] // "no-label"' 2>/dev/null)
-                
-                if is_label_valid "${crd_name}" "${label_value}" "${expected_label}"; then
-                    echo -e "  ${GREEN}✓ ${BOLD}CRD${RESET}${GREEN} ${crd_name} has correct label ${BOLD}app.kubernetes.io/name=${label_value}${RESET}"
-                else
-                    echo -e "  ${YELLOW}! ${BOLD}CRD${RESET}${YELLOW} ${crd_name} does NOT have label ${BOLD}app.kubernetes.io/name=${expected_label}${RESET}${YELLOW} (current: ${label_value}) [service team]${RESET}"
-                    CRD_DEFINITION_VIOLATIONS+=("CustomResourceDefinition|cluster-wide|${crd_name}|${expected_label}|${label_value}")
-                fi
-            fi
-        done < <(echo "${all_crds}" | tail -n +2)
-    fi
-    echo ""
     echo ""
 done
 
@@ -251,25 +216,6 @@ else
     for resource in "${UNLABELED_RESOURCES[@]}"; do
         IFS='|' read -r kind namespace name expected_label current_label <<< "${resource}"
         echo -e "  ${BOLD}${namespace}/${name}${RESET} (${kind}) - Expected: ${BOLD}app.kubernetes.io/name=${expected_label}${RESET}, Current: ${current_label}"
-    done
-    echo ""
-fi
-
-echo ""
-echo "=========================================="
-echo "=== SERVICE TEAM ACTION ITEMS ==="
-echo "=== (CRD definitions missing label — not CLI gaps) ==="
-echo "=========================================="
-echo ""
-
-if [[ ${#CRD_DEFINITION_VIOLATIONS[@]} -eq 0 ]]; then
-    echo -e "${GREEN}✓ No CRD definition labeling issues found.${RESET}"
-else
-    echo -e "${YELLOW}Found ${BOLD}${#CRD_DEFINITION_VIOLATIONS[@]}${RESET}${YELLOW} CRD definition(s) missing the common label (service team to fix):${RESET}"
-    echo ""
-    for resource in "${CRD_DEFINITION_VIOLATIONS[@]}"; do
-        IFS='|' read -r kind namespace name expected_label current_label <<< "${resource}"
-        echo -e "  ${BOLD}${name}${RESET} (${kind}) - Expected: ${BOLD}app.kubernetes.io/name=${expected_label}${RESET}, Current: ${current_label}"
     done
     echo ""
 fi
