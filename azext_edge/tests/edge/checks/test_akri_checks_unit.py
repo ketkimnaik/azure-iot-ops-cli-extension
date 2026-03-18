@@ -122,8 +122,8 @@ def test_evaluate_core_service_runtime(
 
 
 def test_evaluate_core_service_runtime_no_pods(mocker):
-    """When Akri is not installed, no pods are found.
-    The check should return a warning eval with an informative message instead of 0 checks."""
+    """When Akri runtime pods are missing, it is always unexpected.
+    The check should return an error eval with an informative message instead of 0 checks."""
     mocker.patch(
         "azext_edge.edge.providers.check.akri.get_namespaced_pods_by_prefix",
         return_value=[],
