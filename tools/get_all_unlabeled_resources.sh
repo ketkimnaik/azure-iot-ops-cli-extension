@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -o pipefail
 
 # Script to find Kubernetes resources with specific keywords but WITHOUT their corresponding labels
 # Compatible with bash 4+ and zsh
@@ -23,19 +24,15 @@ declare -A KEYWORD_LABEL_MAP=(
     ["meso|observability"]="microsoft-iotoperations-observability"
 )
 
-# All valid AIO app.kubernetes.io/name label values.
-# If a resource already has any of these, it is owned by another AIO service
-# and should not be flagged as unlabeled (prevents cross-service name collision false positives).
-VALID_AIO_LABELS=(
-    "microsoft-iotoperations"
-    "microsoft-iotoperations-mqttbroker"
-    "microsoft-iotoperations-opcuabroker"
-    "microsoft-iotoperations-akri"
-    "microsoft-iotoperations-dataflows"
-    "microsoft-iotoperations-schemas"
-    "microsoft-iotoperations-observability"
-    "microsoft-iotoperations-observability-cluster-metrics"
-)
+# All valid AIO app.kubernetes.io/name label values — derived from KEYWORD_LABEL_MAP
+# plus the base label, so this stays in sync automatically.
+VALID_AIO_LABELS=("microsoft-iotoperations")
+for _label in "${KEYWORD_LABEL_MAP[@]}"; do
+    VALID_AIO_LABELS+=("${_label}")
+done
+# Sub-component label variant not in KEYWORD_LABEL_MAP
+VALID_AIO_LABELS+=("microsoft-iotoperations-observability-cluster-metrics")
+unset _label
 
 # Resources that are intentionally unlabeled or already captured via alternative means
 # (e.g. cert-manager module, no diagnostic value). Format: "namespace/name".
@@ -56,7 +53,6 @@ RESOURCE_TYPES=(
     "statefulsets"
     "daemonsets"
     "configmaps"
-    # "secrets"
     "serviceaccounts"
     "persistentvolumeclaims"
     "jobs"
@@ -86,12 +82,9 @@ matches_keyword() {
 }
 
 # Function to check if a label is valid for a resource
-# Handles special cases where alternative labels are acceptable
 is_label_valid() {
-    local name=$1
-    local label_value=$2
-    local expected_label=$3
-    local name_lower=$(echo "${name}" | tr '[:upper:]' '[:lower:]')
+    local label_value=$1
+    local expected_label=$2
 
     # Check if it matches the expected label
     if [[ "${label_value}" == "${expected_label}" ]]; then
@@ -105,27 +98,6 @@ is_label_valid() {
             return 0
         fi
     done
-
-    # Special case 1: 'observability-cluster-metrics' resources can have 'microsoft-iotoperations-observability-cluster-metrics' label
-    if echo "${name_lower}" | grep -q "observability-cluster-metrics"; then
-        if [[ "${label_value}" == "microsoft-iotoperations-observability-cluster-metrics" ]]; then
-            return 0
-        fi
-    fi
-
-    # Special case 2: 'akri-adr' resources can still have 'microsoft-iotoperations-akri' label
-    if echo "${name_lower}" | grep -q "akri-adr"; then
-        if [[ "${label_value}" == "microsoft-iotoperations-akri" ]]; then
-            return 0
-        fi
-    fi
-
-    # Special case 3: 'opc-ua-broker' or 'opc-opcuabroker' resources can have 'microsoft-iotoperations-opcuabroker' label
-    if echo "${name_lower}" | grep -qE "opc-ua-broker|opc-opcuabroker"; then
-        if [[ "${label_value}" == "microsoft-iotoperations-opcuabroker" ]]; then
-            return 0
-        fi
-    fi
 
     return 1
 }
@@ -158,9 +130,9 @@ for keywords_pattern in "${!KEYWORD_LABEL_MAP[@]}"; do
         echo "Checking ${resource}..."
         
         # Get all resources
-        all_resources=$(kubectl get ${resource} --all-namespaces -o wide 2>/dev/null)
-        
-        if [[ $? -eq 0 ]] && [[ -n "${all_resources}" ]]; then
+        all_resources=$(kubectl get ${resource} --all-namespaces -o wide 2>/dev/null || true)
+
+        if [[ -n "${all_resources}" ]]; then
             # Check each line for matching keywords
             while IFS= read -r line; do
                 # Extract namespace and name from the line
@@ -176,15 +148,15 @@ for keywords_pattern in "${!KEYWORD_LABEL_MAP[@]}"; do
                 if matches_keyword "${name}" "${keywords_pattern}"; then
                     # Get labels for this specific resource
                     if [[ "${namespace}" == "" ]] || [[ "${namespace}" == "<none>" ]]; then
-                        labels=$(kubectl get ${resource} ${name} -o jsonpath='{.metadata.labels}' 2>/dev/null)
+                        labels=$(kubectl get ${resource} ${name} -o jsonpath='{.metadata.labels}' 2>/dev/null || true)
                     else
-                        labels=$(kubectl get ${resource} ${name} -n ${namespace} -o jsonpath='{.metadata.labels}' 2>/dev/null)
+                        labels=$(kubectl get ${resource} ${name} -n ${namespace} -o jsonpath='{.metadata.labels}' 2>/dev/null || true)
                     fi
                     
                     # Check if it has the correct label
                     label_value=$(echo "${labels}" | jq -r '.["app.kubernetes.io/name"] // "no-label"' 2>/dev/null)
                     
-                    if is_label_valid "${name}" "${label_value}" "${expected_label}"; then
+                    if is_label_valid "${label_value}" "${expected_label}"; then
                         echo -e "  ${GREEN}✓ ${BOLD}${resource}${RESET}${GREEN} ${namespace}/${name} has correct label ${BOLD}app.kubernetes.io/name=${label_value}${RESET}"
                     elif is_excluded "${namespace}" "${name}"; then
                         echo -e "  ${GREEN}~ ${BOLD}${resource}${RESET}${GREEN} ${namespace}/${name} is a known exclusion (no label needed by CLI)${RESET}"
@@ -196,7 +168,6 @@ for keywords_pattern in "${!KEYWORD_LABEL_MAP[@]}"; do
             done < <(echo "${all_resources}" | tail -n +2)
         fi
     done
-    echo ""
     echo ""
 done
 
