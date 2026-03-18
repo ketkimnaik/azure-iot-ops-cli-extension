@@ -122,8 +122,8 @@ def test_evaluate_core_service_runtime(
 
 
 def test_evaluate_core_service_runtime_no_pods(mocker):
-    """When Akri is disabled or not installed, no pods are found.
-    The check should return a skipped eval with an informative message instead of 0 checks."""
+    """When Akri is not installed, no pods are found.
+    The check should return a warning eval with an informative message instead of 0 checks."""
     mocker.patch(
         "azext_edge.edge.providers.check.akri.get_namespaced_pods_by_prefix",
         return_value=[],
@@ -133,7 +133,7 @@ def test_evaluate_core_service_runtime_no_pods(mocker):
     assert result["name"] == "evalCoreServiceRuntime"
     target = result["targets"][CoreServiceResourceKinds.RUNTIME_RESOURCE.value]
     assert "_all_" in target
-    assert target["_all_"]["status"] == "skipped"
+    assert target["_all_"]["status"] == "warning"
     assert any(
         "No Akri runtime pods detected." in str(e.get("value", ""))
         for e in target["_all_"]["evaluations"]

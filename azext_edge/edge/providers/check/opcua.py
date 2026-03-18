@@ -9,12 +9,14 @@ from typing import Any, Dict, List
 
 from ...common import CheckTaskStatus
 from ..base import get_namespaced_pods_by_prefix
+from ..edge_api.iotops import IOTOPS_ACTIVE_API, IoTOpsResourceKinds
 
 from .base import (
     CheckManager,
     check_post_deployment,
     filter_resources_by_name,
     evaluate_pod_health,
+    get_resources_by_name,
     get_resources_grouped_by_namespace,
 )
 
@@ -78,11 +80,27 @@ def evaluate_core_service_runtime(
             )
 
     if not opcua_runtime_resources:
-        no_pods_text = "No OPC UA broker pods detected."
+        # Check if OPC UA is explicitly disabled via the instance feature flag
+        instances = get_resources_by_name(
+            api_info=IOTOPS_ACTIVE_API,
+            kind=IoTOpsResourceKinds.INSTANCE,
+            resource_name=None,
+        )
+        opcua_mode = None
+        if instances:
+            opcua_mode = instances[0].get("spec", {}).get("features", {}).get("opcua", {}).get("mode")
+
+        if opcua_mode and opcua_mode.lower() == "disabled":
+            no_pods_text = f"OPC UA feature is disabled (opcua.mode={opcua_mode})."
+            no_pods_status = CheckTaskStatus.skipped
+        else:
+            no_pods_text = "No OPC UA broker pods detected."
+            no_pods_status = CheckTaskStatus.error
+
         check_manager.add_target(target_name=CoreServiceResourceKinds.RUNTIME_RESOURCE.value)
         check_manager.add_target_eval(
             target_name=CoreServiceResourceKinds.RUNTIME_RESOURCE.value,
-            status=CheckTaskStatus.skipped.value,
+            status=no_pods_status.value,
             value=no_pods_text,
         )
         check_manager.add_display(

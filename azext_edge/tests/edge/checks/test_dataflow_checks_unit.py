@@ -1394,8 +1394,8 @@ def test_evaluate_core_service_runtime(
 
 
 def test_evaluate_core_service_runtime_no_pods(mocker):
-    """When Dataflow is disabled or not installed, no pods are found.
-    The check should return a skipped eval with an informative message instead of 0 checks."""
+    """When Dataflow operator pods are missing, it is always unexpected.
+    The check should return an error eval with an informative message instead of 0 checks."""
     mocker.patch(
         "azext_edge.edge.providers.check.dataflow.get_namespaced_pods_by_prefix",
         return_value=[],
@@ -1405,7 +1405,7 @@ def test_evaluate_core_service_runtime_no_pods(mocker):
     assert result["name"] == "evalCoreServiceRuntime"
     target = result["targets"][CoreServiceResourceKinds.RUNTIME_RESOURCE.value]
     assert "_all_" in target
-    assert target["_all_"]["status"] == "skipped"
+    assert target["_all_"]["status"] == "error"
     assert any(
         "No Dataflow operator pods detected." in str(e.get("value", ""))
         for e in target["_all_"]["evaluations"]
