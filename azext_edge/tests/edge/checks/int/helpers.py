@@ -60,21 +60,7 @@ def assert_eval_core_service_runtime(
     assert check_results["evalCoreServiceRuntime"]
     assert check_results["evalCoreServiceRuntime"]["description"] == f"Evaluate {description_name} core service"
     overall_status = "skipped"
-    targets = check_results["evalCoreServiceRuntime"]["targets"]
-    if "coreServiceRuntimeResource" not in targets:
-        # Service not deployed: no runtime resource target was added. Verify kubectl
-        # also finds no pods and that the overall check status is not unexpectedly errored.
-        post_check_pods = get_pods(pod_prefix=pod_prefix, resource_match=resource_match)
-        assert not pre_check_pods and not post_check_pods, (
-            f"'coreServiceRuntimeResource' missing from targets but pods exist: "
-            f"pre={list(pre_check_pods.keys())} post={list(post_check_pods.keys())}"
-        )
-        check_status = check_results["evalCoreServiceRuntime"]["status"]
-        assert check_status in ("skipped", "error"), (
-            f"Unexpected check status '{check_status}' when no pods and no runtime resource target."
-        )
-        return
-    runtime_resource = targets["coreServiceRuntimeResource"]
+    runtime_resource = check_results["evalCoreServiceRuntime"]["targets"]["coreServiceRuntimeResource"]
     for namespace in runtime_resource.keys():
         namespace_status = "skipped"
         evals = runtime_resource[namespace]["evaluations"]
