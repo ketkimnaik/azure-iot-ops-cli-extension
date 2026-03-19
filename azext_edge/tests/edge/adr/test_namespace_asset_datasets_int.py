@@ -8,7 +8,7 @@ import pytest
 from typing import List
 
 from ...generators import generate_random_string
-from ...helpers import run
+from ...helpers import run, wait_for_expected_count
 from .namespace_helpers import create_config_file, assert_point_properties, assert_dataset_properties
 
 
@@ -16,12 +16,12 @@ pytestmark = [pytest.mark.rpsaas, pytest.mark.long_running]
 
 
 def test_namespace_custom_asset_dataset_lifecycle_operations(
-    require_init, tracked_resources: List[str], tracked_files: List[str]
+    require_namespace_init, tracked_resources: List[str], tracked_files: List[str]
 ):
     """Test complete lifecycle of custom asset dataset and datapoint operations."""
     # Setup test variables
-    instance_name = require_init["instanceName"]
-    resource_group = require_init["resourceGroup"]
+    instance_name = require_namespace_init["instanceName"]
+    resource_group = require_namespace_init["resourceGroup"]
     device_name = f"dev-{generate_random_string(8, force_lower=True)}"
     endpoint_name = f"custom-{generate_random_string(8)}"
     asset_name = f"custom-{generate_random_string(8, force_lower=True)}"
@@ -189,14 +189,27 @@ def test_namespace_custom_asset_dataset_lifecycle_operations(
     )
 
     # 7. LIST DATASET DATAPOINTS
-    datapoints_list = run(
-        f"az iot ops ns asset custom datapoint list --asset {asset_name} "
-        f"--instance {instance_name} -g {resource_group} --dataset {dataset_name_1}"
+    datapoints_list = wait_for_expected_count(
+        list_cmd=(
+            f"az iot ops ns asset custom datapoint list --asset {asset_name} "
+            f"--instance {instance_name} -g {resource_group} --dataset {dataset_name_1}"
+        ),
+        expected_count=2,
+        expected_names=[datapoint_name_1, datapoint_name_2],
+        reissue_cmds={
+            datapoint_name_1: (
+                f"az iot ops ns asset custom datapoint add --asset {asset_name} "
+                f"--instance {instance_name} -g {resource_group} --dataset {dataset_name_1} "
+                f"--name {datapoint_name_1} --data-source {datapoint_data_source_1}"
+            ),
+            datapoint_name_2: (
+                f"az iot ops ns asset custom datapoint add --asset {asset_name} "
+                f"--instance {instance_name} -g {resource_group} --dataset {dataset_name_1} "
+                f"--name {datapoint_name_2} --data-source {datapoint_data_source_2}"
+            ),
+        },
     )
 
-    datapoint_names = [dp["name"] for dp in datapoints_list]
-    assert datapoint_name_1 in datapoint_names
-    assert datapoint_name_2 in datapoint_names
     assert len(datapoints_list) >= 2
 
     # 8. TEST DATAPOINT REPLACE FUNCTIONALITY
@@ -250,11 +263,11 @@ def test_namespace_custom_asset_dataset_lifecycle_operations(
     assert dataset_name_1 not in remaining_dataset_names
 
 
-def test_namespace_opcua_asset_dataset_lifecycle_operations(require_init, tracked_resources: List[str]):
+def test_namespace_opcua_asset_dataset_lifecycle_operations(require_namespace_init, tracked_resources: List[str]):
     """Test complete lifecycle of OPCUA asset dataset and datapoint operations."""
     # Setup test variables
-    instance_name = require_init["instanceName"]
-    resource_group = require_init["resourceGroup"]
+    instance_name = require_namespace_init["instanceName"]
+    resource_group = require_namespace_init["resourceGroup"]
     device_name = f"dev-{generate_random_string(8, force_lower=True)}"
     endpoint_name = f"opcua-{generate_random_string(8)}"
     asset_name = f"opcua-{generate_random_string(8, force_lower=True)}"
@@ -426,14 +439,27 @@ def test_namespace_opcua_asset_dataset_lifecycle_operations(require_init, tracke
     )
 
     # 7. LIST DATASET DATAPOINTS
-    datapoints_list = run(
-        f"az iot ops ns asset opcua datapoint list --asset {asset_name} "
-        f"--instance {instance_name} -g {resource_group} --dataset {dataset_name_1}"
+    datapoints_list = wait_for_expected_count(
+        list_cmd=(
+            f"az iot ops ns asset opcua datapoint list --asset {asset_name} "
+            f"--instance {instance_name} -g {resource_group} --dataset {dataset_name_1}"
+        ),
+        expected_count=2,
+        expected_names=[datapoint_name_1, datapoint_name_2],
+        reissue_cmds={
+            datapoint_name_1: (
+                f'az iot ops ns asset opcua datapoint add --asset {asset_name} '
+                f'--instance {instance_name} -g {resource_group} --dataset {dataset_name_1} '
+                f'--name {datapoint_name_1} --data-source "{datapoint_data_source_1}"'
+            ),
+            datapoint_name_2: (
+                f'az iot ops ns asset opcua datapoint add --asset {asset_name} '
+                f'--instance {instance_name} -g {resource_group} --dataset {dataset_name_1} '
+                f'--name {datapoint_name_2} --data-source "{datapoint_data_source_2}"'
+            ),
+        },
     )
 
-    datapoint_names = [dp["name"] for dp in datapoints_list]
-    assert datapoint_name_1 in datapoint_names
-    assert datapoint_name_2 in datapoint_names
     assert len(datapoints_list) >= 2
 
     # 8. TEST DATAPOINT REPLACE FUNCTIONALITY
@@ -486,11 +512,11 @@ def test_namespace_opcua_asset_dataset_lifecycle_operations(require_init, tracke
     assert dataset_name_1 not in remaining_dataset_names
 
 
-def test_namespace_rest_asset_dataset_lifecycle_operations(require_init, tracked_resources: List[str]):
+def test_namespace_rest_asset_dataset_lifecycle_operations(require_namespace_init, tracked_resources: List[str]):
     """Test complete lifecycle of REST asset dataset operations."""
     # Setup test variables
-    instance_name = require_init["instanceName"]
-    resource_group = require_init["resourceGroup"]
+    instance_name = require_namespace_init["instanceName"]
+    resource_group = require_namespace_init["resourceGroup"]
     device_name = f"dev-{generate_random_string(8, force_lower=True)}"
     endpoint_name = f"rest-{generate_random_string(8)}"
     asset_name = f"rest-{generate_random_string(8, force_lower=True)}"
@@ -638,11 +664,11 @@ def test_namespace_rest_asset_dataset_lifecycle_operations(require_init, tracked
     assert dataset_name_1 not in remaining_dataset_names
 
 
-def test_namespace_sse_asset_dataset_lifecycle_operations(require_init, tracked_resources: List[str]):
+def test_namespace_sse_asset_dataset_lifecycle_operations(require_namespace_init, tracked_resources: List[str]):
     """Test complete lifecycle of SSE asset dataset operations."""
     # Setup test variables
-    instance_name = require_init["instanceName"]
-    resource_group = require_init["resourceGroup"]
+    instance_name = require_namespace_init["instanceName"]
+    resource_group = require_namespace_init["resourceGroup"]
     device_name = f"dev-{generate_random_string(8, force_lower=True)}"
     endpoint_name = f"sse-{generate_random_string(8)}"
     asset_name = f"sse-{generate_random_string(8, force_lower=True)}"
@@ -787,11 +813,11 @@ def test_namespace_sse_asset_dataset_lifecycle_operations(require_init, tracked_
     assert dataset_name_1 not in remaining_dataset_names
 
 
-def test_namespace_mqtt_asset_dataset_lifecycle_operations(require_init, tracked_resources: List[str]):
+def test_namespace_mqtt_asset_dataset_lifecycle_operations(require_namespace_init, tracked_resources: List[str]):
     """Test complete lifecycle of MQTT asset dataset operations."""
     # Setup test variables
-    instance_name = require_init["instanceName"]
-    resource_group = require_init["resourceGroup"]
+    instance_name = require_namespace_init["instanceName"]
+    resource_group = require_namespace_init["resourceGroup"]
     device_name = f"dev-{generate_random_string(8, force_lower=True)}"
     endpoint_name = f"mqtt-{generate_random_string(8)}"
     asset_name = f"mqtt-{generate_random_string(8, force_lower=True)}"
