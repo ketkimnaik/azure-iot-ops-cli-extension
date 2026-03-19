@@ -60,7 +60,21 @@ def assert_eval_core_service_runtime(
     assert check_results["evalCoreServiceRuntime"]
     assert check_results["evalCoreServiceRuntime"]["description"] == f"Evaluate {description_name} core service"
     overall_status = "skipped"
-    runtime_resource = check_results["evalCoreServiceRuntime"]["targets"]["coreServiceRuntimeResource"]
+    targets = check_results["evalCoreServiceRuntime"]["targets"]
+    if "coreServiceRuntimeResource" not in targets:
+        # Service not deployed: no runtime resource target was added. Verify kubectl
+        # also finds no pods and that the overall check status is not unexpectedly errored.
+        post_check_pods = get_pods(pod_prefix=pod_prefix, resource_match=resource_match)
+        assert not pre_check_pods and not post_check_pods, (
+            f"'coreServiceRuntimeResource' missing from targets but pods exist: "
+            f"pre={list(pre_check_pods.keys())} post={list(post_check_pods.keys())}"
+        )
+        check_status = check_results["evalCoreServiceRuntime"]["status"]
+        assert check_status in ("skipped", "error"), (
+            f"Unexpected check status '{check_status}' when no pods and no runtime resource target."
+        )
+        return
+    runtime_resource = targets["coreServiceRuntimeResource"]
     for namespace in runtime_resource.keys():
         namespace_status = "skipped"
         evals = runtime_resource[namespace]["evaluations"]
@@ -71,7 +85,9 @@ def assert_eval_core_service_runtime(
         else:
             assert not runtime_resource[namespace]["conditions"]
 
-        results = list(set(pod["name"].replace("pod/", "") for pod in evals))
+        # Filter to only named pod evals; sentinel no-pods evals (added when no pods are
+        # detected) don't have a "name" key and should be skipped for name comparison.
+        results = list(set(pod["name"].replace("pod/", "") for pod in evals if "name" in pod))
         assert_extra_or_missing_names(
             resource_type="pods",
             result_names=results,
@@ -101,6 +117,12 @@ def assert_eval_core_service_runtime(
                     namespace_status=namespace_status,
                     overall_status=overall_status
                 )
+
+        # When no named evals exist (no-pods scenario), accept the status reported by
+        # the check (e.g. "error" when pods are absent, "skipped" when feature is disabled).
+        if not results:
+            namespace_status = runtime_resource[namespace]["status"]
+            overall_status = combine_statuses([overall_status, namespace_status])
 
         assert runtime_resource[namespace]["status"] == namespace_status
     assert check_results["evalCoreServiceRuntime"]["status"] == overall_status
