@@ -4,6 +4,9 @@ set -o pipefail
 # Script to find Kubernetes resources with specific keywords but WITHOUT their corresponding labels
 # Compatible with bash 4+ and zsh
 
+command -v jq >/dev/null 2>&1 || { echo "jq is required but not installed."; exit 1; }
+command -v kubectl >/dev/null 2>&1 || { echo "kubectl is required but not installed."; exit 1; }
+
 # Color codes
 GREEN='\033[0;32m'      # Green for correct labels
 RED='\033[0;31m'        # Red for missing labels (CLI gaps)
