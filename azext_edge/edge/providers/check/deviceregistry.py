@@ -44,36 +44,55 @@ def check_deviceregistry_deployment(
     resource_kinds: List[str] = None,
     resource_name: str = None,
 ) -> List[dict]:
-    classic_evaluate_funcs = {
-        DeviceRegistryResourceKinds.ASSET: evaluate_assets,
-        DeviceRegistryResourceKinds.ASSETENDPOINTPROFILE: evaluate_asset_endpoint_profiles,
-    }
+    classic_resource_kinds = [
+        DeviceRegistryResourceKinds.ASSET.value,
+        DeviceRegistryResourceKinds.ASSETENDPOINTPROFILE.value,
+    ]
+    namespaced_resource_kinds = [
+        DeviceRegistryResourceKinds.DEVICE.value,
+    ]
 
-    results = check_post_deployment(
-        api_info=DEVICEREGISTRY_API_V1,
-        check_name="enumerateDeviceRegistryApi",
-        check_desc="Enumerate Device Registry API resources",
-        resource_name=resource_name,
-        evaluate_funcs=classic_evaluate_funcs,
-        as_list=as_list,
-        detail_level=detail_level,
-        resource_kinds=resource_kinds,
-    )
+    # When resource_kinds is None or empty, run both API groups with no filter.
+    # When resource_kinds is specified, only run the API group whose kinds were requested.
+    if not resource_kinds:
+        classic_filter = None
+        namespaced_filter = None
+    else:
+        classic_filter = [r for r in resource_kinds if r in classic_resource_kinds]
+        namespaced_filter = [r for r in resource_kinds if r in namespaced_resource_kinds]
 
-    namespaced_evaluate_funcs = {
-        DeviceRegistryResourceKinds.DEVICE: evaluate_devices,
-    }
+    results = []
 
-    results.extend(check_post_deployment(
-        api_info=NAMESPACED_DEVICEREGISTRY_API_V1,
-        check_name="enumerateNamespacedDeviceRegistryApi",
-        check_desc="Enumerate Namespaced Device Registry API resources",
-        resource_name=resource_name,
-        evaluate_funcs=namespaced_evaluate_funcs,
-        as_list=as_list,
-        detail_level=detail_level,
-        resource_kinds=resource_kinds,
-    ))
+    if classic_filter is None or classic_filter:
+        classic_evaluate_funcs = {
+            DeviceRegistryResourceKinds.ASSET: evaluate_assets,
+            DeviceRegistryResourceKinds.ASSETENDPOINTPROFILE: evaluate_asset_endpoint_profiles,
+        }
+        results = check_post_deployment(
+            api_info=DEVICEREGISTRY_API_V1,
+            check_name="enumerateDeviceRegistryApi",
+            check_desc="Enumerate Device Registry API resources",
+            resource_name=resource_name,
+            evaluate_funcs=classic_evaluate_funcs,
+            as_list=as_list,
+            detail_level=detail_level,
+            resource_kinds=classic_filter,
+        )
+
+    if namespaced_filter is None or namespaced_filter:
+        namespaced_evaluate_funcs = {
+            DeviceRegistryResourceKinds.DEVICE: evaluate_devices,
+        }
+        results.extend(check_post_deployment(
+            api_info=NAMESPACED_DEVICEREGISTRY_API_V1,
+            check_name="enumerateNamespacedDeviceRegistryApi",
+            check_desc="Enumerate Namespaced Device Registry API resources",
+            resource_name=resource_name,
+            evaluate_funcs=namespaced_evaluate_funcs,
+            as_list=as_list,
+            detail_level=detail_level,
+            resource_kinds=namespaced_filter,
+        ))
 
     return results
 
@@ -662,6 +681,7 @@ def evaluate_devices(
         )
 
         devices: List[dict] = list(devices)
+        added_status_conditions = False
         for device in devices:
             padding = 10
             device_name = device["metadata"]["name"]
@@ -742,6 +762,69 @@ def evaluate_devices(
                 namespace=namespace,
                 padding=(0, 0, 0, spec_padding),
             )
+
+            device_status = device.get("status") or {}
+            status_inbound = device_status.get("endpoints", {}).get("inbound", {})
+
+            if detail_level > ResourceOutputDetailLevel.summary.value and inbound_endpoints:
+                for ep_name, ep in inbound_endpoints.items():
+                    ep_address = ep.get("address", "")
+                    ep_health = status_inbound.get(ep_name, {}).get("healthState") or {}
+                    health_status = ep_health.get("status", "")
+                    health_color = {
+                        "Available": "green",
+                        "Degraded": "yellow",
+                        "Unavailable": "red",
+                    }.get(health_status, "white")
+
+                    ep_addr_text = ep_address if ep_address else "[yellow]no address[/yellow]"
+                    health_text = f" [[{health_color}]{health_status}[/{health_color}]]" if health_status else ""
+                    ep_text = f"- Endpoint {{[bright_blue]{ep_name}[/bright_blue]}}: {ep_addr_text}{health_text}"
+                    check_manager.add_display(
+                        target_name=target_devices,
+                        namespace=namespace,
+                        display=Padding(ep_text, (0, 0, 0, spec_padding + PADDING_SIZE)),
+                    )
+
+                    if detail_level > ResourceOutputDetailLevel.detail.value and ep_health.get("message"):
+                        check_manager.add_display(
+                            target_name=target_devices,
+                            namespace=namespace,
+                            display=Padding(
+                                f"  {ep_health['message']}",
+                                (0, 0, 0, spec_padding + PADDING_SIZE * 2),
+                            ),
+                        )
+
+            # status.config.error
+            config_error = device_status.get("config", {}).get("error")
+            if config_error:
+                if not added_status_conditions:
+                    check_manager.add_target_conditions(
+                        target_name=target_devices,
+                        namespace=namespace,
+                        conditions=["status.config.error"],
+                    )
+                    added_status_conditions = True
+
+                error_code = config_error.get("code", "")
+                error_message = config_error.get("message", "")
+                error_value = {"status.config.error": error_code or error_message}
+                error_text = (
+                    f"Config error [red]{error_code}[/red]: {error_message}"
+                    if error_code
+                    else f"Config error: {error_message}"
+                )
+                add_display_and_eval(
+                    check_manager=check_manager,
+                    target_name=target_devices,
+                    display_text=error_text,
+                    eval_status=CheckTaskStatus.error.value,
+                    eval_value=error_value,
+                    resource_name=device_name,
+                    namespace=namespace,
+                    padding=(0, 0, 0, spec_padding),
+                )
 
     return check_manager.as_dict(as_list)
 

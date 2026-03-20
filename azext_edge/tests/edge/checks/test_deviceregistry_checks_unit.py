@@ -288,7 +288,7 @@ def test_assets_checks(
     detail_level,
     resource_name,
 ):
-    mocker = mocker.patch(
+    mocker.patch(
         "azext_edge.edge.providers.edge_api.base.EdgeResourceApi.get_resources",
         side_effect=[{"items": assets}, {"items": asset_endpoint_profiles}],
     )
@@ -481,7 +481,7 @@ def test_asset_endpoint_profiles_checks(
     detail_level,
     resource_name,
 ):
-    mocker = mocker.patch(
+    mocker.patch(
         "azext_edge.edge.providers.edge_api.base.EdgeResourceApi.get_resources",
         side_effect=[{"items": asset_endpoint_profiles}],
     )
@@ -567,6 +567,46 @@ def test_asset_endpoint_profiles_checks(
             ],
         ),
         (
+            # device with config error in status
+            [
+                {
+                    "metadata": {"name": "device-1"},
+                    "spec": {
+                        "enabled": True,
+                        "uuid": "abc-123",
+                        "endpoints": {"inbound": {"ep-1": {"address": "opc.tcp://localhost:4840"}}},
+                    },
+                    "status": {
+                        "config": {
+                            "error": {
+                                "code": "500",
+                                "message": "connection refused",
+                            }
+                        }
+                    },
+                }
+            ],
+            ["spec.enabled", "spec.uuid", "spec.endpoints.inbound", "status.config.error"],
+            [
+                [
+                    ("status", "success"),
+                    ("value/spec.enabled", True),
+                ],
+                [
+                    ("status", "success"),
+                    ("value/spec.uuid", "abc-123"),
+                ],
+                [
+                    ("status", "success"),
+                    ("value/spec.endpoints.inbound", 1),
+                ],
+                [
+                    ("status", "error"),
+                    ("value/status.config.error", "500"),
+                ],
+            ],
+        ),
+        (
             # no devices
             [],
             [],
@@ -588,7 +628,7 @@ def test_devices_checks(
     detail_level,
     resource_name,
 ):
-    mocker = mocker.patch(
+    mocker.patch(
         "azext_edge.edge.providers.edge_api.base.EdgeResourceApi.get_resources",
         side_effect=[{"items": devices}],
     )
