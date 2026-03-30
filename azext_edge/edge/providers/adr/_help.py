@@ -754,11 +754,11 @@ def load_iotops_adr_help():
         examples:
         - name: Discover the endpoint configuration schema for an OPC UA connector
           text: >
-            az iot ops ns device endpoint inbound create --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-schema
+            az iot ops ns device endpoint inbound create --device mydevice --name myEndpoint --endpoint-address "opc.tcp://placeholder:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-schema
 
         - name: Save the schema as a starter config file, then edit values before use
           text: >
-            az iot ops ns device endpoint inbound create --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-schema -o json > opcua-endpoint-config.json
+            az iot ops ns device endpoint inbound create --device mydevice --name myEndpoint --endpoint-address "opc.tcp://placeholder:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-schema -o json > opcua-endpoint-config.json
           long-summary: >
             Use -o json or -o yaml when redirecting output to a file — both formats are accepted by
             --endpoint-config. Table and tsv formats are not supported.
