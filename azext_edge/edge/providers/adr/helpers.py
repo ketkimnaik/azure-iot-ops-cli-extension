@@ -4,7 +4,6 @@
 # Licensed under the MIT License. See License file in the project root for license information.
 # ----------------------------------------------------------------------------------------------
 
-import json
 from knack.log import get_logger
 from typing import Dict, Optional, Union
 from azure.cli.core.azclierror import (
