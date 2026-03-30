@@ -756,13 +756,6 @@ def load_iotops_adr_help():
           text: >
             az iot ops ns device endpoint inbound create --device mydevice --name myEndpoint --endpoint-address "opc.tcp://placeholder:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-schema
 
-        - name: Save the schema as a starter config file, then edit values before use
-          text: >
-            az iot ops ns device endpoint inbound create --device mydevice --name myEndpoint --endpoint-address "opc.tcp://placeholder:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-schema -o json > opcua-endpoint-config.json
-          long-summary: >
-            Use -o json or -o yaml when redirecting output to a file — both formats are accepted by
-            --endpoint-config. Table and tsv formats are not supported.
-
         - name: Add a generalized OPC UA inbound endpoint using a JSON config file
           text: >
             az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config ./opcua-endpoint-config.json
@@ -791,6 +784,13 @@ def load_iotops_adr_help():
         - name: Add an inbound endpoint skipping connector template check (no schema validation, no version auto-resolution)
           text: >
             az iot ops ns device endpoint inbound create --device mydevice --name myEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --skip-connector-check
+    """
+
+    helps[
+        "iot ops ns device endpoint inbound add"
+    ] = """
+        type: group
+        short-summary: Add a type-specific inbound endpoint to a device in a Device Registry namespace.
     """
 
     helps[

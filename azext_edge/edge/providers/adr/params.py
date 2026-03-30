@@ -876,7 +876,7 @@ def load_adr_arguments(self, _):
             options_list=["--show-schema"],
             help="Show the available endpoint configuration schema for the specified connector type "
             "and exit without creating an endpoint. The output is a ready-to-use config template "
-            "with default values filled in. Fields shown as '<string>' or '<integer>' are optional "
+            "with default values filled in. Fields shown as `<string>` or `<integer>` are optional "
             "— replace with a value or remove them before passing to --endpoint-config.",
             arg_type=get_three_state_flag(),
         )
