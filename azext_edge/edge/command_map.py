@@ -289,7 +289,7 @@ def load_iotops_commands(self, _):
     ) as cmd_group:
         cmd_group.command("list", "list_inbound_device_endpoints")
         cmd_group.command("remove", "remove_inbound_device_endpoints")
-        cmd_group.command("add", "add_inbound_device_endpoint")
+        cmd_group.command("create", "add_inbound_device_endpoint")
 
     with self.command_group(
         "iot ops ns device endpoint inbound add",

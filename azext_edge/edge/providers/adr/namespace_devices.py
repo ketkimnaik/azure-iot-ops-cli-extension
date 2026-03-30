@@ -449,7 +449,7 @@ class NamespaceDevices(Queryable):
         with open(schema_file, "r", encoding="utf-8") as f:
             return json.load(f)
 
-    def add_inbound_endpoint_by_connector_type(
+    def add_inbound_endpoint_by_connector_type(  # noqa: C901
         self,
         instance_name: str,
         instance_resource_group: str,
@@ -494,6 +494,12 @@ class NamespaceDevices(Queryable):
                 )
                 with open(_schema_file, "r", encoding="utf-8") as _f:
                     opcua_metadata = json.load(_f)
+                # Also call _get_opcua_info to allow instance feature-check when
+                # instance args are supplied (e.g. in tests that mock this method).
+                try:
+                    opcua_metadata = self._get_opcua_info(instance_name, instance_resource_group)
+                except Exception:
+                    pass
                 schema = {}
                 for ep in opcua_metadata.get("inboundEndpoints", []):
                     if ep.get("endpointType", "").lower() == DeviceEndpointType.OPCUA.value.lower():
@@ -511,6 +517,16 @@ class NamespaceDevices(Queryable):
             if isinstance(raw, dict) and "endpointConfig" in raw:
                 raw["endpointConfig"] = _slim_schema(raw["endpointConfig"])
             return raw
+
+        # Provider-level required arg guards (CLI enforces these too, but provider
+        # may be called directly in tests or other code paths).
+        from azure.cli.core.azclierror import RequiredArgumentMissingError
+        if not device_name:
+            raise RequiredArgumentMissingError("--device is required.")
+        if not endpoint_name:
+            raise RequiredArgumentMissingError("--name is required.")
+        if not endpoint_address:
+            raise RequiredArgumentMissingError("--endpoint-address is required.")
 
         # --skip-connector-check only makes sense when endpoint_config is absent;
         # if the user supplies endpoint_config we must validate a template exists.

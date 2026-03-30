@@ -839,7 +839,7 @@ def load_adr_arguments(self, _):
             action="extend",
         )
 
-    with self.argument_context("iot ops ns device endpoint inbound add") as context:
+    with self.argument_context("iot ops ns device endpoint inbound create") as context:
         context.argument(
             "connector_type",
             options_list=["--connector-type", "--ct"],

@@ -10,7 +10,12 @@ import json
 import pytest
 import responses
 
-from azure.cli.core.azclierror import FileOperationError, InvalidArgumentValueError, RequiredArgumentMissingError, ResourceNotFoundError
+from azure.cli.core.azclierror import (
+    FileOperationError,
+    InvalidArgumentValueError,
+    RequiredArgumentMissingError,
+    ResourceNotFoundError,
+)
 
 from azext_edge.edge.commands_namespaces import (
     create_namespace_device,
@@ -2449,13 +2454,19 @@ def test_add_inbound_device_endpoint_show_schema(
     if is_opcua:
         # OPC UA uses bundled metadata; patch _get_opcua_info and derive the expected schema
         # from the inboundEndpoints entry.  We synthesise a minimal metadata payload here.
-        opcua_schema = expected_schema["endpointConfig"]
+        # _slim_schema will convert {"type":"object","properties":{"foo":{"type":"string"}}}
+        # into {"foo": "<string>"}, so the expected endpointConfig after slim is {"foo": "<string>"}.
+        opcua_raw_schema = expected_schema["endpointConfig"]
+        expected_schema = {
+            "connectorType": connector_type,
+            "endpointConfig": {"foo": "<string>"},  # result of _slim_schema on opcua_raw_schema
+        }
         mocker.patch(
             "azext_edge.edge.providers.adr.namespace_devices.NamespaceDevices._get_opcua_info",
             return_value={
                 "version": "1.2.82",
                 "inboundEndpoints": [
-                    {"endpointType": "Microsoft.OpcUa", "additionalConfigurationSchema": opcua_schema}
+                    {"endpointType": "Microsoft.OpcUa", "additionalConfigurationSchema": opcua_raw_schema}
                 ],
             },
         )
@@ -2508,9 +2519,9 @@ def test_add_inbound_device_endpoint_skip_connector_check_with_config_file_error
 
 
 @pytest.mark.parametrize("missing_arg, kwargs_override", [
-    ("device_name",       {"device_name": None}),
-    ("endpoint_name",     {"endpoint_name": None}),
-    ("endpoint_address",  {"endpoint_address": None}),
+    ("device_name", {"device_name": None}),
+    ("endpoint_name", {"endpoint_name": None}),
+    ("endpoint_address", {"endpoint_address": None}),
 ])
 def test_add_inbound_device_endpoint_missing_required_args(
     mocked_cmd,
@@ -2589,7 +2600,10 @@ def test_add_inbound_device_endpoint_success(
     """
     # --endpoint-config and --skip-connector-check are mutually exclusive; skip the invalid combination.
     if with_config_file and skip_connector_check:
-        pytest.skip("mutually exclusive combination — covered by test_add_inbound_device_endpoint_skip_connector_check_with_config_file_errors")
+        pytest.skip(
+            "mutually exclusive combination — covered by "
+            "test_add_inbound_device_endpoint_skip_connector_check_with_config_file_errors"
+        )
 
     connector_type = "Microsoft.OpcUa"
     version_from_template = "1.3.0"
@@ -2788,4 +2802,3 @@ def test_add_inbound_device_endpoint_duplicate_no_replace_errors(
             replace=False,
             wait_sec=0,
         )
-

@@ -736,7 +736,7 @@ def load_iotops_adr_help():
     """
 
     helps[
-        "iot ops ns device endpoint inbound add"
+        "iot ops ns device endpoint inbound create"
     ] = """
         type: command
         short-summary: Add an inbound endpoint to a device using a generalized connector-type approach.
@@ -754,30 +754,30 @@ def load_iotops_adr_help():
         examples:
         - name: Discover the endpoint configuration schema for an OPC UA connector
           text: >
-            az iot ops ns device endpoint inbound add --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-schema
+            az iot ops ns device endpoint inbound create --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-schema
 
         - name: Save the schema as a starter config file, then edit values before use
           text: >
-            az iot ops ns device endpoint inbound add --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-schema -o json > opcua-endpoint-config.json
+            az iot ops ns device endpoint inbound create --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-schema -o json > opcua-endpoint-config.json
           long-summary: >
             Use -o json or -o yaml when redirecting output to a file — both formats are accepted by
             --endpoint-config. Table and tsv formats are not supported.
 
         - name: Add a generalized OPC UA inbound endpoint using a JSON config file
           text: >
-            az iot ops ns device endpoint inbound add --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config ./opcua-endpoint-config.json
+            az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config ./opcua-endpoint-config.json
 
         - name: Add a generalized OPC UA inbound endpoint using a YAML config file
           text: >
-            az iot ops ns device endpoint inbound add --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config ./opcua-endpoint-config.yaml
+            az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config ./opcua-endpoint-config.yaml
 
         - name: Add a generalized OPC UA inbound endpoint using inline JSON with nested objects (Bash/Zsh)
           text: >
-            az iot ops ns device endpoint inbound add --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config '{"applicationName":"line1-opcua-client","keepAlive":10000,"session":{"timeout":60000,"reconnectPeriod":5000},"security":{"policy":"Basic256Sha256","mode":"SignAndEncrypt","autoAcceptCertificates":true}}'
+            az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config '{"applicationName":"line1-opcua-client","keepAlive":10000,"session":{"timeout":60000,"reconnectPeriod":5000},"security":{"policy":"Basic256Sha256","mode":"SignAndEncrypt","autoAcceptCertificates":true}}'
 
         - name: Add a generalized OPC UA inbound endpoint using inline JSON with nested objects (PowerShell)
           text: >
-            az iot ops ns device endpoint inbound add --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config '{\"applicationName\":\"line1-opcua-client\",\"keepAlive\":10000,\"session\":{\"timeout\":60000,\"reconnectPeriod\":5000},\"security\":{\"policy\":\"Basic256Sha256\",\"mode\":\"SignAndEncrypt\",\"autoAcceptCertificates\":true}}'
+            az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config '{\"applicationName\":\"line1-opcua-client\",\"keepAlive\":10000,\"session\":{\"timeout\":60000,\"reconnectPeriod\":5000},\"security\":{\"policy\":\"Basic256Sha256\",\"mode\":\"SignAndEncrypt\",\"autoAcceptCertificates\":true}}'
           long-summary: >
             In PowerShell, all double quotes inside the JSON must be escaped with a backslash (\").
             In Bash/Zsh, wrap the entire JSON value in single quotes — no escaping needed, including for nested objects.
@@ -786,11 +786,11 @@ def load_iotops_adr_help():
 
         - name: Add a generalized ONVIF inbound endpoint using a config file with authentication
           text: >
-            az iot ops ns device endpoint inbound add --device mydevice --name myONVIFEndpoint --endpoint-address "http://192.168.1.100:8000/onvif/device_service" --connector-type Microsoft.Onvif --instance myInstance -g myInstanceResourceGroup --endpoint-config ./onvif-config.json --user-ref auth-secret/username --pass-ref auth-secret/password
+            az iot ops ns device endpoint inbound create --device mydevice --name myONVIFEndpoint --endpoint-address "http://192.168.1.100:8000/onvif/device_service" --connector-type Microsoft.Onvif --instance myInstance -g myInstanceResourceGroup --endpoint-config ./onvif-config.json --user-ref auth-secret/username --pass-ref auth-secret/password
 
         - name: Add an inbound endpoint skipping connector template check (no schema validation, no version auto-resolution)
           text: >
-            az iot ops ns device endpoint inbound add --device mydevice --name myEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --skip-connector-check
+            az iot ops ns device endpoint inbound create --device mydevice --name myEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --skip-connector-check
     """
 
     helps[
