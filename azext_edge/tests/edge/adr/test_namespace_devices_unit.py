@@ -10,7 +10,7 @@ import json
 import pytest
 import responses
 
-from azure.cli.core.azclierror import FileOperationError, InvalidArgumentValueError
+from azure.cli.core.azclierror import FileOperationError, InvalidArgumentValueError, RequiredArgumentMissingError, ResourceNotFoundError
 
 from azext_edge.edge.commands_namespaces import (
     create_namespace_device,
@@ -27,7 +27,8 @@ from azext_edge.edge.commands_namespaces import (
     add_inbound_opcua_device_endpoint,
     add_inbound_rest_device_endpoint,
     add_inbound_sse_device_endpoint,
-    add_inbound_mqtt_device_endpoint
+    add_inbound_mqtt_device_endpoint,
+    add_inbound_device_endpoint,
 )
 from azext_edge.edge.providers.adr.common import ADRAuthModes
 from azext_edge.edge.providers.adr.namespace_devices import DeviceEndpointType
@@ -2395,3 +2396,396 @@ def test_add_inbound_mqtt_device_endpoint(
     assert endpoint_patch["additionalConfiguration"]
     additional_config = json.loads(endpoint_patch["additionalConfiguration"])
     assert additional_config == expected_mqtt_config
+
+
+# ---------------------------------------------------------------------------
+# Tests for the generalized add_inbound_device_endpoint command
+# ---------------------------------------------------------------------------
+
+
+def _make_connector_template(connector_type: str, version: str = "1.0.0", schema_refs=None):
+    """Build a minimal mock connector template resource."""
+    return {
+        "name": f"template-{connector_type.lower()}",
+        "properties": {
+            "connectorMetadataRef": f"mcr.microsoft.com/azureiotoperations/{connector_type.lower()}-metadata:1.0",
+            "deviceInboundEndpointTypes": [
+                {
+                    "endpointType": connector_type,
+                    "version": version,
+                    "configurationSchemaRefs": schema_refs or [],
+                }
+            ],
+            "runtimeConfiguration": {
+                "managedConfigurationSettings": {
+                    "imageConfigurationSettings": {
+                        "tagDigestSettings": {"tag": version}
+                    }
+                }
+            },
+        },
+    }
+
+
+@pytest.mark.parametrize("connector_type", ["Microsoft.OpcUa", "Microsoft.Onvif"])
+def test_add_inbound_device_endpoint_show_schema(
+    mocked_cmd,
+    mocker,
+    connector_type: str,
+    mocked_get_namespace_for_instance,
+):
+    """--show-schema returns schema without hitting device APIs.
+
+    OPC UA: schema comes from bundled metadata via _get_opcua_info.
+    Other types: schema comes from ConnectorTemplates.get_endpoint_schema.
+    """
+    expected_schema = {
+        "connectorType": connector_type,
+        "endpointConfig": {"type": "object", "properties": {"foo": {"type": "string"}}},
+    }
+
+    is_opcua = connector_type.lower() == "microsoft.opcua"
+
+    if is_opcua:
+        # OPC UA uses bundled metadata; patch _get_opcua_info and derive the expected schema
+        # from the inboundEndpoints entry.  We synthesise a minimal metadata payload here.
+        opcua_schema = expected_schema["endpointConfig"]
+        mocker.patch(
+            "azext_edge.edge.providers.adr.namespace_devices.NamespaceDevices._get_opcua_info",
+            return_value={
+                "version": "1.2.82",
+                "inboundEndpoints": [
+                    {"endpointType": "Microsoft.OpcUa", "additionalConfigurationSchema": opcua_schema}
+                ],
+            },
+        )
+        mock_ct = mocker.patch(
+            "azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates"
+        )
+        mock_ct.return_value.get_endpoint_schema.side_effect = AssertionError(
+            "ConnectorTemplates.get_endpoint_schema must not be called for OPC UA"
+        )
+    else:
+        mock_ct = mocker.patch(
+            "azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates"
+        )
+        mock_ct.return_value.get_endpoint_schema.return_value = expected_schema
+
+    instance_name = f"inst-{generate_random_string()}"
+    instance_resource_group = f"rg-{generate_random_string()}"
+
+    result = add_inbound_device_endpoint(
+        cmd=mocked_cmd,
+        connector_type=connector_type,
+        instance_name=instance_name,
+        instance_resource_group=instance_resource_group,
+        show_schema=True,
+    )
+
+    assert result == expected_schema
+    if not is_opcua:
+        mock_ct.return_value.get_endpoint_schema.assert_called_once_with(
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            connector_type=connector_type,
+        )
+
+
+def test_add_inbound_device_endpoint_skip_connector_check_with_config_file_errors(mocked_cmd):
+    """--skip-connector-check and --endpoint-config together must raise InvalidArgumentValueError."""
+    with pytest.raises(InvalidArgumentValueError, match="--skip-connector-check cannot be used when --endpoint-config"):
+        add_inbound_device_endpoint(
+            cmd=mocked_cmd,
+            connector_type="Microsoft.OpcUa",
+            instance_name="my-instance",
+            instance_resource_group="my-rg",
+            device_name="my-device",
+            endpoint_name="ep1",
+            endpoint_address="opc.tcp://1.2.3.4:4840",
+            endpoint_config="./config.json",
+            skip_connector_check=True,
+        )
+
+
+@pytest.mark.parametrize("missing_arg, kwargs_override", [
+    ("device_name",       {"device_name": None}),
+    ("endpoint_name",     {"endpoint_name": None}),
+    ("endpoint_address",  {"endpoint_address": None}),
+])
+def test_add_inbound_device_endpoint_missing_required_args(
+    mocked_cmd,
+    mocker,
+    missing_arg: str,
+    kwargs_override: dict,
+):
+    """When not in show_schema mode, --device / --name / --endpoint-address are required."""
+    # Patch connector template so we never hit the network
+    mock_ct = mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates"
+    )
+    mock_ct.return_value.get_connector_template_for_type.return_value = _make_connector_template("Microsoft.OpcUa")
+
+    base_kwargs = {
+        "connector_type": "Microsoft.OpcUa",
+        "instance_name": "my-instance",
+        "instance_resource_group": "my-rg",
+        "device_name": "my-device",
+        "endpoint_name": "ep1",
+        "endpoint_address": "opc.tcp://1.2.3.4:4840",
+        "skip_connector_check": True,  # skip template lookup so we hit arg validation
+    }
+    base_kwargs.update(kwargs_override)
+
+    with pytest.raises(RequiredArgumentMissingError):
+        add_inbound_device_endpoint(cmd=mocked_cmd, **base_kwargs)
+
+
+def test_add_inbound_device_endpoint_no_template_errors(
+    mocked_cmd,
+    mocker,
+):
+    """When connector template is not found for a non-OPC UA type and --skip-connector-check
+    is not set, raise ResourceNotFoundError.
+    OPC UA is excluded here because it never uses connector templates.
+    """
+    connector_type = "Microsoft.Onvif"  # non-OPC UA type that requires a connector template
+    mock_ct = mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates"
+    )
+    mock_ct.return_value.get_connector_template_for_type.return_value = None
+
+    with pytest.raises(ResourceNotFoundError, match="No connector template found for connector type"):
+        add_inbound_device_endpoint(
+            cmd=mocked_cmd,
+            connector_type=connector_type,
+            instance_name="my-instance",
+            instance_resource_group="my-rg",
+            device_name="my-device",
+            endpoint_name="ep1",
+            endpoint_address="http://1.2.3.4:80/onvif",
+            skip_connector_check=False,
+        )
+
+
+@pytest.mark.parametrize("with_config_file", [False, True])
+@pytest.mark.parametrize("skip_connector_check", [False, True])
+@pytest.mark.parametrize("endpoints_present, replace", [
+    (False, False),
+    (True, True),
+])
+def test_add_inbound_device_endpoint_success(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocker,
+    mocked_get_namespace_for_instance,
+    with_config_file: bool,
+    skip_connector_check: bool,
+    endpoints_present: bool,
+    replace: bool,
+):
+    """
+    Happy-path tests for add_inbound_device_endpoint.
+    Covers: with/without config file, skip/no-skip connector check, replace semantics.
+    """
+    # --endpoint-config and --skip-connector-check are mutually exclusive; skip the invalid combination.
+    if with_config_file and skip_connector_check:
+        pytest.skip("mutually exclusive combination — covered by test_add_inbound_device_endpoint_skip_connector_check_with_config_file_errors")
+
+    connector_type = "Microsoft.OpcUa"
+    version_from_template = "1.3.0"
+
+    # OPC UA does not use Akri connector templates — mock _get_opcua_info instead.
+    # For skip_connector_check=True neither path is taken, so the mock is a no-op there.
+    mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_devices.NamespaceDevices._get_opcua_info",
+        return_value={"version": version_from_template, "inboundEndpoints": []},
+    )
+    # ConnectorTemplates should NOT be called for OPC UA; patch it to catch any accidental call.
+    mock_ct = mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates"
+    )
+    mock_ct.return_value.get_connector_template_for_type.side_effect = AssertionError(
+        "ConnectorTemplates should not be called for OPC UA"
+    )
+
+    # Setup identifiers
+    device_name = generate_random_string()
+    instance_name = f"inst-{generate_random_string()}"
+    instance_resource_group = f"rg-{generate_random_string()}"
+    endpoint_name = f"ep-{generate_random_string()}"
+    endpoint_address = "opc.tcp://10.0.0.1:4840"
+
+    namespace_name = mocked_get_namespace_for_instance.return_value["name"]
+    resource_group_name = mocked_get_namespace_for_instance.return_value["resource_group"]
+
+    # Build endpoint config file content (inline JSON, not an actual file path)
+    endpoint_config_content = '{"keepAlive": 5000}'
+    config_file_path = None
+    if with_config_file:
+        config_file_path = endpoint_config_content
+        # patch process_additional_configuration so it just returns the JSON string
+        mocker.patch(
+            "azext_edge.edge.providers.adr.helpers.process_additional_configuration",
+            return_value=endpoint_config_content,
+        )
+
+    # Build original device
+    original_device = get_namespace_device_record(
+        device_name=device_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+    )
+    original_device["properties"]["endpoints"] = {
+        "inbound": generate_device_inbound_endpoint() if endpoints_present else {}
+    }
+    if replace:
+        original_device["properties"]["endpoints"]["inbound"].update(
+            generate_device_inbound_endpoint(endpoint_name=endpoint_name)
+        )
+
+    # Determine expected endpoint body
+    expected_version = None if skip_connector_check else version_from_template
+    expected_inbound = {
+        endpoint_name: {
+            "endpointType": connector_type,
+            "address": endpoint_address,
+            "version": expected_version,
+            "authentication": {"method": ADRAuthModes.anonymous.value},
+        }
+    }
+    if with_config_file:
+        expected_inbound[endpoint_name]["additionalConfiguration"] = endpoint_config_content
+
+    updated_device = deepcopy(original_device)
+    updated_device["properties"]["endpoints"] = {"inbound": expected_inbound}
+
+    # Mock GET (original device)
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_namespace_device_mgmt_uri(
+            namespace_name=namespace_name,
+            resource_group_name=resource_group_name,
+            device_name=device_name,
+        ),
+        json=original_device,
+        status=200,
+        content_type="application/json",
+    )
+    # Mock PATCH
+    mocked_responses.add(
+        method=responses.PATCH,
+        url=get_namespace_device_mgmt_uri(
+            namespace_name=namespace_name,
+            resource_group_name=resource_group_name,
+            device_name=device_name,
+        ),
+        json=updated_device,
+        status=200,
+        content_type="application/json",
+    )
+    # Mock GET (final read-back)
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_namespace_device_mgmt_uri(
+            namespace_name=namespace_name,
+            resource_group_name=resource_group_name,
+            device_name=device_name,
+        ),
+        json=updated_device,
+        status=200,
+        content_type="application/json",
+    )
+
+    result = add_inbound_device_endpoint(
+        cmd=mocked_cmd,
+        connector_type=connector_type,
+        instance_name=instance_name,
+        instance_resource_group=instance_resource_group,
+        device_name=device_name,
+        endpoint_name=endpoint_name,
+        endpoint_address=endpoint_address,
+        endpoint_config=config_file_path,
+        skip_connector_check=skip_connector_check,
+        wait_sec=0,
+        replace=replace,
+    )
+
+    assert result == expected_inbound
+
+    # OPC UA never uses ConnectorTemplates — template lookup must not be called in any case.
+    mock_ct.return_value.get_connector_template_for_type.assert_not_called()
+
+    # Verify HTTP calls
+    assert len(mocked_responses.calls) == 3
+    patch_body = json.loads(mocked_responses.calls[1].request.body)
+    endpoint_patch = patch_body["properties"]["endpoints"]["inbound"][endpoint_name]
+    assert endpoint_patch["endpointType"] == connector_type
+    assert endpoint_patch["version"] == expected_version
+    assert endpoint_patch["address"] == endpoint_address
+
+    if with_config_file:
+        assert endpoint_patch.get("additionalConfiguration") == endpoint_config_content
+    else:
+        assert "additionalConfiguration" not in endpoint_patch
+
+
+def test_add_inbound_device_endpoint_duplicate_no_replace_errors(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocker,
+    mocked_get_namespace_for_instance,
+):
+    """Duplicate endpoint name without --replace must raise InvalidArgumentValueError."""
+    connector_type = "Microsoft.OpcUa"
+    # OPC UA uses bundled metadata, not connector templates.
+    mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_devices.NamespaceDevices._get_opcua_info",
+        return_value={"version": "1.2.82", "inboundEndpoints": []},
+    )
+    mock_ct = mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates"
+    )
+    mock_ct.return_value.get_connector_template_for_type.side_effect = AssertionError(
+        "ConnectorTemplates should not be called for OPC UA"
+    )
+
+    device_name = generate_random_string()
+    endpoint_name = f"ep-{generate_random_string()}"
+    namespace_name = mocked_get_namespace_for_instance.return_value["name"]
+    resource_group_name = mocked_get_namespace_for_instance.return_value["resource_group"]
+
+    original_device = get_namespace_device_record(
+        device_name=device_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+    )
+    # Pre-populate the endpoint so it already exists
+    original_device["properties"]["endpoints"]["inbound"] = {
+        endpoint_name: {"endpointType": connector_type, "address": "opc.tcp://old:4840", "authentication": {}}
+    }
+
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_namespace_device_mgmt_uri(
+            namespace_name=namespace_name,
+            resource_group_name=resource_group_name,
+            device_name=device_name,
+        ),
+        json=original_device,
+        status=200,
+        content_type="application/json",
+    )
+
+    with pytest.raises(InvalidArgumentValueError, match="already exists"):
+        add_inbound_device_endpoint(
+            cmd=mocked_cmd,
+            connector_type=connector_type,
+            instance_name="my-instance",
+            instance_resource_group="my-rg",
+            device_name=device_name,
+            endpoint_name=endpoint_name,
+            endpoint_address="opc.tcp://new:4840",
+            replace=False,
+            wait_sec=0,
+        )
+

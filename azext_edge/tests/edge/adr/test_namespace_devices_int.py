@@ -614,3 +614,194 @@ def assert_namespace_device_opcua_props(
         assert result_config["security"]["securityPolicy"] == expected_policy
     if "security_mode" in expected:
         assert result_config["security"]["securityMode"] == expected["security_mode"]
+
+
+# ---------------------------------------------------------------------------
+# Generalized inbound add command tests
+# ---------------------------------------------------------------------------
+
+def test_generalized_inbound_endpoint_show_schema_opcua():
+    """--show-schema for OPC UA reads from the bundled file (no ARM call needed)."""
+    result = run(
+        "az iot ops ns device endpoint inbound add "
+        "--show-schema --connector-type Microsoft.OpcUa "
+        "-n dummy -d dummy --endpoint-address dummy -g dummy -i dummy"
+    )
+    assert result["connectorType"] == "Microsoft.OpcUa"
+    config = result["endpointConfig"]
+
+    # All top-level fields expected from 1.3.x metadata
+    for field in [
+        "applicationName",
+        "keepAliveMilliseconds",
+        "defaults",
+        "session",
+        "subscription",
+        "security",
+        "runAssetDiscovery",
+        "syncPropertiesIntoStateStore",
+        "shared",
+    ]:
+        assert field in config, f"Missing top-level field: {field}"
+
+    # Security sub-fields including the 1.3.x addition
+    for field in [
+        "autoAcceptUntrustedServerCertificates",
+        "securityPolicy",
+        "securityMode",
+        "privateKeyPasswordSecretName",
+    ]:
+        assert field in config["security"], f"Missing security field: {field}"
+
+    # Defaults sub-object
+    for field in [
+        "publishingIntervalMilliseconds",
+        "samplingIntervalMilliseconds",
+        "queueSize",
+        "keyFrameCount",
+    ]:
+        assert field in config["defaults"], f"Missing defaults field: {field}"
+
+
+def test_generalized_inbound_endpoint_error_cases():
+    """Verify CLI-level and provider-level error conditions."""
+    # --skip-connector-check + --endpoint-config are mutually exclusive
+    run(
+        "az iot ops ns device endpoint inbound add "
+        "--connector-type Microsoft.Mqtt "
+        "-n dummy -d dummy --endpoint-address dummy -g dummy -i dummy "
+        "--skip-connector-check --endpoint-config '{\"key\": \"value\"}'",
+        expect_failure=True,
+    )
+
+
+def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_resources: List[str]):
+    """Integration lifecycle test for the generalized inbound add command."""
+    import os
+    import tempfile
+
+    instance_name = require_namespace_init["instanceName"]
+    resource_group = require_namespace_init["resourceGroup"]
+
+    device_name = f"dev-gen-{generate_random_string(8, force_lower=True)}"
+    endpoint_opcua_min = f"gen-opcua-min-{generate_random_string(6, force_lower=True)}"
+    endpoint_opcua_cfg = f"gen-opcua-cfg-{generate_random_string(6, force_lower=True)}"
+    endpoint_mqtt_scc = f"gen-mqtt-scc-{generate_random_string(6, force_lower=True)}"
+
+    # Create device
+    result = run(
+        f"az iot ops ns device create --name {device_name} "
+        f"--instance {instance_name} -g {resource_group}"
+    )
+    tracked_resources.append(result["id"])
+
+    # --- OPC UA: minimal (no --endpoint-config, version auto-resolved from bundled) ---
+    opcua_address = "opc.tcp://192.168.1.200:4840"
+    result = run(
+        f"az iot ops ns device endpoint inbound add "
+        f"--connector-type Microsoft.OpcUa "
+        f"--device {device_name} --name {endpoint_opcua_min} "
+        f"--endpoint-address {opcua_address} "
+        f"--instance {instance_name} -g {resource_group}"
+    )
+    assert endpoint_opcua_min in result
+    ep = result[endpoint_opcua_min]
+    assert ep["endpointType"] == DeviceEndpointType.OPCUA.value
+    assert ep["address"] == opcua_address
+
+    # --- OPC UA: with --endpoint-config (JSON file) and --replace ---
+    opcua_config = {
+        "applicationName": "IntTestApp",
+        "keepAliveMilliseconds": 15000,
+        "security": {"autoAcceptUntrustedServerCertificates": True},
+    }
+    config_fd, config_path = tempfile.mkstemp(suffix=".json")
+    try:
+        with os.fdopen(config_fd, "w") as f:
+            json.dump(opcua_config, f)
+        result = run(
+            f"az iot ops ns device endpoint inbound add "
+            f"--connector-type Microsoft.OpcUa "
+            f"--device {device_name} --name {endpoint_opcua_min} "
+            f"--endpoint-address {opcua_address} "
+            f"--instance {instance_name} -g {resource_group} "
+            f"--endpoint-config {config_path} --replace"
+        )
+    finally:
+        os.unlink(config_path)
+
+    assert endpoint_opcua_min in result
+    ep = result[endpoint_opcua_min]
+    additional_config = json.loads(ep["additionalConfiguration"])
+    assert additional_config["applicationName"] == "IntTestApp"
+    assert additional_config["keepAliveMilliseconds"] == 15000
+    assert additional_config["security"]["autoAcceptUntrustedServerCertificates"] is True
+
+    # --- OPC UA: separate named endpoint with --endpoint-config ---
+    result = run(
+        f"az iot ops ns device endpoint inbound add "
+        f"--connector-type Microsoft.OpcUa "
+        f"--device {device_name} --name {endpoint_opcua_cfg} "
+        f"--endpoint-address {opcua_address} "
+        f"--instance {instance_name} -g {resource_group}"
+    )
+    assert endpoint_opcua_cfg in result
+
+    # --- --show-schema for non-OPC UA type with real instance ---
+    # Attempt Onvif; skip gracefully if no connector template is deployed
+    try:
+        schema_result = run(
+            f"az iot ops ns device endpoint inbound add "
+            f"--show-schema --connector-type Microsoft.Onvif "
+            f"-n dummy -d dummy --endpoint-address dummy "
+            f"--instance {instance_name} -g {resource_group}"
+        )
+        assert schema_result["connectorType"] == "Microsoft.Onvif"
+        assert "endpointConfig" in schema_result
+    except CLIInternalError as e:
+        if "not found" in str(e).lower() or "no connector" in str(e).lower():
+            pytest.skip(f"No Onvif connector template available in instance: {e}")
+        raise
+
+    # --- Non-OPC UA with --skip-connector-check + --version (no template needed) ---
+    mqtt_address = "aio-broker:18883"
+    result = run(
+        f"az iot ops ns device endpoint inbound add "
+        f"--connector-type Microsoft.Mqtt "
+        f"--device {device_name} --name {endpoint_mqtt_scc} "
+        f"--endpoint-address {mqtt_address} "
+        f"--instance {instance_name} -g {resource_group} "
+        f"--skip-connector-check --version 0.3.4"
+    )
+    assert endpoint_mqtt_scc in result
+    ep = result[endpoint_mqtt_scc]
+    assert ep["endpointType"] == "Microsoft.Mqtt"
+    assert ep["address"] == mqtt_address
+    assert ep.get("version") == "0.3.4"
+
+    # --- Error: --skip-connector-check + --endpoint-config (mutually exclusive) ---
+    run(
+        f"az iot ops ns device endpoint inbound add "
+        f"--connector-type Microsoft.Mqtt "
+        f"--device {device_name} --name dummy_ep "
+        f"--endpoint-address dummy "
+        f"--instance {instance_name} -g {resource_group} "
+        f"--skip-connector-check --endpoint-config '{{\"key\": \"value\"}}'",
+        expect_failure=True,
+    )
+
+    # --- Error: missing required arg (--connector-type) ---
+    run(
+        f"az iot ops ns device endpoint inbound add "
+        f"--device {device_name} --name dummy_ep "
+        f"--endpoint-address dummy "
+        f"--instance {instance_name} -g {resource_group}",
+        expect_failure=True,
+    )
+
+    # --- Cleanup: remove all created endpoints ---
+    run(
+        f"az iot ops ns device endpoint inbound remove "
+        f"--device {device_name} --instance {instance_name} -g {resource_group} "
+        f"--endpoint {endpoint_opcua_min} {endpoint_opcua_cfg} {endpoint_mqtt_scc} -y"
+    )

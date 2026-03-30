@@ -839,6 +839,56 @@ def load_adr_arguments(self, _):
             action="extend",
         )
 
+    with self.argument_context("iot ops ns device endpoint inbound add") as context:
+        context.argument(
+            "connector_type",
+            options_list=["--connector-type", "--ct"],
+            help="Connector type for the inbound endpoint (e.g. 'Microsoft.OpcUa', 'Microsoft.Onvif'). "
+            "The matching connector template must exist in the instance unless --skip-connector-check is used.",
+        )
+        context.argument(
+            "device_name",
+            options_list=["--device", "-d"],
+            help="Device name.",
+            required=True,
+        )
+        context.argument(
+            "endpoint_name",
+            options_list=["--name", "-n"],
+            help="Endpoint name.",
+            required=True,
+        )
+        context.argument(
+            "endpoint_address",
+            options_list=["--endpoint-address", "--address"],
+            help="Endpoint address to connect to.",
+            required=True,
+        )
+        context.argument(
+            "endpoint_config",
+            options_list=["--endpoint-config", "--ec"],
+            help="Inline JSON string or path to a JSON/YAML file (.json, .yaml, .yml) containing "
+            "connector-specific endpoint configuration. The schema can be discovered with --show-schema. "
+            "Cannot be combined with --skip-connector-check.",
+        )
+        context.argument(
+            "show_schema",
+            options_list=["--show-schema"],
+            help="Show the available endpoint configuration schema for the specified connector type "
+            "and exit without creating an endpoint. The output is a ready-to-use config template "
+            "with default values filled in. Fields shown as '<string>' or '<integer>' are optional "
+            "— replace with a value or remove them before passing to --endpoint-config.",
+            arg_type=get_three_state_flag(),
+        )
+        context.argument(
+            "skip_connector_check",
+            options_list=["--skip-connector-check", "--scc"],
+            help="Skip validation that a connector template exists for the connector type. "
+            "The endpoint version will not be auto-resolved and no schema validation is performed. "
+            "Cannot be combined with --endpoint-config.",
+            arg_type=get_three_state_flag(),
+        )
+
     with self.argument_context("iot ops ns device endpoint inbound add custom") as context:
         context.argument(
             "endpoint_version",

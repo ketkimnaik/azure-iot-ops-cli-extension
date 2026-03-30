@@ -183,41 +183,110 @@ def get_default_dataset(asset: dict, dataset_name: str, create_if_none: bool = F
     return matched_datasets[0]
 
 
+def _detect_shell() -> str:
+    """Return a short shell identifier: 'powershell', 'bash', 'zsh', 'cmd', or 'unknown'."""
+    import os
+    import sys
+
+    # PowerShell (any version, any OS) always sets PSModulePath
+    if os.environ.get("PSModulePath"):
+        return "powershell"
+    # Unix-like shells set $SHELL
+    shell_path = os.environ.get("SHELL", "")
+    if "zsh" in shell_path:
+        return "zsh"
+    if "bash" in shell_path:
+        return "bash"
+    # Windows CMD
+    if sys.platform == "win32":
+        return "cmd"
+    return "unknown"
+
+
+def _inline_json_quoting_hint() -> str:
+    """Return a shell-specific quoting hint for inline JSON."""
+    shell = _detect_shell()
+    if shell == "powershell":
+        return (
+            "Detected shell: PowerShell. "
+            "Wrap the JSON in single quotes and escape inner double quotes with backslash:\n"
+            "  --endpoint-config '{\\\"key\\\": \\\"value\\\", \\\"nested\\\": {\\\"k\\\": 1}}'"
+        )
+    if shell in ("bash", "zsh"):
+        return (
+            f"Detected shell: {shell}. "
+            "Wrap the entire JSON value in single quotes (no escaping needed):\n"
+            "  --endpoint-config '{\"key\": \"value\", \"nested\": {\"k\": 1}}'"
+        )
+    if shell == "cmd":
+        return (
+            "Detected shell: Windows CMD. "
+            "Escape each double quote with a backslash:\n"
+            "  --endpoint-config {\\\"key\\\": \\\"value\\\"}"
+        )
+    return (
+        "Tip: in Bash/Zsh wrap the JSON in single quotes; "
+        "in PowerShell escape inner double quotes with backslash (\\\"key\\\")."
+    )
+
+
 def process_additional_configuration(
     additional_configuration: Optional[str] = None,
     config_type: str = "additional",
     **_
 ) -> Optional[str]:
     """
-    Checks that the custom configuration is a valid JSON and returns the stringified JSON.
-    If it is a file, it will read the content.
+    Validates and normalizes endpoint/asset configuration input.
+
+    Accepts:
+    - A file path to a JSON or YAML file (.json, .yaml, .yml)
+    - An inline JSON string
+
+    Always returns a stringified JSON (as required by the API's additionalConfiguration field).
     """
     from ...util import read_file_content
-    inline_json = False
+    from ...util.file_operations import deserialize_file_content
 
     if not additional_configuration:
         return
 
-    try:
-        logger.debug(f"Processing {config_type} configuration.")
-        additional_configuration = read_file_content(additional_configuration)
-        if not additional_configuration:
-            raise InvalidArgumentValueError("Given file is empty.")
-    except FileOperationError:
-        inline_json = True
-        logger.debug(f"Given {config_type} configuration is not a file.")
+    logger.debug(f"Processing {config_type} configuration.")
 
-    # make sure it is an actual json
+    # Try to read as a file first
     try:
-        json.loads(additional_configuration)
-        return additional_configuration
-    except json.JSONDecodeError as e:
-        error_msg = f"{config_type.capitalize()} configuration is not a valid JSON. "
-        if inline_json:
-            error_msg += "For examples of valid JSON formating, please see https://aka.ms/inline-json-examples "
-        raise InvalidArgumentValueError(
-            f"{error_msg}\n{e.msg}"
-        )
+        file_content = read_file_content(additional_configuration)
+        if not file_content:
+            raise InvalidArgumentValueError("Given file is empty.")
+
+        # Parse the file content — supports JSON and YAML transparently
+        try:
+            parsed = deserialize_file_content(additional_configuration)
+        except Exception:
+            # Fallback: try parsing the raw string as JSON
+            try:
+                import json as _json
+                parsed = _json.loads(file_content)
+            except _json.JSONDecodeError as e:
+                raise InvalidArgumentValueError(
+                    f"{config_type.capitalize()} configuration file is not valid JSON or YAML.\n{e.msg}"
+                )
+
+        import json as _json
+        return _json.dumps(parsed)
+
+    except FileOperationError:
+        # Not a file path — treat as inline JSON string
+        logger.debug(f"Given {config_type} configuration is not a file, treating as inline JSON.")
+        import json as _json
+        try:
+            _json.loads(additional_configuration)
+            return additional_configuration
+        except _json.JSONDecodeError as e:
+            raise InvalidArgumentValueError(
+                f"{config_type.capitalize()} configuration is not valid JSON.\n"
+                f"{_inline_json_quoting_hint()}\n"
+                f"Parse error: {e.msg}"
+            )
 
 
 def _setup_certificate_authentication(

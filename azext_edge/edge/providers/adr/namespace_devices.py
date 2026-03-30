@@ -7,7 +7,10 @@
 import json
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
-from azure.cli.core.azclierror import InvalidArgumentValueError
+from azure.cli.core.azclierror import (
+    InvalidArgumentValueError,
+    ResourceNotFoundError,
+)
 from knack.log import get_logger
 from rich.console import Console
 
@@ -398,6 +401,220 @@ class NamespaceDevices(Queryable):
             )
             return result["properties"].get("endpoints", {}).get("inbound", {})
 
+    def _get_opcua_info(
+        self,
+        instance_name: str,
+        instance_resource_group: str,
+    ) -> dict:
+        """
+        Returns OPC UA metadata loaded from the local bundled file after verifying
+        the feature is not explicitly disabled on the instance.
+
+        OPC UA does not use Akri connector templates — its metadata is bundled locally.
+        Version and schema are derived from schemas/opcua_connector_metadata.json.
+
+        Raises:
+            ValidationError: If OPC UA mode is explicitly set to 'Disabled' on the instance.
+        """
+        import os
+        from azure.cli.core.azclierror import ValidationError
+        from ..orchestration.resources.instances import Instances
+
+        instance = Instances(cmd=self.cmd).show(
+            name=instance_name,
+            resource_group_name=instance_resource_group,
+        )
+        opcua_mode = (
+            instance.get("properties", {})
+            .get("features", {})
+            .get("opcua", {})
+            .get("mode")
+        )
+        if opcua_mode == "Disabled":
+            raise ValidationError(
+                f"OPC UA connector is disabled for instance '{instance_name}'. "
+                "Enable it before adding an OPC UA inbound endpoint:\n"
+                f"  az iot ops update -n {instance_name} -g {instance_resource_group} "
+                "--feature opcua.mode=Stable"
+            )
+
+        schema_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "schemas",
+            "opcua_connector_metadata.json",
+        )
+        if not os.path.exists(schema_file):
+            raise ValidationError(f"Bundled OPC UA metadata file not found: {schema_file}")
+
+        with open(schema_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def add_inbound_endpoint_by_connector_type(
+        self,
+        instance_name: str,
+        instance_resource_group: str,
+        connector_type: str,
+        device_name: Optional[str] = None,
+        endpoint_name: Optional[str] = None,
+        endpoint_address: Optional[str] = None,
+        endpoint_config: Optional[str] = None,
+        show_schema: bool = False,
+        skip_connector_check: bool = False,
+        endpoint_version: Optional[str] = None,
+        certificate_reference: Optional[str] = None,
+        key_reference: Optional[str] = None,
+        intermediate_certificate_reference: Optional[str] = None,
+        password_reference: Optional[str] = None,
+        username_reference: Optional[str] = None,
+        trust_list: Optional[str] = None,
+        replace: Optional[bool] = False,
+        **kwargs
+    ):
+        """
+        Generalized command for adding an inbound device endpoint using a connector type.
+
+        Supports schema discovery (--show-schema) and inline JSON or file-based endpoint
+        configuration (--endpoint-config) driven by the connector template metadata.
+
+        OPC UA (Microsoft.OpcUa) is handled separately: it does not use Akri connector
+        templates. Its metadata (including version and schema) is bundled locally.
+        """
+        from .helpers import process_additional_configuration, process_authentication
+
+        is_opcua = connector_type.lower() == DeviceEndpointType.OPCUA.value.lower()
+
+        # --show-schema: return schema and exit early (no device/name/address needed)
+        if show_schema:
+            if is_opcua:
+                import os as _os
+                _schema_file = _os.path.join(
+                    _os.path.dirname(_os.path.abspath(__file__)),
+                    "schemas",
+                    "opcua_connector_metadata.json",
+                )
+                with open(_schema_file, "r", encoding="utf-8") as _f:
+                    opcua_metadata = json.load(_f)
+                schema = {}
+                for ep in opcua_metadata.get("inboundEndpoints", []):
+                    if ep.get("endpointType", "").lower() == DeviceEndpointType.OPCUA.value.lower():
+                        schema = ep.get("additionalConfigurationSchema", {})
+                        break
+                return {"connectorType": connector_type, "endpointConfig": _slim_schema(schema)}
+
+            connector_templates = ConnectorTemplates(cmd=self.cmd)
+            raw = connector_templates.get_endpoint_schema(
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                connector_type=connector_type,
+            )
+            # slim the endpointConfig portion if present
+            if isinstance(raw, dict) and "endpointConfig" in raw:
+                raw["endpointConfig"] = _slim_schema(raw["endpointConfig"])
+            return raw
+
+        # --skip-connector-check only makes sense when endpoint_config is absent;
+        # if the user supplies endpoint_config we must validate a template exists.
+        if skip_connector_check and endpoint_config:
+            raise InvalidArgumentValueError(
+                "--skip-connector-check cannot be used when --endpoint-config is provided.\n"
+                "Create or verify a connector template first: az iot ops connector template create ..."
+            )
+
+        # OPC UA: no connector template — use bundled metadata for enabled-check and version
+        if is_opcua and not skip_connector_check:
+            opcua_metadata = self._get_opcua_info(instance_name, instance_resource_group)
+            if endpoint_version is None:
+                endpoint_version = opcua_metadata.get("version")
+
+        # Connector template lookup for all other types (only needed when endpoint_config is provided)
+        elif not skip_connector_check:
+            connector_templates = ConnectorTemplates(cmd=self.cmd)
+            template = connector_templates.get_connector_template_for_type(
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                connector_type=connector_type,
+            )
+            if template is None:
+                raise ResourceNotFoundError(
+                    f"No connector template found for connector type '{connector_type}' "
+                    f"in instance '{instance_name}'.\n"
+                    "Create one with: az iot ops connector template create ..."
+                )
+            # Auto-resolve endpoint version from the template using shared helper
+            if endpoint_version is None:
+                endpoint_version = connector_templates.get_endpoint_version_for_type(
+                    instance_name=instance_name,
+                    instance_resource_group=instance_resource_group,
+                    endpoint_type=connector_type,
+                )
+
+        # Process endpoint config from file
+        additional_configuration = None
+        if endpoint_config:
+            additional_configuration = process_additional_configuration(
+                additional_configuration=endpoint_config,
+                config_type="endpoint",
+            )
+
+        # Build endpoint body
+        endpoint_body = {
+            "address": endpoint_address,
+            "endpointType": connector_type,
+            "version": endpoint_version,
+            "authentication": process_authentication(
+                certificate_reference=certificate_reference,
+                key_reference=key_reference,
+                intermediate_certificate_reference=intermediate_certificate_reference,
+                password_reference=password_reference,
+                username_reference=username_reference,
+            ),
+        }
+
+        if additional_configuration is not None:
+            endpoint_body["additionalConfiguration"] = additional_configuration
+
+        if trust_list:
+            endpoint_body["trustSettings"] = {"trustList": trust_list}
+
+        # Fetch current device endpoints and validate replace semantics
+        device = self.show(
+            device_name=device_name,
+            instance_name=instance_name,
+            resource_group=instance_resource_group,
+        )
+        namespace = parse_resource_id(device["id"])
+        original_endpoints = _get_endpoints(device)
+
+        if endpoint_name in original_endpoints and not replace:
+            raise InvalidArgumentValueError(
+                f"Inbound endpoint '{endpoint_name}' already exists. Use --replace to update it."
+            )
+
+        original_endpoints[endpoint_name] = endpoint_body
+
+        update_payload = {
+            "properties": {
+                "endpoints": {
+                    "inbound": original_endpoints
+                }
+            }
+        }
+
+        with console.status(f"Updating inbound endpoints for {device_name}..."):
+            poller = self.ops.begin_update(
+                resource_group_name=namespace["resource_group"],
+                namespace_name=namespace["name"],
+                device_name=device_name,
+                properties=update_payload,
+            )
+            wait_for_terminal_state(poller, **kwargs)
+            result = self.show(
+                device_name=device_name,
+                namespace_name=namespace["name"],
+                resource_group=namespace["resource_group"],
+            )
+            return result["properties"].get("endpoints", {}).get("inbound", {})
+
     def list_endpoints(
         self,
         device_name: str,
@@ -498,6 +715,39 @@ def _get_endpoints(device: dict, inbound: bool = True) -> dict:
 
     device_endpoints = device_props.get("endpoints", {})
     return device_endpoints.get("inbound", {}) if inbound else device_endpoints
+
+
+def _slim_schema(schema: dict) -> dict:
+    """
+    Converts a JSON schema into a ready-to-use config template by extracting
+    default values for each property recursively.
+
+    Fields with null defaults are shown as typed placeholders (e.g. "<string>",
+    "<integer>") so the user knows what value is expected. Fields with actual
+    defaults retain those defaults.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    props = schema.get("properties", {})
+    if not props:
+        return schema.get("default")
+
+    result = {}
+    for field, field_schema in props.items():
+        if "properties" in field_schema:
+            result[field] = _slim_schema(field_schema)
+        else:
+            default = field_schema.get("default")
+            if default is None:
+                raw_type = field_schema.get("type", "string")
+                if isinstance(raw_type, list):
+                    non_null = [t for t in raw_type if t != "null"]
+                    raw_type = non_null[0] if non_null else "string"
+                result[field] = f"<{raw_type}>"
+            else:
+                result[field] = default
+    return result
 
 
 def _process_onvif_configuration(
