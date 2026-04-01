@@ -54,3 +54,52 @@ def secretsync_disable(cmd, instance_name: str, resource_group_name: str, confir
         confirm_yes=confirm_yes,
         **kwargs,
     )
+
+
+def secretsync_secret_set(
+    cmd,
+    instance_name: str,
+    resource_group_name: str,
+    secret_sync_name: str,
+    secret_names: list,
+    **kwargs,
+) -> dict:
+    return Instances(cmd).set_secretsync_secret(
+        name=instance_name,
+        resource_group_name=resource_group_name,
+        secret_sync_name=secret_sync_name,
+        secret_names=secret_names,
+        **kwargs,
+    )
+
+
+def secretsync_secret_list(
+    cmd,
+    instance_name: str,
+    resource_group_name: str,
+    secret_sync_name: str,
+) -> Optional[list[dict]]:
+    return Instances(cmd).list_secretsync_secrets(
+        name=instance_name,
+        resource_group_name=resource_group_name,
+        secret_sync_name=secret_sync_name,
+    )
+
+
+def secretsync_secret_unset(
+    cmd,
+    instance_name: str,
+    resource_group_name: str,
+    secret_sync_name: str,
+    secret_name: str,
+    confirm_yes: Optional[bool] = None,
+    **kwargs,
+):
+    return Instances(cmd).unset_secretsync_secret(
+        name=instance_name,
+        resource_group_name=resource_group_name,
+        secret_sync_name=secret_sync_name,
+        secret_name=secret_name,
+        confirm_yes=confirm_yes,
+        **kwargs,
+    )
