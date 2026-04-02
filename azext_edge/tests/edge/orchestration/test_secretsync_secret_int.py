@@ -52,7 +52,7 @@ def secretsync_secret_int_setup(settings, tracked_resources: List[str]):
 
     # Create test AKV secrets for use in tests
     test_secrets = {}
-    for i in range(3):
+    for _ in range(3):
         secret_name = f"clitest{generate_random_string(size=8, force_lower=True)}"
         secret_value = generate_random_string(size=32)
         try:
