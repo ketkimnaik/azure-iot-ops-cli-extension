@@ -2132,16 +2132,11 @@ def load_iotops_help():
         type: command
         short-summary: Create or update a SecretSync resource that syncs AKV secrets to K8s.
         long-summary: |
-            Resolves the instance's default secret provider class (SPC), verifies each AKV secret exists,
-            adds each secret to the SPC's objects list, and creates or merges entries into the named
-            SecretSync resource.
+            Resolves the instance's default secret provider class (SPC), verifies each AKV secret exists, adds each secret to the SPC's objects list, and creates or merges entries into the named SecretSync resource.
 
-            If the SecretSync already exists, new secret entries are merged into it. Existing entries
-            with the same AKV secret name will have their target key updated.
+            If the SecretSync already exists, new secret entries are merged into it. Existing entries with the same AKV secret name will have their target key updated.
 
-            The --secret-sync-name value becomes the K8s secret name. Consumers reference it via
-            <secret-sync-name>/<target-key> for device endpoints, or just <secret-sync-name> for
-            dataflow endpoints.
+            The --secret-sync-name value becomes the K8s secret name. Consumers reference it via `<secret-sync-name>/<target-key>` for device endpoints, or just `<secret-sync-name>` for dataflow endpoints.
 
         examples:
         - name: Create a SecretSync for device endpoint x509 cert auth.
@@ -2178,17 +2173,11 @@ def load_iotops_help():
         "iot ops secretsync secret unset"
     ] = """
         type: command
-        short-summary: Remove a specific secret from a SecretSync resource. If all secrets are
-            removed, the SecretSync resource itself is automatically deleted.
+        short-summary: Remove a specific secret from a SecretSync resource. If all secrets are removed, the SecretSync resource itself is automatically deleted.
         long-summary: |
-            Removes the secret entry from the SecretSync's objectSecretMapping. If this is the last
-            secret in the SecretSync, the entire SecretSync resource will be deleted since the ARM API
-            does not allow a SecretSync with zero secret mappings.
+            Removes the secret entry from the SecretSync's objectSecretMapping. If this is the last secret in the SecretSync, the entire SecretSync resource will be deleted since the ARM API does not allow a SecretSync with zero secret mappings.
 
-            Before removing the secret from the shared SPC, a ref-count check is performed across all
-            SecretSyncs in the custom location. The SPC entry is only removed if no other SecretSync
-            still references the same AKV secret. This prevents breaking other consumers of the shared
-            SPC.
+            Before removing the secret from the shared SPC, a ref-count check is performed across all SecretSyncs in the custom location. The SPC entry is only removed if no other SecretSync still references the same AKV secret. This prevents breaking other consumers of the shared SPC.
 
             This command does NOT delete the secret from Azure Key Vault.
 

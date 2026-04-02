@@ -1570,7 +1570,7 @@ def load_iotops_arguments(self, _):
             "secret_names",
             options_list=["--secret-name"],
             action="append",
-            help="AKV secret name to sync, format: <akv-name>=<target-key>. "
+            help="AKV secret name to sync, format: `<akv-name>=<target-key>`. "
             "Both parts are required. Repeatable. The AKV secret must already exist.",
         )
 

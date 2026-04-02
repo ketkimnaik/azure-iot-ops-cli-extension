@@ -151,10 +151,13 @@ def test_secretsync_secret_set_list_unset(
             f"--secret-sync-name {sync_name} "
             f"--secret-name {first_secret} -y"
         )
+        # Partial removal returns the updated SecretSync resource
         assert unset_result is not None
-        assert "removed" in unset_result.get("message", "").lower()
+        remaining = unset_result.get("properties", {}).get("objectSecretMapping", [])
+        assert len(remaining) == 1
+        assert remaining[0]["sourcePath"] == second_secret
 
-        # Verify only the second secret remains
+        # Verify via list
         list_result3 = run(
             f"az iot ops secretsync secret list "
             f"--instance {instance_name} -g {resource_group} "
@@ -170,8 +173,8 @@ def test_secretsync_secret_set_list_unset(
             f"--secret-sync-name {sync_name} "
             f"--secret-name {second_secret} -y"
         )
-        assert unset_last_result is not None
-        assert "deleted" in unset_last_result.get("message", "").lower()
+        # Full deletion returns None
+        assert unset_last_result is None
 
     except Exception:
         # Best effort cleanup of the SecretSync if the test fails partway through
@@ -248,6 +251,80 @@ def test_secretsync_secret_set_multiple_at_once(
                 )
             except CLIInternalError:
                 pass
+        raise
+
+
+@pytest.mark.require_wlif_setup
+def test_secretsync_secret_set_multikey_mapping(
+    cluster_connection,
+    secretsync_secret_int_setup,
+):
+    """Test that the same AKV secret can be mapped to multiple target keys."""
+    resource_group = secretsync_secret_int_setup["resourceGroup"]
+    instance_name = secretsync_secret_int_setup["instanceName"]
+    test_secrets = secretsync_secret_int_setup["testSecrets"]
+    secret_names = list(test_secrets.keys())
+
+    sync_name = f"cli-test-multikey-{generate_random_string(size=6, force_lower=True)}"
+    first_secret = secret_names[0]
+
+    try:
+        # Set the same secret with targetKey "certificate"
+        set_result = run(
+            f"az iot ops secretsync secret set "
+            f"--instance {instance_name} -g {resource_group} "
+            f"--secret-sync-name {sync_name} "
+            f"--secret-name {first_secret}=certificate"
+        )
+        mappings = set_result.get("properties", {}).get("objectSecretMapping", [])
+        assert len(mappings) == 1
+
+        # Set the same secret again with a different targetKey "cert-copy"
+        merge_result = run(
+            f"az iot ops secretsync secret set "
+            f"--instance {instance_name} -g {resource_group} "
+            f"--secret-sync-name {sync_name} "
+            f"--secret-name {first_secret}=cert-copy"
+        )
+        merge_mappings = merge_result.get("properties", {}).get("objectSecretMapping", [])
+        # Should have 2 entries: same sourcePath, different targetKeys
+        assert len(merge_mappings) == 2
+        target_keys = {m["targetKey"] for m in merge_mappings}
+        assert "certificate" in target_keys
+        assert "cert-copy" in target_keys
+        assert all(m["sourcePath"] == first_secret for m in merge_mappings)
+
+        # Idempotency: set the same sourcePath+targetKey combo again — should not duplicate
+        idem_result = run(
+            f"az iot ops secretsync secret set "
+            f"--instance {instance_name} -g {resource_group} "
+            f"--secret-sync-name {sync_name} "
+            f"--secret-name {first_secret}=certificate"
+        )
+        idem_mappings = idem_result.get("properties", {}).get("objectSecretMapping", [])
+        assert len(idem_mappings) == 2
+
+        # Unset removes ALL mappings for the sourcePath
+        unset_result = run(
+            f"az iot ops secretsync secret unset "
+            f"--instance {instance_name} -g {resource_group} "
+            f"--secret-sync-name {sync_name} "
+            f"--secret-name {first_secret} -y"
+        )
+        # All mappings removed, SecretSync should be deleted
+        assert unset_result is None
+
+    except Exception:
+        try:
+            run(
+                f"az iot ops secretsync secret unset "
+                f"--instance {instance_name} -g {resource_group} "
+                f"--secret-sync-name {sync_name} "
+                f"--secret-name {first_secret} -y",
+                expect_failure=True,
+            )
+        except CLIInternalError:
+            pass
         raise
 
 

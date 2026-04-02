@@ -100,7 +100,7 @@ def _setup_instance_and_spc(
         (["mysecret1=certificate", "mysecret2=privateKey"], False),
         # Merge into existing SecretSync
         (["newsecret=intermediateCerts"], True),
-        # Update existing mapping in SecretSync
+        # Add same sourcePath with different targetKey (allowed — multi-key mapping)
         (["secret1=newTargetKey"], True),
     ],
 )
@@ -212,9 +212,8 @@ def test_secretsync_secret_set(
     ss_mappings = ss_put_body["properties"]["objectSecretMapping"]
     for entry in secret_names:
         akv_name, _, target_key = entry.partition("=")
-        matching = [m for m in ss_mappings if m["sourcePath"] == akv_name]
+        matching = [m for m in ss_mappings if m["sourcePath"] == akv_name and m["targetKey"] == target_key]
         assert len(matching) == 1
-        assert matching[0]["targetKey"] == target_key
 
     if not existing_secretsync:
         assert ss_put_body["properties"]["secretProviderClassName"] == spc_name
@@ -383,6 +382,7 @@ def test_secretsync_secret_unset(
         name=secret_sync_name, resource_group_name=resource_group_name
     )
     ss_record["properties"]["objectSecretMapping"] = initial_mappings
+    ss_record["properties"]["secretProviderClassName"] = spc_name
     ss_endpoint = get_secretsync_endpoint(
         resource_group_name=resource_group_name, spc_name=secret_sync_name
     )
@@ -458,13 +458,14 @@ def test_secretsync_secret_unset(
     # Mock ARG query for all SecretSyncs in custom location (ref-count check)
     arg_secretsyncs = []
     if other_secretsyncs_reference:
-        # Another SecretSync still references the same secret
+        # Another SecretSync still references the same secret via the same SPC
         other_ss = get_mock_secretsync_record(
             name=generate_random_string(), resource_group_name=resource_group_name
         )
         other_ss["properties"]["objectSecretMapping"] = [
             {"sourcePath": secret_to_remove, "targetKey": "otherKey"}
         ]
+        other_ss["properties"]["secretProviderClassName"] = spc_name
         arg_secretsyncs.append(other_ss)
 
     mocked_responses.add(
@@ -480,14 +481,6 @@ def test_secretsync_secret_unset(
         spc_objects = (
             "array:\n    - |\n      objectName: secret1\n      objectType: secret\n"
             "    - |\n      objectName: secret2\n      objectType: secret\n"
-        )
-        # Mock instance GET (for get_default_spc)
-        mocked_responses.add(
-            method=responses.GET,
-            url=instance_endpoint,
-            json=instance_record,
-            status=200,
-            content_type="application/json",
         )
 
         spc_record = get_mock_spc_record(
@@ -526,13 +519,12 @@ def test_secretsync_secret_unset(
         wait_sec=0.1,
     )
 
-    assert result is not None
-    assert "message" in result
-
     if remaining_count == 0:
-        assert "deleted" in result["message"]
+        # Full deletion — returns None
+        assert result is None
     else:
-        assert "removed" in result["message"].lower() or "removed" in result["message"]
+        # Partial removal — returns updated SecretSync resource
+        assert result is not None
         # Verify the PUT body removed the secret
         ss_put_body = json.loads(ss_put.calls[0].request.body)
         remaining_mappings = ss_put_body["properties"]["objectSecretMapping"]
