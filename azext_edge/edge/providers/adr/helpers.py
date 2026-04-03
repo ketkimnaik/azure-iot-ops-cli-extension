@@ -182,53 +182,6 @@ def get_default_dataset(asset: dict, dataset_name: str, create_if_none: bool = F
     return matched_datasets[0]
 
 
-def _detect_shell() -> str:
-    """Return a short shell identifier: 'powershell', 'bash', 'zsh', 'cmd', or 'unknown'."""
-    import os
-    import sys
-
-    # PowerShell (any version, any OS) always sets PSModulePath
-    if os.environ.get("PSModulePath"):
-        return "powershell"
-    # Unix-like shells set $SHELL
-    shell_path = os.environ.get("SHELL", "")
-    if "zsh" in shell_path:
-        return "zsh"
-    if "bash" in shell_path:
-        return "bash"
-    # Windows CMD
-    if sys.platform == "win32":
-        return "cmd"
-    return "unknown"
-
-
-def _inline_json_quoting_hint() -> str:
-    """Return a shell-specific quoting hint for inline JSON."""
-    shell = _detect_shell()
-    if shell == "powershell":
-        return (
-            "Detected shell: PowerShell. "
-            "Wrap the JSON in single quotes and escape inner double quotes with backslash:\n"
-            "  --endpoint-config '{\\\"key\\\": \\\"value\\\", \\\"nested\\\": {\\\"k\\\": 1}}'"
-        )
-    if shell in ("bash", "zsh"):
-        return (
-            f"Detected shell: {shell}. "
-            "Wrap the entire JSON value in single quotes (no escaping needed):\n"
-            "  --endpoint-config '{\"key\": \"value\", \"nested\": {\"k\": 1}}'"
-        )
-    if shell == "cmd":
-        return (
-            "Detected shell: Windows CMD. "
-            "Escape each double quote with a backslash:\n"
-            "  --endpoint-config {\\\"key\\\": \\\"value\\\"}"
-        )
-    return (
-        "Tip: in Bash/Zsh wrap the JSON in single quotes; "
-        "in PowerShell escape inner double quotes with backslash (\\\"key\\\")."
-    )
-
-
 def process_additional_configuration(
     additional_configuration: Optional[str] = None,
     config_type: str = "additional",
@@ -267,7 +220,7 @@ def process_additional_configuration(
                 parsed = _json.loads(file_content)
             except _json.JSONDecodeError as e:
                 raise InvalidArgumentValueError(
-                    f"{config_type.capitalize()} configuration file is not valid JSON or YAML.\n{e.msg}"
+                    f"{config_type.capitalize()} configuration file is not valid JSON or YAML: {e}"
                 )
 
         import json as _json
@@ -282,9 +235,7 @@ def process_additional_configuration(
             return additional_configuration
         except _json.JSONDecodeError as e:
             raise InvalidArgumentValueError(
-                f"{config_type.capitalize()} configuration is not valid JSON.\n"
-                f"{_inline_json_quoting_hint()}\n"
-                f"Parse error: {e.msg}"
+                f"{config_type.capitalize()} configuration is not valid JSON: {e}"
             )
 
 

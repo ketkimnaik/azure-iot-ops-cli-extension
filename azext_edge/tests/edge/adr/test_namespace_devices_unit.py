@@ -2658,7 +2658,8 @@ def test_add_inbound_device_endpoint_success(
         )
 
     # Determine expected endpoint body
-    expected_version = None if skip_connector_check else version_from_template
+    # OPC UA version is always None — ADR manages it (consistent with DOE behavior).
+    expected_version = None
     expected_inbound = {
         endpoint_name: {
             "endpointType": connector_type,

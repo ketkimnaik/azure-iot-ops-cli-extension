@@ -90,10 +90,7 @@ class ConnectorTemplates(Queryable):
             look_for_mcr=look_for_mcr,
         )
         if template is None:
-            logger.info(
-                f"No connector template found for endpoint type '{endpoint_type}'. "
-                "Endpoint version will be None."
-            )
+            logger.info(f"No connector template found for endpoint type '{endpoint_type}'.")
             return None
 
         properties = template.get("properties", {})
@@ -587,9 +584,7 @@ class ConnectorTemplates(Queryable):
                 if look_for_mcr is not None:
                     connector_metadata_ref = properties.get("connectorMetadataRef", "")
                     is_mcr_template = connector_metadata_ref.startswith(DEFAULT_REGISTRY_HOST)
-                    if look_for_mcr and not is_mcr_template:
-                        continue
-                    if not look_for_mcr and is_mcr_template:
+                    if look_for_mcr != is_mcr_template:
                         continue
 
                 device_endpoint_types = properties.get("deviceInboundEndpointTypes", [])

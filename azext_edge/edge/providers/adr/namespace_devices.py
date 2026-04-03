@@ -5,6 +5,7 @@
 # ----------------------------------------------------------------------------------------------
 
 import json
+import os
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 from azure.cli.core.azclierror import (
@@ -416,7 +417,6 @@ class NamespaceDevices(Queryable):
         Raises:
             ValidationError: If OPC UA mode is explicitly set to 'Disabled' on the instance.
         """
-        import os
         from azure.cli.core.azclierror import ValidationError
         from ..orchestration.resources.instances import Instances
 
@@ -438,16 +438,7 @@ class NamespaceDevices(Queryable):
                 "--feature opcua.mode=Stable"
             )
 
-        schema_file = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "schemas",
-            "opcua_connector_metadata.json",
-        )
-        if not os.path.exists(schema_file):
-            raise ValidationError(f"Bundled OPC UA metadata file not found: {schema_file}")
-
-        with open(schema_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+        return _load_opcua_metadata_file()
 
     def add_inbound_endpoint_by_connector_type(  # noqa: C901
         self,
@@ -486,14 +477,7 @@ class NamespaceDevices(Queryable):
         # --show-schema: return schema and exit early (no device/name/address needed)
         if show_schema:
             if is_opcua:
-                import os as _os
-                _schema_file = _os.path.join(
-                    _os.path.dirname(_os.path.abspath(__file__)),
-                    "schemas",
-                    "opcua_connector_metadata.json",
-                )
-                with open(_schema_file, "r", encoding="utf-8") as _f:
-                    opcua_metadata = json.load(_f)
+                opcua_metadata = _load_opcua_metadata_file()
                 # Also call _get_opcua_info to allow instance feature-check when
                 # instance args are supplied (e.g. in tests that mock this method).
                 try:
@@ -536,11 +520,10 @@ class NamespaceDevices(Queryable):
                 "Create or verify a connector template first: az iot ops connector template create ..."
             )
 
-        # OPC UA: no connector template — use bundled metadata for enabled-check and version
+        # OPC UA: no connector template — use bundled metadata for enabled-check only.
+        # Version is intentionally left as None (let ADR manage it), matching DOE behavior.
         if is_opcua and not skip_connector_check:
-            opcua_metadata = self._get_opcua_info(instance_name, instance_resource_group)
-            if endpoint_version is None:
-                endpoint_version = opcua_metadata.get("version")
+            self._get_opcua_info(instance_name, instance_resource_group)
 
         # Connector template lookup for all other types (only needed when endpoint_config is provided)
         elif not skip_connector_check:
@@ -715,6 +698,21 @@ class NamespaceDevices(Queryable):
                 resource_group=namespace["resource_group"]
             )
             return result["properties"].get("endpoints", {}).get("inbound", {})
+
+
+def _load_opcua_metadata_file() -> dict:
+    """Load and return the bundled OPC UA connector metadata JSON file."""
+    from azure.cli.core.azclierror import ValidationError
+
+    schema_file = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "schemas",
+        "opcua_connector_metadata.json",
+    )
+    if not os.path.exists(schema_file):
+        raise ValidationError(f"Bundled OPC UA metadata file not found: {schema_file}")
+    with open(schema_file, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 # TODO: unit test
