@@ -222,6 +222,133 @@ def test_secretsync_secret_set(
 
 
 @pytest.mark.parametrize(
+    "kv_tags, expected_hex_encoding",
+    [
+        # DOE/CLI-uploaded cert: has file-encoding:hex tag → objectEncoding: hex in SPC
+        ({"file-encoding": "hex"}, True),
+        # Plain secret (password, token): no tag → no objectEncoding in SPC
+        ({}, False),
+        # Unrelated tags: no file-encoding tag → no objectEncoding
+        ({"purpose": "tls"}, False),
+    ],
+)
+def test_secretsync_secret_set_hex_encoding_detection(
+    mocked_cmd,
+    mocked_responses: responses,
+    kv_tags: dict,
+    expected_hex_encoding: bool,
+):
+    """Verify objectEncoding:hex in SPC is set iff AKV secret has tags['file-encoding']=='hex'.
+
+    DOE and our CLI both set tags['file-encoding']='hex' when uploading DER/PEM certs.
+    Content-type alone is NOT reliable (DER certs get 'application/pkix-cert' which
+    does not contain 'pkcs12' or 'x-pem'). Tags are the authoritative signal.
+    """
+    import yaml
+
+    instance_name = generate_random_string()
+    resource_group_name = generate_random_string()
+    secret_sync_name = generate_random_string()
+    spc_name = generate_random_string()
+    keyvault_name = "mykeyvault"
+    akv_name = "my-cert-der"
+
+    instance_record, spc_record = _setup_instance_and_spc(
+        mocked_responses=mocked_responses,
+        instance_name=instance_name,
+        resource_group_name=resource_group_name,
+        spc_name=spc_name,
+        keyvault_name=keyvault_name,
+    )
+
+    # Mock KV GET — return secret with or without the file-encoding tag
+    mocked_responses.add(
+        method=responses.GET,
+        url=KEYVAULT_DATA_URL_RE,
+        json={
+            "value": "abc123",
+            "id": f"https://{keyvault_name}.vault.azure.net/secrets/{akv_name}",
+            "contentType": "application/pkix-cert",  # DER content type — not reliable for encoding
+            "tags": kv_tags,
+        },
+        status=200,
+        content_type="application/json",
+    )
+
+    # Capture SPC PUT body
+    spc_put = mocked_responses.add(
+        method=responses.PUT,
+        url=get_spc_endpoint(resource_group_name=resource_group_name, spc_name=spc_name),
+        json=spc_record,
+        status=200,
+        content_type="application/json",
+    )
+
+    # Mock instance GET for step 5
+    instance_endpoint = get_instance_endpoint(
+        resource_group_name=resource_group_name, instance_name=instance_name
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=instance_endpoint,
+        json=instance_record,
+        status=200,
+        content_type="application/json",
+    )
+
+    # Mock SecretSync GET (not found → create)
+    ss_endpoint = get_secretsync_endpoint(
+        resource_group_name=resource_group_name, spc_name=secret_sync_name
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=ss_endpoint,
+        json={"error": {"code": "ResourceNotFound"}},
+        status=404,
+        content_type="application/json",
+    )
+    expected_ss = get_mock_secretsync_record(
+        name=secret_sync_name, resource_group_name=resource_group_name
+    )
+    mocked_responses.add(
+        method=responses.PUT,
+        url=ss_endpoint,
+        json=expected_ss,
+        status=200,
+        content_type="application/json",
+    )
+
+    secretsync_secret_set(
+        cmd=mocked_cmd,
+        instance_name=instance_name,
+        resource_group_name=resource_group_name,
+        secret_sync_name=secret_sync_name,
+        secret_names=[f"{akv_name}=certificate"],
+        wait_sec=0.1,
+    )
+
+    # Inspect the SPC PUT body — check whether objectEncoding: hex was added
+    spc_put_body = json.loads(spc_put.calls[0].request.body)
+    objects_yaml = spc_put_body["properties"].get("objects", "")
+    assert objects_yaml, "SPC objects YAML must not be empty"
+
+    objects_obj = yaml.safe_load(objects_yaml)
+    entries = [yaml.safe_load(e) for e in objects_obj.get("array", [])]
+    matching = [e for e in entries if e.get("objectName") == akv_name]
+    assert len(matching) == 1, f"Expected exactly one SPC entry for '{akv_name}'"
+
+    spc_entry = matching[0]
+    if expected_hex_encoding:
+        assert spc_entry.get("objectEncoding") == "hex", (
+            f"Expected objectEncoding:hex in SPC for secret with tags {kv_tags}"
+        )
+    else:
+        assert "objectEncoding" not in spc_entry, (
+            f"Expected no objectEncoding in SPC for secret with tags {kv_tags}"
+        )
+
+
+@pytest.mark.parametrize(
     "bad_secret_name",
     [
         "noseparator",

@@ -559,8 +559,8 @@ class Instances(Queryable):
                         secret_name=mapping["akv_name"],
                         secret_version="",
                     )
-                    content_type = (secret_response.get("contentType") or "").lower()
-                    mapping["needs_hex_encoding"] = "pkcs12" in content_type or "x-pem" in content_type
+                    tags = secret_response.get("tags") or {}
+                    mapping["needs_hex_encoding"] = tags.get("file-encoding", "").lower() == "hex"
                 except (ResourceNotFoundError, HttpResponseError) as e:
                     akv_name = mapping["akv_name"]
                     raise InvalidArgumentValueError(
