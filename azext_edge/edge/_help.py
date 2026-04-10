@@ -2170,7 +2170,7 @@ def load_iotops_help():
     """
 
     helps[
-        "iot ops secretsync secret unset"
+        "iot ops secretsync secret remove"
     ] = """
         type: command
         short-summary: Remove a specific secret from a SecretSync resource. If all secrets are removed, the SecretSync resource itself is automatically deleted.
@@ -2184,11 +2184,11 @@ def load_iotops_help():
         examples:
         - name: Remove a secret from a SecretSync.
           text: >
-            az iot ops secretsync secret unset --instance myInstance -g myRG
+            az iot ops secretsync secret remove --instance myInstance -g myRG
             --secret-sync-name my-certs --secret-name my-tls-cert
         - name: Remove a secret without confirmation prompt.
           text: >
-            az iot ops secretsync secret unset --instance myInstance -g myRG
+            az iot ops secretsync secret remove --instance myInstance -g myRG
             --secret-sync-name my-certs --secret-name my-tls-cert -y
     """
 

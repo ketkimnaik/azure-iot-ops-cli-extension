@@ -15,7 +15,7 @@ from azure.cli.core.azclierror import InvalidArgumentValueError
 from azext_edge.edge.commands_secretsync import (
     secretsync_secret_list,
     secretsync_secret_set,
-    secretsync_secret_unset,
+    secretsync_secret_remove,
 )
 from azext_edge.edge.providers.orchestration.resources.instances import (
     SERVICE_ACCOUNT_SECRETSYNC,
@@ -77,6 +77,15 @@ def _setup_instance_and_spc(
         spc_record["properties"]["objects"] = spc_objects
     else:
         spc_record["properties"]["objects"] = ""
+
+    # Store KV resource ID so set_secretsync_secret can resolve vault URI via ARM GET
+    kv_resource_id = generate_resource_id(
+        resource_group_name=resource_group_name,
+        resource_provider="Microsoft.KeyVault",
+        resource_path=f"/vaults/{keyvault_name}",
+    )
+    spc_record["properties"]["keyvaultResourceId"] = kv_resource_id
+
     mocked_responses.add(
         method=responses.GET,
         url=spc_endpoint,
@@ -86,6 +95,27 @@ def _setup_instance_and_spc(
     )
 
     return instance_record, spc_record
+
+
+def _add_kv_arm_mock(
+    mocked_responses: responses,
+    resource_group_name: str,
+    keyvault_name: str,
+) -> None:
+    """Register the ARM Key Vault GET mock that returns vaultUri for vault URL resolution."""
+    kv_resource_id = generate_resource_id(
+        resource_group_name=resource_group_name,
+        resource_provider="Microsoft.KeyVault",
+        resource_path=f"/vaults/{keyvault_name}",
+    )
+    kv_arm_endpoint = f"{BASE_URL}{kv_resource_id}?api-version=2022-07-01"
+    mocked_responses.add(
+        method=responses.GET,
+        url=kv_arm_endpoint,
+        json={"properties": {"vaultUri": f"https://{keyvault_name}.vault.azure.net/"}},
+        status=200,
+        content_type="application/json",
+    )
 
 
 # --- secretsync secret set ---
@@ -123,6 +153,7 @@ def test_secretsync_secret_set(
         spc_name=spc_name,
         keyvault_name=keyvault_name,
     )
+    _add_kv_arm_mock(mocked_responses, resource_group_name, keyvault_name)
 
     # Mock KV secret verification for each secret name
     for entry in secret_names:
@@ -140,18 +171,6 @@ def test_secretsync_secret_set(
         method=responses.PUT,
         url=get_spc_endpoint(resource_group_name=resource_group_name, spc_name=spc_name),
         json=spc_record,
-        status=200,
-        content_type="application/json",
-    )
-
-    # Mock instance GET for step 5 (creating SecretSync)
-    instance_endpoint = get_instance_endpoint(
-        resource_group_name=resource_group_name, instance_name=instance_name
-    )
-    mocked_responses.add(
-        method=responses.GET,
-        url=instance_endpoint,
-        json=instance_record,
         status=200,
         content_type="application/json",
     )
@@ -198,7 +217,7 @@ def test_secretsync_secret_set(
         resource_group_name=resource_group_name,
         secret_sync_name=secret_sync_name,
         secret_names=secret_names,
-        wait_sec=0.1,
+        wait_sec=0,
     )
 
     assert result == expected_ss_result
@@ -260,6 +279,7 @@ def test_secretsync_secret_set_hex_encoding_detection(
         spc_name=spc_name,
         keyvault_name=keyvault_name,
     )
+    _add_kv_arm_mock(mocked_responses, resource_group_name, keyvault_name)
 
     # Mock KV GET — return secret with or without the file-encoding tag
     mocked_responses.add(
@@ -280,18 +300,6 @@ def test_secretsync_secret_set_hex_encoding_detection(
         method=responses.PUT,
         url=get_spc_endpoint(resource_group_name=resource_group_name, spc_name=spc_name),
         json=spc_record,
-        status=200,
-        content_type="application/json",
-    )
-
-    # Mock instance GET for step 5
-    instance_endpoint = get_instance_endpoint(
-        resource_group_name=resource_group_name, instance_name=instance_name
-    )
-    mocked_responses.add(
-        method=responses.GET,
-        url=instance_endpoint,
-        json=instance_record,
         status=200,
         content_type="application/json",
     )
@@ -324,7 +332,7 @@ def test_secretsync_secret_set_hex_encoding_detection(
         resource_group_name=resource_group_name,
         secret_sync_name=secret_sync_name,
         secret_names=[f"{akv_name}=certificate"],
-        wait_sec=0.1,
+        wait_sec=0,
     )
 
     # Inspect the SPC PUT body — check whether objectEncoding: hex was added
@@ -380,7 +388,7 @@ def test_secretsync_secret_set_invalid_format(
             resource_group_name=resource_group_name,
             secret_sync_name=secret_sync_name,
             secret_names=[bad_secret_name],
-            wait_sec=0.1,
+            wait_sec=0,
         )
 
 
@@ -399,6 +407,7 @@ def test_secretsync_secret_set_akv_not_found(
         resource_group_name=resource_group_name,
         spc_name=spc_name,
     )
+    _add_kv_arm_mock(mocked_responses, resource_group_name, "mykeyvault")
 
     # Mock KV secret NOT found (404)
     mocked_responses.add(
@@ -416,7 +425,7 @@ def test_secretsync_secret_set_akv_not_found(
             resource_group_name=resource_group_name,
             secret_sync_name=secret_sync_name,
             secret_names=["nonexistent=cert"],
-            wait_sec=0.1,
+            wait_sec=0,
         )
 
 
@@ -466,7 +475,49 @@ def test_secretsync_secret_list(
     assert len(result) == 2
 
 
-# --- secretsync secret unset ---
+def test_secretsync_secret_list_empty(
+    mocked_cmd,
+    mocked_responses: responses,
+):
+    """Verify list returns an empty list (not None) when objectSecretMapping is absent."""
+    instance_name = generate_random_string()
+    resource_group_name = generate_random_string()
+    secret_sync_name = generate_random_string()
+    spc_name = generate_random_string()
+
+    _setup_instance_and_spc(
+        mocked_responses=mocked_responses,
+        instance_name=instance_name,
+        resource_group_name=resource_group_name,
+        spc_name=spc_name,
+    )
+
+    ss_record = get_mock_secretsync_record(
+        name=secret_sync_name, resource_group_name=resource_group_name
+    )
+    # Simulate a SecretSync with no mappings
+    ss_record["properties"]["objectSecretMapping"] = []
+
+    ss_endpoint = get_secretsync_endpoint(
+        resource_group_name=resource_group_name, spc_name=secret_sync_name
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=ss_endpoint,
+        json=ss_record,
+        status=200,
+        content_type="application/json",
+    )
+
+    result = secretsync_secret_list(
+        cmd=mocked_cmd,
+        instance_name=instance_name,
+        resource_group_name=resource_group_name,
+        secret_sync_name=secret_sync_name,
+    )
+
+    assert result == []
+    assert result is not None
 
 
 @pytest.mark.parametrize(
@@ -482,7 +533,7 @@ def test_secretsync_secret_list(
         (0, True),
     ],
 )
-def test_secretsync_secret_unset(
+def test_secretsync_secret_remove(
     mocked_cmd,
     mocked_responses: responses,
     remaining_count: int,
@@ -636,14 +687,14 @@ def test_secretsync_secret_unset(
             content_type="application/json",
         )
 
-    result = secretsync_secret_unset(
+    result = secretsync_secret_remove(
         cmd=mocked_cmd,
         instance_name=instance_name,
         resource_group_name=resource_group_name,
         secret_sync_name=secret_sync_name,
         secret_name=secret_to_remove,
         confirm_yes=True,
-        wait_sec=0.1,
+        wait_sec=0,
     )
 
     if remaining_count == 0:
@@ -666,7 +717,7 @@ def test_secretsync_secret_unset(
             assert secret_to_remove not in spc_objects_str
 
 
-def test_secretsync_secret_unset_not_found(
+def test_secretsync_secret_remove_not_found(
     mocked_cmd,
     mocked_responses: responses,
 ):
@@ -690,12 +741,12 @@ def test_secretsync_secret_unset_not_found(
     )
 
     with pytest.raises(InvalidArgumentValueError, match="not found in SecretSync"):
-        secretsync_secret_unset(
+        secretsync_secret_remove(
             cmd=mocked_cmd,
             instance_name=instance_name,
             resource_group_name=resource_group_name,
             secret_sync_name=secret_sync_name,
             secret_name="nonexistent_secret",
             confirm_yes=True,
-            wait_sec=0.1,
+            wait_sec=0,
         )

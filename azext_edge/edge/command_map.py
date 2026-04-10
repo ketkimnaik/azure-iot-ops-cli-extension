@@ -65,7 +65,7 @@ def load_iotops_commands(self, _):
     ) as cmd_group:
         cmd_group.command("set", "secretsync_secret_set")
         cmd_group.command("list", "secretsync_secret_list")
-        cmd_group.command("unset", "secretsync_secret_unset")
+        cmd_group.command("remove", "secretsync_secret_remove")
 
     with self.command_group(
         "iot ops mgmt-actions",

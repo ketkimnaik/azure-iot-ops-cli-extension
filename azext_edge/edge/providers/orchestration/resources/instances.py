@@ -419,6 +419,7 @@ class Instances(Queryable):
                     "properties": {
                         "clientId": mi_user_assigned["properties"]["clientId"],
                         "keyvaultName": keyvault_resource_id_container.resource_name,
+                        "keyvaultResourceId": keyvault_resource_id_container.resource_id,
                         "tenantId": get_tenant_id(),
                     },
                     **spc_kwargs,
@@ -534,24 +535,32 @@ class Instances(Queryable):
             spc_name = spc["name"]
             spc_properties = spc.get("properties", {})
             keyvault_name = spc_properties["keyvaultName"]
+            keyvault_resource_id = spc_properties.get("keyvaultResourceId")
 
             # Parse secret_names into akv_name=target_key pairs
             secret_mappings = []
             for entry in secret_names:
                 if "=" not in entry:
                     raise InvalidArgumentValueError(
-                        f"Invalid --secret-name format: '{entry}'. Expected format: <akv-name>=<target-key>."
+                        f"Invalid --secret-map format: '{entry}'. Expected format: <akv-name>=<target-key>."
                     )
                 akv_name, _, target_key = entry.partition("=")
                 if not akv_name or not target_key:
                     raise InvalidArgumentValueError(
-                        f"Invalid --secret-name format: '{entry}'. Both <akv-name> and <target-key> are required."
+                        f"Invalid --secret-map format: '{entry}'. Both <akv-name> and <target-key> are required."
                     )
                 secret_mappings.append({"akv_name": akv_name, "target_key": target_key})
 
             # Step 2: Verify each AKV secret exists and detect encoding
             keyvault_client = get_keyvault_client(subscription_id=self.default_subscription_id)
-            vault_url = KEYVAULT_URL.format(keyvaultName=keyvault_name)
+            if keyvault_resource_id:
+                kv_resource = self.resource_client.resources.get_by_id(
+                    resource_id=keyvault_resource_id, api_version=KEYVAULT_CLOUD_API_VERSION
+                )
+                vault_url = kv_resource["properties"]["vaultUri"]
+            else:
+                # Fallback for instances where secretsync was enabled prior to this change
+                vault_url = KEYVAULT_URL.format(keyvaultName=keyvault_name)
             for mapping in secret_mappings:
                 try:
                     secret_response = keyvault_client.get_secret(
@@ -561,7 +570,7 @@ class Instances(Queryable):
                     )
                     tags = secret_response.get("tags") or {}
                     mapping["needs_hex_encoding"] = tags.get("file-encoding", "").lower() == "hex"
-                except (ResourceNotFoundError, HttpResponseError) as e:
+                except ResourceNotFoundError as e:
                     akv_name = mapping["akv_name"]
                     raise InvalidArgumentValueError(
                         f"AKV secret '{akv_name}' not found in Key Vault '{keyvault_name}'. "
@@ -604,7 +613,6 @@ class Instances(Queryable):
             wait_for_terminal_state(spc_poller, **kwargs)
 
             # Step 5: Create or update the SecretSync resource
-            instance = self.show(name=name, resource_group_name=resource_group_name)
             try:
                 secret_sync = self.ssc_mgmt_client.secret_syncs.get(
                     resource_group_name=resource_group_name,
@@ -629,8 +637,8 @@ class Instances(Queryable):
             else:
                 # Create new SecretSync resource
                 secret_sync = {
-                    "location": instance["location"],
-                    "extendedLocation": instance["extendedLocation"],
+                    "location": spc["location"],
+                    "extendedLocation": spc["extendedLocation"],
                     "properties": {
                         "kubernetesSecretType": "Opaque",
                         "secretProviderClassName": spc_name,
@@ -657,7 +665,7 @@ class Instances(Queryable):
         name: str,
         resource_group_name: str,
         secret_sync_name: str,
-    ) -> Optional[List[dict]]:
+    ) -> List[dict]:
         with console.status("Working..."):
             # Validate secret sync is enabled on the instance
             self.get_default_spc(instance_name=name, resource_group_name=resource_group_name)
@@ -666,19 +674,19 @@ class Instances(Queryable):
                 resource_group_name=resource_group_name,
                 secret_sync_name=secret_sync_name,
             )
-            mappings = secret_sync.get("properties", {}).get("objectSecretMapping", [])
-            if mappings:
-                return mappings
-        logger.warning(f"No secrets found in SecretSync '{secret_sync_name}'.")
+            mappings = secret_sync.get("properties", {}).get("objectSecretMapping") or []
+            if not mappings:
+                logger.warning(f"No secrets found in SecretSync '{secret_sync_name}'.")
+            return mappings
 
-    def unset_secretsync_secret(
+    def remove_secretsync_secret(
         self,
         name: str,
         resource_group_name: str,
         secret_sync_name: str,
         secret_name: str,
         confirm_yes: Optional[bool] = None,
-        **kwargs,
+        **kwargs: Optional[dict],
     ):
         should_bail = not should_continue_prompt(confirm_yes=confirm_yes)
         if should_bail:

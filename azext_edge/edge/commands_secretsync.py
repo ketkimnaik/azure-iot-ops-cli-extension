@@ -86,7 +86,7 @@ def secretsync_secret_list(
     )
 
 
-def secretsync_secret_unset(
+def secretsync_secret_remove(
     cmd,
     instance_name: str,
     resource_group_name: str,
@@ -95,7 +95,7 @@ def secretsync_secret_unset(
     confirm_yes: Optional[bool] = None,
     **kwargs,
 ):
-    return Instances(cmd).unset_secretsync_secret(
+    return Instances(cmd).remove_secretsync_secret(
         name=instance_name,
         resource_group_name=resource_group_name,
         secret_sync_name=secret_sync_name,
