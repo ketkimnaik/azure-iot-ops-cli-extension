@@ -61,14 +61,14 @@ def secretsync_secret_set(
     instance_name: str,
     resource_group_name: str,
     secret_sync_name: str,
-    secret_names: list,
+    secret_map: list,
     **kwargs,
 ) -> dict:
     return Instances(cmd).set_secretsync_secret(
         name=instance_name,
         resource_group_name=resource_group_name,
         secret_sync_name=secret_sync_name,
-        secret_names=secret_names,
+        secret_map=secret_map,
         **kwargs,
     )
 

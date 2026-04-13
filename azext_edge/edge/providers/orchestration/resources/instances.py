@@ -40,6 +40,7 @@ from ..common import (
     CONTRIBUTOR_ROLE_ID,
     CUSTOM_LOCATIONS_API_VERSION,
     KEYVAULT_CLOUD_API_VERSION,
+    KEYVAULT_URL,
     IdentityUsageType,
     MANAGED_IDENTITY_API_VERSION,
 )
@@ -64,7 +65,6 @@ SERVICE_ACCOUNT_SCHEMA = "adr-schema-registry"
 SERVICE_ACCOUNT_WASM = "aio-wasm-graph-controller"
 KEYVAULT_ROLE_ID_SECRETS_USER = "4633458b-17de-408a-b874-0445c86b69e6"
 KEYVAULT_ROLE_ID_READER = "21090545-7ca7-4776-b22c-e363652d74d2"
-KEYVAULT_URL = "https://{keyvaultName}.vault.azure.net/"
 
 COMPAT_FEAT_KEY_SET = {"opcua.mode"}
 
@@ -526,7 +526,7 @@ class Instances(Queryable):
         name: str,
         resource_group_name: str,
         secret_sync_name: str,
-        secret_names: List[str],
+        secret_map: List[str],
         **kwargs,
     ) -> dict:
         with console.status("Working..."):
@@ -537,9 +537,9 @@ class Instances(Queryable):
             keyvault_name = spc_properties["keyvaultName"]
             keyvault_resource_id = spc_properties.get("keyvaultResourceId")
 
-            # Parse secret_names into akv_name=target_key pairs
+            # Parse secret_map into akv_name=target_key pairs
             secret_mappings = []
-            for entry in secret_names:
+            for entry in secret_map:
                 if "=" not in entry:
                     raise InvalidArgumentValueError(
                         f"Invalid --secret-map format: '{entry}'. Expected format: <akv-name>=<target-key>."
@@ -708,6 +708,34 @@ class Instances(Queryable):
                     f"Secret '{secret_name}' not found in SecretSync '{secret_sync_name}'."
                 )
 
+            # Step 2: Ref-count guard — check if any OTHER SecretSync referencing the same SPC
+            #         still uses this secret. Done BEFORE modifying the target SecretSync to
+            #         avoid ARG eventual consistency issues.
+            instance = self.show(name=name, resource_group_name=resource_group_name)
+            resource_map = self.get_resource_map(instance)
+            all_secretsyncs = resource_map.connected_cluster.get_cl_resources_by_type(
+                custom_location_id=instance["extendedLocation"]["name"],
+                resource_types={SECRET_SYNC_RESOURCE_TYPE},
+                show_properties=True,
+            )
+
+            still_referenced = False
+            for ss in all_secretsyncs.get(SECRET_SYNC_RESOURCE_TYPE, []):
+                # Skip the target SecretSync — we only care about other consumers
+                if ss.get("name") == secret_sync_name:
+                    continue
+                # Only consider SecretSyncs that reference the same SPC
+                if ss.get("properties", {}).get("secretProviderClassName") != spc_class_name:
+                    continue
+                ss_mappings = ss.get("properties", {}).get("objectSecretMapping", [])
+                for m in ss_mappings:
+                    if m.get("sourcePath") == secret_name:
+                        still_referenced = True
+                        break
+                if still_referenced:
+                    break
+
+            # Step 3: Modify or delete the SecretSync
             modified_secret_sync = None
             if len(new_mappings) == 0:
                 # ARM API doesn't allow empty objectSecretMapping — delete the entire SecretSync
@@ -732,30 +760,7 @@ class Instances(Queryable):
                 )
                 modified_secret_sync = wait_for_terminal_state(ss_poller, **kwargs)
 
-            # Step 2: Ref-count guard — check if any other SecretSync referencing the same SPC
-            #         still uses this secret
-            instance = self.show(name=name, resource_group_name=resource_group_name)
-            resource_map = self.get_resource_map(instance)
-            all_secretsyncs = resource_map.connected_cluster.get_cl_resources_by_type(
-                custom_location_id=instance["extendedLocation"]["name"],
-                resource_types={SECRET_SYNC_RESOURCE_TYPE},
-                show_properties=True,
-            )
-
-            still_referenced = False
-            for ss in all_secretsyncs.get(SECRET_SYNC_RESOURCE_TYPE, []):
-                # Only consider SecretSyncs that reference the same SPC
-                if ss.get("properties", {}).get("secretProviderClassName") != spc_class_name:
-                    continue
-                ss_mappings = ss.get("properties", {}).get("objectSecretMapping", [])
-                for m in ss_mappings:
-                    if m.get("sourcePath") == secret_name:
-                        still_referenced = True
-                        break
-                if still_referenced:
-                    break
-
-            # Step 3: Only remove from SPC if no other SecretSync (using the same SPC) references this secret
+            # Step 4: Only remove from SPC if no other SecretSync (using the same SPC) references this secret
             if not still_referenced:
                 spc = self.ssc_mgmt_client.azure_key_vault_secret_provider_classes.get(
                     resource_group_name=resource_group_name,

@@ -1567,7 +1567,7 @@ def load_iotops_arguments(self, _):
             help="Name for the SecretSync ARM resource and the resulting K8s secret.",
         )
         context.argument(
-            "secret_names",
+            "secret_map",
             options_list=["--secret-map"],
             action="append",
             help="AKV secret mapping in the format `<akv-secret-name>=<target-key>`. "

@@ -122,7 +122,7 @@ def _add_kv_arm_mock(
 
 
 @pytest.mark.parametrize(
-    "secret_names, existing_secretsync",
+    "secret_map, existing_secretsync",
     [
         # Create new SecretSync with one secret
         (["mysecret=certificate"], False),
@@ -137,7 +137,7 @@ def _add_kv_arm_mock(
 def test_secretsync_secret_set(
     mocked_cmd,
     mocked_responses: responses,
-    secret_names: List[str],
+    secret_map: List[str],
     existing_secretsync: bool,
 ):
     instance_name = generate_random_string()
@@ -156,7 +156,7 @@ def test_secretsync_secret_set(
     _add_kv_arm_mock(mocked_responses, resource_group_name, keyvault_name)
 
     # Mock KV secret verification for each secret name
-    for entry in secret_names:
+    for entry in secret_map:
         akv_name = entry.split("=")[0]
         mocked_responses.add(
             method=responses.GET,
@@ -216,7 +216,7 @@ def test_secretsync_secret_set(
         instance_name=instance_name,
         resource_group_name=resource_group_name,
         secret_sync_name=secret_sync_name,
-        secret_names=secret_names,
+        secret_map=secret_map,
         wait_sec=0,
     )
 
@@ -229,7 +229,7 @@ def test_secretsync_secret_set(
     # Verify SecretSync was created/updated
     ss_put_body = json.loads(ss_put.calls[0].request.body)
     ss_mappings = ss_put_body["properties"]["objectSecretMapping"]
-    for entry in secret_names:
+    for entry in secret_map:
         akv_name, _, target_key = entry.partition("=")
         matching = [m for m in ss_mappings if m["sourcePath"] == akv_name and m["targetKey"] == target_key]
         assert len(matching) == 1
@@ -331,7 +331,7 @@ def test_secretsync_secret_set_hex_encoding_detection(
         instance_name=instance_name,
         resource_group_name=resource_group_name,
         secret_sync_name=secret_sync_name,
-        secret_names=[f"{akv_name}=certificate"],
+        secret_map=[f"{akv_name}=certificate"],
         wait_sec=0,
     )
 
@@ -387,7 +387,7 @@ def test_secretsync_secret_set_invalid_format(
             instance_name=instance_name,
             resource_group_name=resource_group_name,
             secret_sync_name=secret_sync_name,
-            secret_names=[bad_secret_name],
+            secret_map=[bad_secret_name],
             wait_sec=0,
         )
 
@@ -424,7 +424,7 @@ def test_secretsync_secret_set_akv_not_found(
             instance_name=instance_name,
             resource_group_name=resource_group_name,
             secret_sync_name=secret_sync_name,
-            secret_names=["nonexistent=cert"],
+            secret_map=["nonexistent=cert"],
             wait_sec=0,
         )
 
