@@ -686,8 +686,8 @@ class Instances(Queryable):
         secret_sync_name: str,
         secret_name: str,
         confirm_yes: Optional[bool] = None,
-        **kwargs: Optional[dict],
-    ):
+        **kwargs,
+    ) -> Optional[dict]:
         should_bail = not should_continue_prompt(confirm_yes=confirm_yes)
         if should_bail:
             return
