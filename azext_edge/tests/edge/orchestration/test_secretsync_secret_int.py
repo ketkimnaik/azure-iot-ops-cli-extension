@@ -154,7 +154,7 @@ def test_secretsync_secret_set_list_unset(
             f"az iot ops secretsync secret remove "
             f"--instance {instance_name} -g {resource_group} "
             f"--secret-sync-name {sync_name} "
-            f"--secret-map {first_secret} -y"
+            f"--secret-name {first_secret} -y"
         )
         # Partial removal returns the updated SecretSync resource
         assert remove_result is not None
@@ -176,7 +176,7 @@ def test_secretsync_secret_set_list_unset(
             f"az iot ops secretsync secret remove "
             f"--instance {instance_name} -g {resource_group} "
             f"--secret-sync-name {sync_name} "
-            f"--secret-map {second_secret} -y"
+            f"--secret-name {second_secret} -y"
         )
         # Full deletion returns None
         assert remove_last_result is None
@@ -188,7 +188,7 @@ def test_secretsync_secret_set_list_unset(
                 f"az iot ops secretsync secret remove "
                 f"--instance {instance_name} -g {resource_group} "
                 f"--secret-sync-name {sync_name} "
-                f"--secret-map {secret_names[0]} -y",
+                f"--secret-name {secret_names[0]} -y",
                 expect_failure=True,
             )
         except CLIInternalError:
@@ -198,7 +198,7 @@ def test_secretsync_secret_set_list_unset(
                 f"az iot ops secretsync secret remove "
                 f"--instance {instance_name} -g {resource_group} "
                 f"--secret-sync-name {sync_name} "
-                f"--secret-map {secret_names[1]} -y",
+                f"--secret-name {secret_names[1]} -y",
                 expect_failure=True,
             )
         except CLIInternalError:
@@ -240,7 +240,7 @@ def test_secretsync_secret_set_multiple_at_once(
                 f"az iot ops secretsync secret remove "
                 f"--instance {instance_name} -g {resource_group} "
                 f"--secret-sync-name {sync_name} "
-                f"--secret-map {name} -y"
+                f"--secret-name {name} -y"
             )
 
     except Exception:
@@ -251,7 +251,7 @@ def test_secretsync_secret_set_multiple_at_once(
                     f"az iot ops secretsync secret remove "
                     f"--instance {instance_name} -g {resource_group} "
                     f"--secret-sync-name {sync_name} "
-                    f"--secret-map {name} -y",
+                    f"--secret-name {name} -y",
                     expect_failure=True,
                 )
             except CLIInternalError:
@@ -314,7 +314,7 @@ def test_secretsync_secret_set_multikey_mapping(
             f"az iot ops secretsync secret remove "
             f"--instance {instance_name} -g {resource_group} "
             f"--secret-sync-name {sync_name} "
-            f"--secret-map {first_secret} -y"
+            f"--secret-name {first_secret} -y"
         )
         # All mappings removed, SecretSync should be deleted
         assert remove_result is None
@@ -325,7 +325,7 @@ def test_secretsync_secret_set_multikey_mapping(
                 f"az iot ops secretsync secret remove "
                 f"--instance {instance_name} -g {resource_group} "
                 f"--secret-sync-name {sync_name} "
-                f"--secret-map {first_secret} -y",
+                f"--secret-name {first_secret} -y",
                 expect_failure=True,
             )
         except CLIInternalError:
@@ -381,7 +381,7 @@ def test_secretsync_secret_remove_nonexistent(
                 f"az iot ops secretsync secret remove "
                 f"--instance {instance_name} -g {resource_group} "
                 f"--secret-sync-name {sync_name} "
-                f"--secret-map nonexistent_secret -y"
+                f"--secret-name nonexistent_secret -y"
             )
 
     finally:
@@ -391,7 +391,7 @@ def test_secretsync_secret_remove_nonexistent(
                 f"az iot ops secretsync secret remove "
                 f"--instance {instance_name} -g {resource_group} "
                 f"--secret-sync-name {sync_name} "
-                f"--secret-map {secret_names[0]} -y"
+                f"--secret-name {secret_names[0]} -y"
             )
         except CLIInternalError:
             pass

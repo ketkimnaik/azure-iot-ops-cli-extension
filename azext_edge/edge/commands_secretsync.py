@@ -78,7 +78,7 @@ def secretsync_secret_list(
     instance_name: str,
     resource_group_name: str,
     secret_sync_name: str,
-) -> Optional[list[dict]]:
+) -> list[dict]:
     return Instances(cmd).list_secretsync_secrets(
         name=instance_name,
         resource_group_name=resource_group_name,
@@ -94,7 +94,7 @@ def secretsync_secret_remove(
     secret_name: str,
     confirm_yes: Optional[bool] = None,
     **kwargs,
-):
+) -> Optional[dict]:
     return Instances(cmd).remove_secretsync_secret(
         name=instance_name,
         resource_group_name=resource_group_name,

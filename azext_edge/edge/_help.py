@@ -2130,7 +2130,7 @@ def load_iotops_help():
         "iot ops secretsync secret set"
     ] = """
         type: command
-        short-summary: Create or update a SecretSync resource that syncs AKV secrets to K8s.
+        short-summary: Set AKV secret mappings on a SecretSync resource.
         long-summary: |
             Resolves the instance's default secret provider class (SPC), verifies each AKV secret exists, adds each secret to the SPC's objects list, and creates or merges entries into the named SecretSync resource.
 
@@ -2143,17 +2143,17 @@ def load_iotops_help():
           text: >
             az iot ops secretsync secret set --instance myInstance -g myRG
             --secret-sync-name my-certs
-            --secret-name my-tls-cert=certificate --secret-name my-tls-key=privateKey
+            --secret-map my-tls-cert=certificate --secret-map my-tls-key=privateKey
         - name: Add another secret to an existing SecretSync (idempotent merge).
           text: >
             az iot ops secretsync secret set --instance myInstance -g myRG
             --secret-sync-name my-certs
-            --secret-name my-intermediate-cert=intermediateCerts
+            --secret-map my-intermediate-cert=intermediateCerts
         - name: Create a SecretSync for SASL-based dataflow endpoint.
           text: >
             az iot ops secretsync secret set --instance myInstance -g myRG
             --secret-sync-name eventhub-sasl
-            --secret-name my-eh-user=username --secret-name my-eh-pass=password
+            --secret-map my-eh-user=username --secret-map my-eh-pass=password
     """
 
     helps[
