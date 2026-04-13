@@ -146,7 +146,7 @@ def test_secretsync_secret_set(
     spc_name = generate_random_string()
     keyvault_name = "mykeyvault"
 
-    instance_record, spc_record = _setup_instance_and_spc(
+    _, spc_record = _setup_instance_and_spc(
         mocked_responses=mocked_responses,
         instance_name=instance_name,
         resource_group_name=resource_group_name,
@@ -272,7 +272,7 @@ def test_secretsync_secret_set_hex_encoding_detection(
     keyvault_name = "mykeyvault"
     akv_name = "my-cert-der"
 
-    instance_record, spc_record = _setup_instance_and_spc(
+    _, spc_record = _setup_instance_and_spc(
         mocked_responses=mocked_responses,
         instance_name=instance_name,
         resource_group_name=resource_group_name,
