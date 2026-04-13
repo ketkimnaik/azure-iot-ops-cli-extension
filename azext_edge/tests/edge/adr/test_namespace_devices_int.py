@@ -180,6 +180,9 @@ def test_namespace_device_lifecycle_operations(require_namespace_init, tracked_r
         f"--session-backoff {reconnect_exponential_backoff} "
         f"--session-tracing --subscription-lifetime {sub_lifetime} "
         f"--subscription-max-items {sub_max_items} --accept-certs "
+        f"--shared "
+        f"--cert-ref secretRef:certificate --key-ref secretRef:privateKey "
+        f"--intermediate-cert-ref secretRef:intermediateCerts "
 
     )
     assert_namespace_device_endpoint_props(
@@ -204,7 +207,11 @@ def test_namespace_device_lifecycle_operations(require_namespace_init, tracked_r
         enable_tracing=True,
         run_asset_discovery=True,
         sync_properties_into_state_store=True,
-        authentication_method="Anonymous",
+        shared=True,
+        authentication_method="Certificate",
+        certificate_reference="secretRef:certificate",
+        key_reference="secretRef:privateKey",
+        intermediate_certificate_reference="secretRef:intermediateCerts",
     )
 
     # Add Custom endpoint
@@ -580,6 +587,8 @@ def assert_namespace_device_opcua_props(
         assert result_config["runAssetDiscovery"] == expected["run_asset_discovery"]
     if "sync_properties_into_state_store" in expected:
         assert result_config["syncPropertiesIntoStateStore"] == expected["sync_properties_into_state_store"]
+    if "shared" in expected:
+        assert result_config["shared"] == expected["shared"]
     # Default
     if "publishing_interval" in expected:
         assert result_config["defaults"]["publishingIntervalMilliseconds"] == expected["publishing_interval"]
