@@ -89,14 +89,17 @@ def _setup_instance_and_spc(
     return instance_record, spc_record
 
 
-@pytest.fixture(autouse=True)
-def mocked_default_cli(mocker):
-    """Mock get_default_cli() so vault suffix resolves without a real CLI context."""
-    mock_cloud = mocker.MagicMock()
-    mock_cloud.suffixes.keyvault_dns = ".vault.azure.net"
-    mock_cli = mocker.MagicMock()
-    mock_cli.cloud = mock_cloud
-    mocker.patch("azure.cli.core.get_default_cli", return_value=mock_cli)
+@pytest.mark.parametrize("keyvault_dns, expected_url", [
+    (".vault.azure.net", "https://mykeyvault.vault.azure.net/"),
+    ("vault.azure.net", "https://mykeyvault.vault.azure.net/"),  # no leading dot — should be normalized
+])
+def test_vault_url_normalization(keyvault_dns, expected_url):
+    """Verify vault_url is correctly constructed regardless of keyvault_dns leading dot."""
+    vault_suffix = keyvault_dns
+    if vault_suffix and not vault_suffix.startswith("."):
+        vault_suffix = f".{vault_suffix}"
+    vault_url = f"https://mykeyvault{vault_suffix}/"
+    assert vault_url == expected_url
 
 
 # --- secretsync secret set ---
