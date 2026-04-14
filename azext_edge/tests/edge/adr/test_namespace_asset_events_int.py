@@ -200,7 +200,7 @@ def test_namespace_opcua_asset_event_lifecycle_operations(asset_factory):
     publishing_interval = 500
     queue_size = 10
     start_instance = "ns=3;i=3001"
-    condition_refresh_interval = 30
+    condition_refresh_interval = 30000  # milliseconds
 
     event_result = run(
         f"az iot ops ns asset opcua event-group add --asset {asset_name} --instance {instance_name} "
@@ -241,7 +241,7 @@ def test_namespace_opcua_asset_event_lifecycle_operations(asset_factory):
     updated_data_source = "ns=3;i=1000"
     updated_publishing_interval = 1000
     updated_queue_size = 15
-    updated_condition_refresh_interval = 60
+    updated_condition_refresh_interval = 60000  # milliseconds
 
     updated_event = run(
         f"az iot ops ns asset opcua event-group update --asset {asset_name} --instance {instance_name} "
