@@ -2,7 +2,7 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "$id": "https://azure-iot-operations/schemas/assetendpointprofile/additionalconfiguration/opcua/1.5.0.json",
     "title": "AIO OPC UA Device Inbound Endpoint Additional Configuration Schema",
-    "description": "Schema for the additional configuration of OPC UA inbound endpoint of an device in Azure Industrial Operations",
+    "description": "Schema for the additional configuration of OPC UA inbound endpoint of a device in Azure Industrial Operations",
     "type": "object",
     "properties": {
         "applicationName": {
