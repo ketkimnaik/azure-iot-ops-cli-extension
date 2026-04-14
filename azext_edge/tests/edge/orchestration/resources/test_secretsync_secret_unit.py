@@ -78,14 +78,6 @@ def _setup_instance_and_spc(
     else:
         spc_record["properties"]["objects"] = ""
 
-    # Store KV resource ID so set_secretsync_secret can resolve vault URI via ARM GET
-    kv_resource_id = generate_resource_id(
-        resource_group_name=resource_group_name,
-        resource_provider="Microsoft.KeyVault",
-        resource_path=f"/vaults/{keyvault_name}",
-    )
-    spc_record["properties"]["keyvaultResourceId"] = kv_resource_id
-
     mocked_responses.add(
         method=responses.GET,
         url=spc_endpoint,
@@ -97,25 +89,14 @@ def _setup_instance_and_spc(
     return instance_record, spc_record
 
 
-def _add_kv_arm_mock(
-    mocked_responses: responses,
-    resource_group_name: str,
-    keyvault_name: str,
-) -> None:
-    """Register the ARM Key Vault GET mock that returns vaultUri for vault URL resolution."""
-    kv_resource_id = generate_resource_id(
-        resource_group_name=resource_group_name,
-        resource_provider="Microsoft.KeyVault",
-        resource_path=f"/vaults/{keyvault_name}",
-    )
-    kv_arm_endpoint = f"{BASE_URL}{kv_resource_id}?api-version=2022-07-01"
-    mocked_responses.add(
-        method=responses.GET,
-        url=kv_arm_endpoint,
-        json={"properties": {"vaultUri": f"https://{keyvault_name}.vault.azure.net/"}},
-        status=200,
-        content_type="application/json",
-    )
+@pytest.fixture(autouse=True)
+def mocked_default_cli(mocker):
+    """Mock get_default_cli() so vault suffix resolves without a real CLI context."""
+    mock_cloud = mocker.MagicMock()
+    mock_cloud.suffixes.keyvault_dns = ".vault.azure.net"
+    mock_cli = mocker.MagicMock()
+    mock_cli.cloud = mock_cloud
+    mocker.patch("azure.cli.core.get_default_cli", return_value=mock_cli)
 
 
 # --- secretsync secret set ---
@@ -153,7 +134,6 @@ def test_secretsync_secret_set(
         spc_name=spc_name,
         keyvault_name=keyvault_name,
     )
-    _add_kv_arm_mock(mocked_responses, resource_group_name, keyvault_name)
 
     # Mock KV secret verification for each secret name
     for entry in secret_map:
@@ -279,7 +259,6 @@ def test_secretsync_secret_set_hex_encoding_detection(
         spc_name=spc_name,
         keyvault_name=keyvault_name,
     )
-    _add_kv_arm_mock(mocked_responses, resource_group_name, keyvault_name)
 
     # Mock KV GET — return secret with or without the file-encoding tag
     mocked_responses.add(
@@ -407,7 +386,6 @@ def test_secretsync_secret_set_akv_not_found(
         resource_group_name=resource_group_name,
         spc_name=spc_name,
     )
-    _add_kv_arm_mock(mocked_responses, resource_group_name, "mykeyvault")
 
     # Mock KV secret NOT found (404)
     mocked_responses.add(
