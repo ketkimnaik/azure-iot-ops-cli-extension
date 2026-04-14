@@ -550,8 +550,7 @@ class Instances(Queryable):
 
             # Step 2: Verify each AKV secret exists and detect encoding
             keyvault_client = get_keyvault_client(subscription_id=self.default_subscription_id)
-            from azure.cli.core import get_default_cli
-            vault_suffix = get_default_cli().cloud.suffixes.keyvault_dns
+            vault_suffix = self.cmd.cli_ctx.cloud.suffixes.keyvault_dns
             # Normalize: ensure suffix starts with a dot (e.g. "vault.azure.net" → ".vault.azure.net")
             if vault_suffix and not vault_suffix.startswith("."):
                 vault_suffix = f".{vault_suffix}"
