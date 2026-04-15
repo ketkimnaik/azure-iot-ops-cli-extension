@@ -193,10 +193,3 @@ def append_role_assignment_endpoint(
 
 def echo_callback(request: requests.PreparedRequest) -> tuple[int, dict, Optional[dict]]:
     return (200, {"Content-Type": "application/json"}, request.body)
-
-
-@pytest.fixture(autouse=True)
-def mocked_keyvault_dns(mocked_cmd):
-    """Set keyvault_dns on mocked CLI context for vault URL resolution in secretsync tests."""
-    mocked_cmd.cli_ctx.cloud.suffixes = type("Stub", (), {})()
-    mocked_cmd.cli_ctx.cloud.suffixes.keyvault_dns = ".vault.azure.net"
