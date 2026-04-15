@@ -29,7 +29,7 @@ on:
         description: Custom Locations OID
         type: string
         required: false
-        default: "51dfe1e8-70c6-4de5-a08e-e18aff23d815"
+        default: "d7c8af5d-5320-435c-8d61-88d4cc0f345d"
       init-continue-on-error:
         description: Continue on error for init integration tests
         type: boolean
@@ -63,7 +63,7 @@ on:
         description: Object ID of Custom Locations RP
         type: string
         required: false
-        default: "51dfe1e8-70c6-4de5-a08e-e18aff23d815"
+        default: "d7c8af5d-5320-435c-8d61-88d4cc0f345d"
       runtime-init-args:
         description: Additional INIT arguments (beyond cluster name, resource group, schema registry).
         type: string
@@ -93,7 +93,7 @@ permissions:
 env:
   RESOURCE_GROUP: "${{ inputs.resource-group || 'ops-cli-int-test-rg' }}"
   K3S_VERSION: "v1.31.1+k3s1"
-  CUSTOM_LOCATIONS_OID: "${{ inputs.custom-locations-oid || '51dfe1e8-70c6-4de5-a08e-e18aff23d815' }}"
+  CUSTOM_LOCATIONS_OID: "${{ inputs.custom-locations-oid || 'd7c8af5d-5320-435c-8d61-88d4cc0f345d' }}"
   KEEP_ALIVE: ${{ inputs.keep-on-failure || 0 }}
   RUNTIME_CREATE_ARGS: "${{ inputs.runtime-create-args }}"
   RUNTIME_INIT_ARGS: "${{ inputs.runtime-init-args }}"
