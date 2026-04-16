@@ -93,7 +93,7 @@ def _setup_instance_and_spc(
             method=responses.POST,
             url=ARG_ENDPOINT,
             json={"data": [{
-                "properties_vaultUri": f"https://{keyvault_name}.vault.azure.net/",
+                "vaultUri": f"https://{keyvault_name}.vault.azure.net/",
                 "subscriptionId": "00000000-0000-0000-0000-000000000000",
             }]},
             status=200,
@@ -372,6 +372,44 @@ def test_secretsync_secret_set_invalid_format(
             resource_group_name=resource_group_name,
             secret_sync_name=secret_sync_name,
             secret_map=[bad_secret_name],
+            wait_sec=0,
+        )
+
+
+def test_secretsync_secret_set_keyvault_not_found(
+    mocked_cmd,
+    mocked_responses: responses,
+):
+    instance_name = generate_random_string()
+    resource_group_name = generate_random_string()
+    secret_sync_name = generate_random_string()
+    spc_name = generate_random_string()
+
+    # Setup instance + SPC but skip vault URL mock (ARG returns empty)
+    _setup_instance_and_spc(
+        mocked_responses=mocked_responses,
+        instance_name=instance_name,
+        resource_group_name=resource_group_name,
+        spc_name=spc_name,
+        mock_vault_url=False,
+    )
+
+    # ARG returns no data for the Key Vault
+    mocked_responses.add(
+        method=responses.POST,
+        url=ARG_ENDPOINT,
+        json={"data": []},
+        status=200,
+        content_type="application/json",
+    )
+
+    with pytest.raises(InvalidArgumentValueError, match="not found"):
+        secretsync_secret_set(
+            cmd=mocked_cmd,
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            secret_sync_name=secret_sync_name,
+            secret_map=["mysecret=cert"],
             wait_sec=0,
         )
 

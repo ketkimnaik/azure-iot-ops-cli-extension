@@ -556,7 +556,7 @@ class Instances(Queryable):
             kv_query_result = graph.query_resources(
                 query=(
                     "Resources | where type =~ 'microsoft.keyvault/vaults'"
-                    f" | where name =~ '{keyvault_name}' | project properties.vaultUri, subscriptionId"
+                    f" | where name =~ '{keyvault_name}' | project vaultUri = properties.vaultUri, subscriptionId"
                 ),
             )
             kv_data = kv_query_result.get("data", [])
@@ -566,7 +566,7 @@ class Instances(Queryable):
                     "Ensure it exists and is accessible."
                 )
             kv_result = kv_data[0]
-            vault_url = kv_result["properties_vaultUri"]
+            vault_url = kv_result["vaultUri"]
             kv_subscription_id = kv_result["subscriptionId"]
 
             keyvault_client = get_keyvault_client(subscription_id=kv_subscription_id)
