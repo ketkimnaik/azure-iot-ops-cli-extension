@@ -36,6 +36,7 @@ from ....util.common import (
     url_safe_hash_phrase,
 )
 from ....util.queryable import Queryable
+from ....util.resource_graph import ResourceGraph
 from ..common import (
     CONTRIBUTOR_ROLE_ID,
     CUSTOM_LOCATIONS_API_VERSION,
@@ -549,21 +550,26 @@ class Instances(Queryable):
                 secret_mappings.append({"akv_name": akv_name, "target_key": target_key})
 
             # Step 2: Resolve vault URL via Resource Graph (authoritative source, cloud-agnostic)
-            kv_result = self.query(
+            # Use ResourceGraph without subscription filter to search across all accessible subscriptions,
+            # since the Key Vault may reside in a different subscription than the IoT Operations instance.
+            graph = ResourceGraph(cmd=self.cmd)
+            kv_query_result = graph.query_resources(
                 query=(
                     f"Resources | where type == 'microsoft.keyvault/vaults'"
-                    f" | where name == '{keyvault_name}' | project properties.vaultUri"
+                    f" | where name == '{keyvault_name}' | project properties.vaultUri, subscriptionId"
                 ),
-                first=True,
             )
-            if not kv_result:
+            kv_data = kv_query_result.get("data", [])
+            if not kv_data:
                 raise InvalidArgumentValueError(
                     f"Key Vault '{keyvault_name}' not found. "
-                    "Ensure it exists and is accessible in the current subscription."
+                    "Ensure it exists and is accessible."
                 )
+            kv_result = kv_data[0]
             vault_url = kv_result["properties_vaultUri"]
+            kv_subscription_id = kv_result["subscriptionId"]
 
-            keyvault_client = get_keyvault_client(subscription_id=self.default_subscription_id)
+            keyvault_client = get_keyvault_client(subscription_id=kv_subscription_id)
             for mapping in secret_mappings:
                 try:
                     secret_response = keyvault_client.get_secret(

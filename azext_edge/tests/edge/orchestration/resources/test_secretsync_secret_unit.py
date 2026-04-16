@@ -87,12 +87,15 @@ def _setup_instance_and_spc(
         content_type="application/json",
     )
 
-    # ARG mock for vault URL resolution
+    # ARG mock for vault URL resolution (cross-subscription ResourceGraph query)
     if mock_vault_url:
         mocked_responses.add(
             method=responses.POST,
             url=ARG_ENDPOINT,
-            json={"data": [{"properties_vaultUri": f"https://{keyvault_name}.vault.azure.net/"}]},
+            json={"data": [{
+                "properties_vaultUri": f"https://{keyvault_name}.vault.azure.net/",
+                "subscriptionId": "00000000-0000-0000-0000-000000000000",
+            }]},
             status=200,
             content_type="application/json",
         )
