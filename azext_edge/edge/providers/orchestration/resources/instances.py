@@ -555,8 +555,8 @@ class Instances(Queryable):
             graph = ResourceGraph(cmd=self.cmd)
             kv_query_result = graph.query_resources(
                 query=(
-                    f"Resources | where type == 'microsoft.keyvault/vaults'"
-                    f" | where name == '{keyvault_name}' | project properties.vaultUri, subscriptionId"
+                    "Resources | where type =~ 'microsoft.keyvault/vaults'"
+                    f" | where name =~ '{keyvault_name}' | project properties.vaultUri, subscriptionId"
                 ),
             )
             kv_data = kv_query_result.get("data", [])
