@@ -5,6 +5,7 @@
 # ----------------------------------------------------------------------------------------------
 
 from typing import List
+import json
 import pytest
 
 from ...generators import generate_random_string
@@ -276,10 +277,12 @@ def test_namespace_opcua_asset_event_lifecycle_operations(asset_factory):
     event_result = run(
         f"az iot ops ns asset opcua event add --asset {asset_name} --instance {instance_name} "
         f"-g {resource_group} --event-group {event_group_name} --name {event_name} "
-        f"--condition-refresh"
+        "--condition-refresh"
     )
     assert isinstance(event_result, list)
-    assert any(ev["name"] == event_name for ev in event_result)
+    created_event = next((ev for ev in event_result if ev["name"] == event_name), None)
+    assert created_event is not None
+    assert json.loads(created_event["eventConfiguration"])["conditionRefresh"] is True
 
     # 7. REMOVE INDIVIDUAL EVENT
     run(

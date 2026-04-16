@@ -167,6 +167,9 @@ def test_namespace_device_lifecycle_operations(require_namespace_init, tracked_r
     sub_max_items = 10
     security_policy = "Basic256Sha256"
     security_mode = "signAndEncrypt"
+    certificate_reference = "secretRef:certificate"
+    key_reference = "secretRef:privateKey"
+    intermediate_cert_reference = "secretRef:intermediateCerts"
 
     result = run(
         f"az iot ops ns device endpoint inbound add opcua --device {device_name_2} "
@@ -180,10 +183,9 @@ def test_namespace_device_lifecycle_operations(require_namespace_init, tracked_r
         f"--session-backoff {reconnect_exponential_backoff} "
         f"--session-tracing --subscription-lifetime {sub_lifetime} "
         f"--subscription-max-items {sub_max_items} --accept-certs "
-        f"--shared "
-        f"--cert-ref secretRef:certificate --key-ref secretRef:privateKey "
-        f"--intermediate-cert-ref secretRef:intermediateCerts "
-
+        "--shared "
+        f"--cert-ref {certificate_reference} --key-ref {key_reference} "
+        f"--intermediate-cert-ref {intermediate_cert_reference} "
     )
     assert_namespace_device_endpoint_props(
         result,
@@ -209,9 +211,9 @@ def test_namespace_device_lifecycle_operations(require_namespace_init, tracked_r
         sync_properties_into_state_store=True,
         shared=True,
         authentication_method="Certificate",
-        certificate_reference="secretRef:certificate",
-        key_reference="secretRef:privateKey",
-        intermediate_certificate_reference="secretRef:intermediateCerts",
+        certificate_reference=certificate_reference,
+        key_reference=key_reference,
+        intermediate_certificate_reference=intermediate_cert_reference,
     )
 
     # Add Custom endpoint
