@@ -45,6 +45,9 @@ KNOWN_UNLABELED_EXCLUSIONS=(
     "azure-iot-operations/azure-iot-operations-observability-trust-bundle"
     # Bare serviceaccount with no diagnostic content
     "azure-iot-operations/mqtt-client"
+    # Captured by MQ support bundle via field selector (name-based) instead of label selector;
+    # this configmap intentionally lacks the common label — no CLI fix needed
+    "azure-iot-operations/aio-broker-generation-id"
 )
 
 # Get all resource types in the cluster
@@ -196,3 +199,7 @@ fi
 
 echo ""
 echo "=== Done ==="
+
+if [[ ${#UNLABELED_RESOURCES[@]} -gt 0 ]]; then
+    exit 1
+fi
