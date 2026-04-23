@@ -771,41 +771,48 @@ def load_adr_arguments(self, _):
             "for connector pods to be created - without it, devices will not have associated connector pods "
             "even if a connector template is deployed.",
         )
-        # TODO: add description of how to use these in the wiki
         context.argument(
             "certificate_reference",
             options_list=["--certificate-ref", "--cert-ref"],
-            help="Reference for the certificate used in authentication.",
+            help="Reference for the certificate used in authentication. "
+            "Supported by 1P types: OpcUa, REST, SSE, MQTT. Not supported by Media or Onvif. "
+            "For custom connector types, depends on the connector implementation.",
             arg_group="Authentication",
         )
         context.argument(
             "key_reference",
             options_list=["--key-ref"],
-            help="Private key reference for certificate authentication.",
+            help="Private key reference for certificate authentication. "
+            "Supported by 1P types: OpcUa, REST, SSE, MQTT. Not supported by Media or Onvif. "
+            "For custom connector types, depends on the connector implementation.",
             arg_group="Authentication",
         )
         context.argument(
             "intermediate_certificate_reference",
             options_list=["--intermediate-cert-ref", "--icr"],
-            help="Intermediate certificates reference for certificate authentication.",
+            help="Intermediate certificates reference for certificate authentication. "
+            "Supported by 1P types: OpcUa, REST, SSE, MQTT. Not supported by Media or Onvif. "
+            "For custom connector types, depends on the connector implementation.",
             arg_group="Authentication",
         )
         context.argument(
             "password_reference",
             options_list=["--password-ref", "--pass-ref"],
-            help="Reference for the password used in authentication.",
+            help="Reference for the password used in authentication. Supported by all 1P connector types.",
             arg_group="Authentication",
         )
         context.argument(
             "username_reference",
             options_list=["--username-ref", "--user-ref"],
-            help="Reference for the username used in authentication.",
+            help="Reference for the username used in authentication. Supported by all 1P connector types.",
             arg_group="Authentication",
         )
         context.argument(
             "trust_list",
             options_list=["--trust-list"],
-            help="List of trusted certificates for the endpoint.",
+            help="List of trusted certificates for the endpoint. "
+            "Supported by 1P types: OpcUa, REST, SSE, MQTT. Not supported by Media or Onvif. "
+            "For custom connector types, depends on the connector implementation.",
         )
         context.argument(
             "replace",
@@ -849,20 +856,17 @@ def load_adr_arguments(self, _):
         context.argument(
             "device_name",
             options_list=["--device", "-d"],
-            help="Device name.",
-            required=True,
+            help="Device name. Required unless --show-schema is used.",
         )
         context.argument(
             "endpoint_name",
             options_list=["--name", "-n"],
-            help="Endpoint name.",
-            required=True,
+            help="Endpoint name. Required unless --show-schema is used.",
         )
         context.argument(
             "endpoint_address",
             options_list=["--endpoint-address", "--address"],
-            help="Endpoint address to connect to.",
-            required=True,
+            help="Endpoint address to connect to. Required unless --show-schema is used.",
         )
         context.argument(
             "endpoint_config",
@@ -875,9 +879,10 @@ def load_adr_arguments(self, _):
             "show_schema",
             options_list=["--show-schema"],
             help="Show the available endpoint configuration schema for the specified connector type "
-            "and exit without creating an endpoint. The output is a ready-to-use config template "
-            "with default values filled in. Fields shown as `<string>` or `<integer>` are optional "
-            "— replace with a value or remove them before passing to --endpoint-config.",
+            "and exit without creating an endpoint. Fields with a default value are shown as-is. "
+            "Fields with no default (null) are shown with their type info "
+            "{\"type\": \"<type>\", \"default\": null} so you know what value to provide. "
+            "Pass the filled-in config to --endpoint-config to create the endpoint.",
             arg_type=get_three_state_flag(),
         )
         context.argument(

@@ -512,6 +512,16 @@ class NamespaceDevices(Queryable):
         if not endpoint_address:
             raise RequiredArgumentMissingError("--endpoint-address is required.")
 
+        # Validate auth args against 1P connector type capabilities.
+        # Custom connector types are skipped — the user is responsible for knowing what their connector supports.
+        _validate_auth_args_for_connector_type(
+            connector_type=connector_type,
+            certificate_reference=certificate_reference,
+            key_reference=key_reference,
+            intermediate_certificate_reference=intermediate_certificate_reference,
+            trust_list=trust_list,
+        )
+
         # --skip-connector-check only makes sense when endpoint_config is absent;
         # if the user supplies endpoint_config we must validate a template exists.
         if skip_connector_check and endpoint_config:
@@ -733,35 +743,80 @@ def _get_endpoints(device: dict, inbound: bool = True) -> dict:
 
 def _slim_schema(schema: dict) -> dict:
     """
-    Converts a JSON schema into a ready-to-use config template by extracting
+    Converts a JSON schema into a discovery-friendly config template by extracting
     default values for each property recursively.
 
-    Fields with null defaults are shown as typed placeholders (e.g. "<string>",
-    "<integer>") so the user knows what value is expected. Fields with actual
-    defaults retain those defaults.
+    Fields with a real default value are flattened to just that value so they are
+    immediately copy-paste ready. Fields with a null default retain their type info
+    as {"type": "<type>", "default": null} so the user knows what to fill in.
     """
     if not isinstance(schema, dict):
         return schema
 
     props = schema.get("properties", {})
     if not props:
-        return schema.get("default")
+        default = schema.get("default")
+        if default is None:
+            raw_type = schema.get("type", "string")
+            if isinstance(raw_type, list):
+                non_null = [t for t in raw_type if t != "null"]
+                raw_type = non_null[0] if non_null else "string"
+            return {"type": raw_type, "default": None}
+        return default
 
     result = {}
     for field, field_schema in props.items():
         if "properties" in field_schema:
             result[field] = _slim_schema(field_schema)
         else:
+            raw_type = field_schema.get("type", "string")
+            if isinstance(raw_type, list):
+                non_null = [t for t in raw_type if t != "null"]
+                raw_type = non_null[0] if non_null else "string"
             default = field_schema.get("default")
             if default is None:
-                raw_type = field_schema.get("type", "string")
-                if isinstance(raw_type, list):
-                    non_null = [t for t in raw_type if t != "null"]
-                    raw_type = non_null[0] if non_null else "string"
-                result[field] = f"<{raw_type}>"
+                result[field] = {"type": raw_type, "default": None}
             else:
                 result[field] = default
     return result
+
+
+# Connector types that do NOT support certificate-based authentication.
+_NO_CERT_AUTH_TYPES = {
+    DeviceEndpointType.MEDIA.value.lower(),
+    DeviceEndpointType.ONVIF.value.lower(),
+}
+
+
+def _validate_auth_args_for_connector_type(
+    connector_type: str,
+    certificate_reference: Optional[str] = None,
+    key_reference: Optional[str] = None,
+    intermediate_certificate_reference: Optional[str] = None,
+    trust_list: Optional[str] = None,
+) -> None:
+    """
+    Raises an error if cert-based auth args are used with a connector type that doesn't support them.
+    Only Media and Onvif lack cert support. Custom/unknown types are skipped.
+    """
+    if connector_type.lower() not in _NO_CERT_AUTH_TYPES:
+        return
+
+    cert_args_used = [
+        arg for arg, val in [
+            ("--cert-ref", certificate_reference),
+            ("--key-ref", key_reference),
+            ("--icr", intermediate_certificate_reference),
+            ("--trust-list", trust_list),
+        ] if val
+    ]
+
+    if cert_args_used:
+        raise InvalidArgumentValueError(
+            f"Certificate-based authentication ({', '.join(cert_args_used)}) is not supported "
+            f"for connector type '{connector_type}'.\n"
+            f"Only username/password authentication is supported for this connector type."
+        )
 
 
 def _process_onvif_configuration(

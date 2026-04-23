@@ -2455,11 +2455,11 @@ def test_add_inbound_device_endpoint_show_schema(
         # OPC UA uses bundled metadata; patch _get_opcua_info and derive the expected schema
         # from the inboundEndpoints entry.  We synthesise a minimal metadata payload here.
         # _slim_schema will convert {"type":"object","properties":{"foo":{"type":"string"}}}
-        # into {"foo": "<string>"}, so the expected endpointConfig after slim is {"foo": "<string>"}.
+        # into {"foo": {"type": "string", "default": None}} for fields with no default value.
         opcua_raw_schema = expected_schema["endpointConfig"]
         expected_schema = {
             "connectorType": connector_type,
-            "endpointConfig": {"foo": "<string>"},  # result of _slim_schema on opcua_raw_schema
+            "endpointConfig": {"foo": {"type": "string", "default": None}},  # result of _slim_schema on opcua_raw_schema
         }
         mocker.patch(
             "azext_edge.edge.providers.adr.namespace_devices.NamespaceDevices._get_opcua_info",

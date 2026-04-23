@@ -764,18 +764,9 @@ def load_iotops_adr_help():
           text: >
             az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config ./opcua-endpoint-config.yaml
 
-        - name: Add a generalized OPC UA inbound endpoint using inline JSON with nested objects (Bash/Zsh)
+        - name: Add a generalized OPC UA inbound endpoint using inline JSON with nested objects
           text: >
             az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config '{"applicationName":"line1-opcua-client","keepAlive":10000,"session":{"timeout":60000,"reconnectPeriod":5000},"security":{"policy":"Basic256Sha256","mode":"SignAndEncrypt","autoAcceptCertificates":true}}'
-
-        - name: Add a generalized OPC UA inbound endpoint using inline JSON with nested objects (PowerShell)
-          text: >
-            az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config '{\"applicationName\":\"line1-opcua-client\",\"keepAlive\":10000,\"session\":{\"timeout\":60000,\"reconnectPeriod\":5000},\"security\":{\"policy\":\"Basic256Sha256\",\"mode\":\"SignAndEncrypt\",\"autoAcceptCertificates\":true}}'
-          long-summary: >
-            In PowerShell, all double quotes inside the JSON must be escaped with a backslash (\").
-            In Bash/Zsh, wrap the entire JSON value in single quotes — no escaping needed, including for nested objects.
-            For complex or multi-level JSON, using a file (--endpoint-config ./config.json or ./config.yaml) is the most
-            portable option across all shells and avoids quoting issues entirely.
 
         - name: Add a generalized ONVIF inbound endpoint using a config file with authentication
           text: >
