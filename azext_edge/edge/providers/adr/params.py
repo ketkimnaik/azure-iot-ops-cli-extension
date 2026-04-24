@@ -881,7 +881,8 @@ def load_adr_arguments(self, _):
             options_list=["--show-template"],
             help=(
                 "Show a starter configuration template for the connector type and exit without creating an endpoint. "
-                "config: fields shown with their default values; null if no default; output can be passed to --endpoint-config. "
+                "config: fields shown with their default values; null if no default; "
+                "output can be passed to --endpoint-config. "
                 "schema: every field includes type, default, and constraints (min, max, enum, pattern)."
             ),
             arg_type=get_enum_type(EndpointTemplateMode),
