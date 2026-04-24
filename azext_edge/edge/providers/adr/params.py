@@ -852,7 +852,8 @@ def load_adr_arguments(self, _):
             "connector_type",
             options_list=["--connector-type", "--ct"],
             help="Connector type for the inbound endpoint (e.g. 'Microsoft.OpcUa', 'Microsoft.Onvif'). "
-            "The matching connector template must exist in the instance unless --skip-connector-check is used.",
+            "For all types except Microsoft.OpcUa, the matching connector template must exist "
+            "in the instance unless --skip-connector-check is used.",
         )
         context.argument(
             "device_name",

@@ -631,12 +631,13 @@ def assert_namespace_device_opcua_props(
 # Generalized inbound create command tests
 # ---------------------------------------------------------------------------
 
-def test_generalized_inbound_endpoint_show_schema_opcua():
-    """--show-schema for OPC UA reads from the bundled file (no ARM call needed)."""
+@pytest.mark.parametrize("template_mode", ["config", "schema"])
+def test_generalized_inbound_endpoint_show_template_opcua(template_mode):
+    """--show-template for OPC UA reads from the bundled file (no ARM call needed)."""
     result = run(
         "az iot ops ns device endpoint inbound create "
-        "--show-schema --connector-type Microsoft.OpcUa "
-        "-n dummy -d dummy --endpoint-address dummy -g dummy -i dummy"
+        f"--show-template {template_mode} --connector-type Microsoft.OpcUa "
+        "-g dummy -i dummy"
     )
     assert result["connectorType"] == "Microsoft.OpcUa"
     config = result["endpointConfig"]
@@ -748,23 +749,60 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
     assert additional_config["keepAliveMilliseconds"] == 15000
     assert additional_config["security"]["autoAcceptUntrustedServerCertificates"] is True
 
-    # --- OPC UA: separate named endpoint with --endpoint-config ---
-    result = run(
+    # --- OPC UA: --show-template config round-trip → use output as --endpoint-config ---
+    config_result = run(
         f"az iot ops ns device endpoint inbound create "
-        f"--connector-type Microsoft.OpcUa "
-        f"--device {device_name} --name {endpoint_opcua_cfg} "
-        f"--endpoint-address {opcua_address} "
+        f"--show-template config --connector-type Microsoft.OpcUa "
         f"--instance {instance_name} -g {resource_group}"
     )
+    assert config_result["connectorType"] == "Microsoft.OpcUa"
+    assert "endpointConfig" in config_result
+    # Serialize the config template and use it directly as --endpoint-config (round-trip)
+    config_fd, config_path = tempfile.mkstemp(suffix=".json")
+    try:
+        with os.fdopen(config_fd, "w") as f:
+            json.dump(config_result["endpointConfig"], f)
+        result = run(
+            f"az iot ops ns device endpoint inbound create "
+            f"--connector-type Microsoft.OpcUa "
+            f"--device {device_name} --name {endpoint_opcua_cfg} "
+            f"--endpoint-address {opcua_address} "
+            f"--instance {instance_name} -g {resource_group} "
+            f"--endpoint-config {config_path}"
+        )
+    finally:
+        os.unlink(config_path)
     assert endpoint_opcua_cfg in result
 
-    # --- --show-schema for non-OPC UA type with real instance ---
+    # --- OPC UA: --show-template schema returns type/default/constraint metadata ---
+    schema_template = run(
+        f"az iot ops ns device endpoint inbound create "
+        f"--show-template schema --connector-type Microsoft.OpcUa "
+        f"--instance {instance_name} -g {resource_group}"
+    )
+    assert schema_template["connectorType"] == "Microsoft.OpcUa"
+    ep_schema = schema_template["endpointConfig"]
+    # schema mode: each field is a dict with at least a "type" key
+    for field_name, field_meta in ep_schema.items():
+        assert isinstance(field_meta, dict), f"Field '{field_name}' should be a dict in schema mode"
+        assert "type" in field_meta, f"Field '{field_name}' missing 'type' in schema mode"
+
+    # --- Error: --show-template + --endpoint-config together is not allowed ---
+    run(
+        f"az iot ops ns device endpoint inbound create "
+        f"--connector-type Microsoft.OpcUa "
+        f"--show-template config "
+        f"--endpoint-config '{{\"applicationName\": \"test\"}}' "
+        f"--instance {instance_name} -g {resource_group}",
+        expect_failure=True,
+    )
+
+    # --- --show-template for non-OPC UA type with real instance ---
     # Attempt Onvif; skip gracefully if no connector template is deployed
     try:
         schema_result = run(
             f"az iot ops ns device endpoint inbound create "
-            f"--show-schema --connector-type Microsoft.Onvif "
-            f"-n dummy -d dummy --endpoint-address dummy "
+            f"--show-template schema --connector-type Microsoft.Onvif "
             f"--instance {instance_name} -g {resource_group}"
         )
         assert schema_result["connectorType"] == "Microsoft.Onvif"
