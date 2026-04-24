@@ -16,6 +16,7 @@ from knack.log import get_logger
 from rich.console import Console
 
 from ...common import ListableEnum
+from .common import EndpointTemplateMode
 from ...util.az_client import (
     get_registry_mgmt_client,
     get_resource_client,
@@ -449,7 +450,7 @@ class NamespaceDevices(Queryable):
         endpoint_name: Optional[str] = None,
         endpoint_address: Optional[str] = None,
         endpoint_config: Optional[str] = None,
-        show_schema: bool = False,
+        show_template: Optional[str] = None,
         skip_connector_check: bool = False,
         endpoint_version: Optional[str] = None,
         certificate_reference: Optional[str] = None,
@@ -464,7 +465,7 @@ class NamespaceDevices(Queryable):
         """
         Generalized command for adding an inbound device endpoint using a connector type.
 
-        Supports schema discovery (--show-schema) and inline JSON or file-based endpoint
+        Supports template discovery (--show-template) and inline JSON or file-based endpoint
         configuration (--endpoint-config) driven by the connector template metadata.
 
         OPC UA (Microsoft.OpcUa) is handled separately: it does not use Akri connector
@@ -474,8 +475,14 @@ class NamespaceDevices(Queryable):
 
         is_opcua = connector_type.lower() == DeviceEndpointType.OPCUA.value.lower()
 
-        # --show-schema: return schema and exit early (no device/name/address needed)
-        if show_schema:
+        # --show-template: return config template and exit early (no device/name/address needed)
+        if show_template:
+            if endpoint_config:
+                raise InvalidArgumentValueError(
+                    "--show-template and --endpoint-config cannot be used together. "
+                    "--show-template displays the template and exits without creating an endpoint."
+                )
+            template_mode = show_template.lower()
             if is_opcua:
                 opcua_metadata = _load_opcua_metadata_file()
                 # Also call _get_opcua_info to allow instance feature-check when
@@ -489,7 +496,7 @@ class NamespaceDevices(Queryable):
                     if ep.get("endpointType", "").lower() == DeviceEndpointType.OPCUA.value.lower():
                         schema = ep.get("additionalConfigurationSchema", {})
                         break
-                return {"connectorType": connector_type, "endpointConfig": _slim_schema(schema)}
+                return {"connectorType": connector_type, "endpointConfig": _slim_schema(schema, mode=template_mode)}
 
             connector_templates = ConnectorTemplates(cmd=self.cmd)
             raw = connector_templates.get_endpoint_schema(
@@ -499,7 +506,7 @@ class NamespaceDevices(Queryable):
             )
             # slim the endpointConfig portion if present
             if isinstance(raw, dict) and "endpointConfig" in raw:
-                raw["endpointConfig"] = _slim_schema(raw["endpointConfig"])
+                raw["endpointConfig"] = _slim_schema(raw["endpointConfig"], mode=template_mode)
             return raw
 
         # Provider-level required arg guards (CLI enforces these too, but provider
@@ -741,42 +748,62 @@ def _get_endpoints(device: dict, inbound: bool = True) -> dict:
     return device_endpoints.get("inbound", {}) if inbound else device_endpoints
 
 
-def _slim_schema(schema: dict) -> dict:
+def _slim_schema(schema: dict, mode: str = EndpointTemplateMode.CONFIG.value) -> dict:
     """
-    Converts a JSON schema into a discovery-friendly config template by extracting
-    default values for each property recursively.
+    Converts a JSON schema into a user-friendly config template.
 
-    Fields with a real default value are flattened to just that value so they are
-    immediately copy-paste ready. Fields with a null default retain their type info
-    as {"type": "<type>", "default": null} so the user knows what to fill in.
+    modes:
+      config  - Fields with a default are shown as the default value.
+                Fields without a default are shown as null.
+                Output is directly submittable as --endpoint-config.
+
+      schema  - Every field includes a metadata dict with keys: type, default,
+                and any constraints present (minimum, maximum, enum, pattern).
+                Useful for discovering the full schema before crafting a config.
     """
+    _CONSTRAINT_KEYS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "enum", "pattern")
+
     if not isinstance(schema, dict):
         return schema
 
     props = schema.get("properties", {})
     if not props:
+        # Leaf node (no sub-properties)
         default = schema.get("default")
-        if default is None:
-            raw_type = schema.get("type", "string")
-            if isinstance(raw_type, list):
-                non_null = [t for t in raw_type if t != "null"]
-                raw_type = non_null[0] if non_null else "string"
-            return {"type": raw_type, "default": None}
-        return default
+        raw_type = schema.get("type", "string")
+        if isinstance(raw_type, list):
+            non_null = [t for t in raw_type if t != "null"]
+            raw_type = non_null[0] if non_null else "string"
+
+        if mode == EndpointTemplateMode.SCHEMA.value:
+            entry = {"type": raw_type, "default": default}
+            for k in _CONSTRAINT_KEYS:
+                if k in schema:
+                    entry[k] = schema[k]
+            return entry
+
+        # config mode
+        return default  # None if no default
 
     result = {}
     for field, field_schema in props.items():
         if "properties" in field_schema:
-            result[field] = _slim_schema(field_schema)
+            result[field] = _slim_schema(field_schema, mode=mode)
         else:
             raw_type = field_schema.get("type", "string")
             if isinstance(raw_type, list):
                 non_null = [t for t in raw_type if t != "null"]
                 raw_type = non_null[0] if non_null else "string"
             default = field_schema.get("default")
-            if default is None:
-                result[field] = {"type": raw_type, "default": None}
+
+            if mode == EndpointTemplateMode.SCHEMA.value:
+                entry = {"type": raw_type, "default": default}
+                for k in _CONSTRAINT_KEYS:
+                    if k in field_schema:
+                        entry[k] = field_schema[k]
+                result[field] = entry
             else:
+                # config mode: use default value, or null if no default
                 result[field] = default
     return result
 

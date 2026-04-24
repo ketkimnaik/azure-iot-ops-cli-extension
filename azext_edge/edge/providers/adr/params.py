@@ -13,6 +13,7 @@ from .specs import MediaFormat, MediaTaskType, SecurityPolicy, SecurityMode
 from .common import (
     ActionType,
     ADRAuthModes,
+    EndpointTemplateMode,
     FileType,
     TopicRetain,
 )
@@ -856,34 +857,34 @@ def load_adr_arguments(self, _):
         context.argument(
             "device_name",
             options_list=["--device", "-d"],
-            help="Device name. Required unless --show-schema is used.",
+            help="Device name. Required unless --show-template is used.",
         )
         context.argument(
             "endpoint_name",
             options_list=["--name", "-n"],
-            help="Endpoint name. Required unless --show-schema is used.",
+            help="Endpoint name. Required unless --show-template is used.",
         )
         context.argument(
             "endpoint_address",
             options_list=["--endpoint-address", "--address"],
-            help="Endpoint address to connect to. Required unless --show-schema is used.",
+            help="Endpoint address to connect to. Required unless --show-template is used.",
         )
         context.argument(
             "endpoint_config",
             options_list=["--endpoint-config", "--ec"],
             help="Inline JSON string or path to a JSON/YAML file (.json, .yaml, .yml) containing "
-            "connector-specific endpoint configuration. The schema can be discovered with --show-schema. "
+            "connector-specific endpoint configuration. The template can be discovered with --show-template. "
             "Cannot be combined with --skip-connector-check.",
         )
         context.argument(
-            "show_schema",
-            options_list=["--show-schema"],
-            help="Show the available endpoint configuration schema for the specified connector type "
-            "and exit without creating an endpoint. Fields with a default value are shown as-is. "
-            "Fields with no default (null) are shown with their type info "
-            "{\"type\": \"<type>\", \"default\": null} so you know what value to provide. "
-            "Pass the filled-in config to --endpoint-config to create the endpoint.",
-            arg_type=get_three_state_flag(),
+            "show_template",
+            options_list=["--show-template"],
+            help=(
+                "Show a starter configuration template for the connector type and exit without creating an endpoint. "
+                "config: fields shown with their default values; null if no default; output can be passed to --endpoint-config. "
+                "schema: every field includes type, default, and constraints (min, max, enum, pattern)."
+            ),
+            arg_type=get_enum_type(EndpointTemplateMode),
         )
         context.argument(
             "skip_connector_check",

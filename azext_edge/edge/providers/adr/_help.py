@@ -749,12 +749,16 @@ def load_iotops_adr_help():
           Its schema and version are derived from bundled metadata. The instance must have OPC UA
           enabled (feature.opcua.mode != Disabled).
 
-          Use --show-schema to discover valid configuration fields before creating an endpoint.
+          Use --show-template to discover valid configuration fields before creating an endpoint.
 
         examples:
-        - name: Discover the endpoint configuration schema for an OPC UA connector
+        - name: Discover default endpoint configuration template for an OPC UA connector
           text: >
-            az iot ops ns device endpoint inbound create --device mydevice --name myEndpoint --endpoint-address "opc.tcp://placeholder:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-schema
+            az iot ops ns device endpoint inbound create --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-template config
+
+        - name: Discover full schema template (with types and constraints) for an OPC UA connector
+          text: >
+            az iot ops ns device endpoint inbound create --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-template schema
 
         - name: Add a generalized OPC UA inbound endpoint using a JSON config file
           text: >

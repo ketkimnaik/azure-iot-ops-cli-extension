@@ -2462,41 +2462,45 @@ def _make_connector_template(connector_type: str, version: str = "1.0.0", schema
     }
 
 
-@pytest.mark.parametrize("connector_type", ["Microsoft.OpcUa", "Microsoft.Onvif"])
-def test_add_inbound_device_endpoint_show_schema(
+@pytest.mark.parametrize("connector_type,template_mode", [
+    ("Microsoft.OpcUa", "config"),
+    ("Microsoft.OpcUa", "schema"),
+    ("Microsoft.Onvif", "config"),
+    ("Microsoft.Onvif", "schema"),
+])
+def test_add_inbound_device_endpoint_show_template(
     mocked_cmd,
     mocker,
     connector_type: str,
+    template_mode: str,
     mocked_get_namespace_for_instance,
 ):
-    """--show-schema returns schema without hitting device APIs.
+    """--show-template returns config template without hitting device APIs.
 
     OPC UA: schema comes from bundled metadata via _get_opcua_info.
     Other types: schema comes from ConnectorTemplates.get_endpoint_schema.
+
+    config mode: fields shown as default value (null if no default).
+    schema mode: fields shown with type, default, and constraints.
     """
-    expected_schema = {
-        "connectorType": connector_type,
-        "endpointConfig": {"type": "object", "properties": {"foo": {"type": "string"}}},
-    }
+    raw_schema = {"type": "object", "properties": {"foo": {"type": "string"}}}
 
     is_opcua = connector_type.lower() == "microsoft.opcua"
 
+    if template_mode == "config":
+        # foo has no default -> null in config mode
+        expected_endpoint_config = {"foo": None}
+    else:
+        # schema mode: foo has no default -> full metadata
+        expected_endpoint_config = {"foo": {"type": "string", "default": None}}
+
     if is_opcua:
-        # OPC UA uses bundled metadata; patch _get_opcua_info and derive the expected schema
-        # from the inboundEndpoints entry.  We synthesise a minimal metadata payload here.
-        # _slim_schema will convert {"type":"object","properties":{"foo":{"type":"string"}}}
-        # into {"foo": {"type": "string", "default": None}} for fields with no default value.
-        opcua_raw_schema = expected_schema["endpointConfig"]
-        expected_schema = {
-            "connectorType": connector_type,
-            "endpointConfig": {"foo": {"type": "string", "default": None}},  # result of _slim_schema on opcua_raw_schema
-        }
         mocker.patch(
             "azext_edge.edge.providers.adr.namespace_devices.NamespaceDevices._get_opcua_info",
             return_value={
                 "version": "1.2.82",
                 "inboundEndpoints": [
-                    {"endpointType": "Microsoft.OpcUa", "additionalConfigurationSchema": opcua_raw_schema}
+                    {"endpointType": "Microsoft.OpcUa", "additionalConfigurationSchema": raw_schema}
                 ],
             },
         )
@@ -2510,7 +2514,10 @@ def test_add_inbound_device_endpoint_show_schema(
         mock_ct = mocker.patch(
             "azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates"
         )
-        mock_ct.return_value.get_endpoint_schema.return_value = expected_schema
+        mock_ct.return_value.get_endpoint_schema.return_value = {
+            "connectorType": connector_type,
+            "endpointConfig": raw_schema,
+        }
 
     instance_name = f"inst-{generate_random_string()}"
     instance_resource_group = f"rg-{generate_random_string()}"
@@ -2520,10 +2527,11 @@ def test_add_inbound_device_endpoint_show_schema(
         connector_type=connector_type,
         instance_name=instance_name,
         instance_resource_group=instance_resource_group,
-        show_schema=True,
+        show_template=template_mode,
     )
 
-    assert result == expected_schema
+    expected = {"connectorType": connector_type, "endpointConfig": expected_endpoint_config}
+    assert result == expected
     if not is_opcua:
         mock_ct.return_value.get_endpoint_schema.assert_called_once_with(
             instance_name=instance_name,
