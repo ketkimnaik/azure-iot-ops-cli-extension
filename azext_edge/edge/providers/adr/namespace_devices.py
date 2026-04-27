@@ -548,7 +548,9 @@ class NamespaceDevices(Queryable):
         if is_opcua and not skip_connector_check:
             self._get_opcua_info(instance_name, instance_resource_group)
 
-        # Connector template lookup for all other types (only needed when endpoint_config is provided)
+        # For all other connector types, when connector checks are enabled, look up the
+        # connector template to enforce template presence and auto-resolve endpoint
+        # version when not explicitly provided, even if endpoint_config is absent.
         elif not skip_connector_check:
             connector_templates = ConnectorTemplates(cmd=self.cmd)
             template = connector_templates.get_connector_template_for_type(
