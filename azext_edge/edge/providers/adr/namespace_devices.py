@@ -485,12 +485,18 @@ class NamespaceDevices(Queryable):
             template_mode = show_template.lower()
             if is_opcua:
                 opcua_metadata = _load_opcua_metadata_file()
-                # Also call _get_opcua_info to allow instance feature-check when
-                # instance args are supplied (e.g. in tests that mock this method).
-                try:
-                    opcua_metadata = self._get_opcua_info(instance_name, instance_resource_group)
-                except Exception:
-                    pass
+                # When real instance args are provided, check if OPC UA is disabled on
+                # the instance.  For dummy / offline args (e.g. integration-test scaffolding)
+                # the ARM call may fail with a not-found error; fall back to the bundled
+                # metadata in that case.  ValidationError (OPC UA explicitly Disabled) is
+                # intentionally NOT caught so the disabled-check still propagates.
+                if instance_name and instance_resource_group:
+                    from azure.core.exceptions import HttpResponseError
+
+                    try:
+                        opcua_metadata = self._get_opcua_info(instance_name, instance_resource_group)
+                    except HttpResponseError:
+                        pass  # instance / resource-group not found – use bundled metadata
                 schema = {}
                 for ep in opcua_metadata.get("inboundEndpoints", []):
                     if ep.get("endpointType", "").lower() == DeviceEndpointType.OPCUA.value.lower():
@@ -571,6 +577,30 @@ class NamespaceDevices(Queryable):
                 additional_configuration=endpoint_config,
                 config_type="endpoint",
             )
+
+            # Validate the parsed config against the connector's JSON Schema.
+            # Skipped when --skip-connector-check is set (user opts out of validation).
+            if not skip_connector_check:
+                if is_opcua:
+                    from .specs import NAMESPACE_DEVICE_OPCUA_ENDPOINT_SCHEMA as _endpoint_schema
+                else:
+                    _endpoint_schema = connector_templates.get_endpoint_schema(
+                        instance_name=instance_name,
+                        instance_resource_group=instance_resource_group,
+                        connector_type=connector_type,
+                    ).get("endpointConfig", {})
+                if _endpoint_schema:
+                    from ...util.schema_validation import check_json_schema, validate_data_against_schema
+
+                    skip_reason = check_json_schema(_endpoint_schema)
+                    if skip_reason:
+                        logger.warning("Skipping endpoint config validation: %s", skip_reason)
+                    else:
+                        validate_data_against_schema(
+                            _endpoint_schema,
+                            json.loads(additional_configuration),
+                            name="endpoint",
+                        )
 
         # Build endpoint body
         endpoint_body = {

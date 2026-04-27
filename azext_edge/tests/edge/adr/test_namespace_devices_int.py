@@ -628,14 +628,14 @@ def assert_namespace_device_opcua_props(
 
 
 # ---------------------------------------------------------------------------
-# Generalized inbound create command tests
+# Generalized inbound apply command tests
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("template_mode", ["config", "schema"])
 def test_generalized_inbound_endpoint_show_template_opcua(template_mode):
     """--show-template for OPC UA reads from the bundled file (no ARM call needed)."""
     result = run(
-        "az iot ops ns device endpoint inbound create "
+        "az iot ops ns device endpoint inbound apply "
         f"--show-template {template_mode} --connector-type Microsoft.OpcUa "
         "-g dummy -i dummy"
     )
@@ -679,7 +679,7 @@ def test_generalized_inbound_endpoint_error_cases():
     """Verify CLI-level and provider-level error conditions."""
     # --skip-connector-check + --endpoint-config are mutually exclusive
     run(
-        "az iot ops ns device endpoint inbound create "
+        "az iot ops ns device endpoint inbound apply "
         "--connector-type Microsoft.Mqtt "
         "-n dummy -d dummy --endpoint-address dummy -g dummy -i dummy "
         "--skip-connector-check --endpoint-config '{\"key\": \"value\"}'",
@@ -688,7 +688,7 @@ def test_generalized_inbound_endpoint_error_cases():
 
 
 def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_resources: List[str]):
-    """Integration lifecycle test for the generalized inbound create command."""
+    """Integration lifecycle test for the generalized inbound apply command."""
     import os
     import tempfile
 
@@ -710,7 +710,7 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
     # --- OPC UA: minimal (no --endpoint-config, version auto-resolved from bundled) ---
     opcua_address = "opc.tcp://192.168.1.200:4840"
     result = run(
-        f"az iot ops ns device endpoint inbound create "
+        f"az iot ops ns device endpoint inbound apply "
         f"--connector-type Microsoft.OpcUa "
         f"--device {device_name} --name {endpoint_opcua_min} "
         f"--endpoint-address {opcua_address} "
@@ -732,7 +732,7 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
         with os.fdopen(config_fd, "w") as f:
             json.dump(opcua_config, f)
         result = run(
-            f"az iot ops ns device endpoint inbound create "
+            f"az iot ops ns device endpoint inbound apply "
             f"--connector-type Microsoft.OpcUa "
             f"--device {device_name} --name {endpoint_opcua_min} "
             f"--endpoint-address {opcua_address} "
@@ -751,7 +751,7 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
 
     # --- OPC UA: --show-template config round-trip → use output as --endpoint-config ---
     config_result = run(
-        f"az iot ops ns device endpoint inbound create "
+        f"az iot ops ns device endpoint inbound apply "
         f"--show-template config --connector-type Microsoft.OpcUa "
         f"--instance {instance_name} -g {resource_group}"
     )
@@ -763,7 +763,7 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
         with os.fdopen(config_fd, "w") as f:
             json.dump(config_result["endpointConfig"], f)
         result = run(
-            f"az iot ops ns device endpoint inbound create "
+            f"az iot ops ns device endpoint inbound apply "
             f"--connector-type Microsoft.OpcUa "
             f"--device {device_name} --name {endpoint_opcua_cfg} "
             f"--endpoint-address {opcua_address} "
@@ -776,7 +776,7 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
 
     # --- OPC UA: --show-template schema returns type/default/constraint metadata ---
     schema_template = run(
-        f"az iot ops ns device endpoint inbound create "
+        f"az iot ops ns device endpoint inbound apply "
         f"--show-template schema --connector-type Microsoft.OpcUa "
         f"--instance {instance_name} -g {resource_group}"
     )
@@ -794,7 +794,7 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
 
     # --- Error: --show-template + --endpoint-config together is not allowed ---
     run(
-        f"az iot ops ns device endpoint inbound create "
+        f"az iot ops ns device endpoint inbound apply "
         f"--connector-type Microsoft.OpcUa "
         f"--show-template config "
         f"--endpoint-config '{{\"applicationName\": \"test\"}}' "
@@ -806,7 +806,7 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
     # Attempt Onvif; skip gracefully if no connector template is deployed
     try:
         schema_result = run(
-            f"az iot ops ns device endpoint inbound create "
+            f"az iot ops ns device endpoint inbound apply "
             f"--show-template schema --connector-type Microsoft.Onvif "
             f"--instance {instance_name} -g {resource_group}"
         )
@@ -820,7 +820,7 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
     # --- Non-OPC UA with --skip-connector-check + --version (no template needed) ---
     mqtt_address = "aio-broker:18883"
     result = run(
-        f"az iot ops ns device endpoint inbound create "
+        f"az iot ops ns device endpoint inbound apply "
         f"--connector-type Microsoft.Mqtt "
         f"--device {device_name} --name {endpoint_mqtt_scc} "
         f"--endpoint-address {mqtt_address} "
@@ -835,7 +835,7 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
 
     # --- Error: --skip-connector-check + --endpoint-config (mutually exclusive) ---
     run(
-        f"az iot ops ns device endpoint inbound create "
+        f"az iot ops ns device endpoint inbound apply "
         f"--connector-type Microsoft.Mqtt "
         f"--device {device_name} --name dummy_ep "
         f"--endpoint-address dummy "
@@ -846,7 +846,7 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
 
     # --- Error: missing required arg (--connector-type) ---
     run(
-        f"az iot ops ns device endpoint inbound create "
+        f"az iot ops ns device endpoint inbound apply "
         f"--device {device_name} --name dummy_ep "
         f"--endpoint-address dummy "
         f"--instance {instance_name} -g {resource_group}",

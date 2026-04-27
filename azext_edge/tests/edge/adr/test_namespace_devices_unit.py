@@ -3062,3 +3062,283 @@ def test_add_inbound_device_endpoint_success_non_opcua(
     ep_patch = patch_body["properties"]["endpoints"]["inbound"][endpoint_name]
     assert ep_patch["endpointType"] == connector_type
     assert ep_patch["version"] == version_from_template
+
+
+# ---------------------------------------------------------------------------
+# Schema validation tests for --endpoint-config
+# ---------------------------------------------------------------------------
+
+
+def test_add_inbound_device_endpoint_opcua_config_fails_schema_validation(
+    mocked_cmd,
+    mocker,
+    mocked_get_namespace_for_instance,
+):
+    """Invalid OPC UA endpoint config raises InvalidArgumentValueError via bundled schema."""
+    mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_devices.NamespaceDevices._get_opcua_info",
+        return_value={"version": "1.2.82", "inboundEndpoints": []},
+    )
+    # keepAliveMilliseconds must be an integer — passing a string violates the schema.
+    mocker.patch(
+        "azext_edge.edge.providers.adr.helpers.process_additional_configuration",
+        return_value='{"keepAliveMilliseconds": "not-an-integer"}',
+    )
+
+    with pytest.raises(InvalidArgumentValueError, match="endpoint"):
+        add_inbound_device_endpoint(
+            cmd=mocked_cmd,
+            connector_type="Microsoft.OpcUa",
+            instance_name="my-instance",
+            instance_resource_group="my-rg",
+            device_name="my-device",
+            endpoint_name="ep1",
+            endpoint_address="opc.tcp://1.2.3.4:4840",
+            endpoint_config='{"keepAliveMilliseconds": "not-an-integer"}',
+        )
+
+
+def test_add_inbound_device_endpoint_non_opcua_config_fails_schema_validation(
+    mocked_cmd,
+    mocker,
+    mocked_get_namespace_for_instance,
+):
+    """Invalid non-OPC UA endpoint config raises InvalidArgumentValueError via schema from get_endpoint_schema."""
+    strict_schema = {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "port": {"type": "integer"},
+        },
+        "additionalProperties": False,
+    }
+    mock_ct = mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates"
+    )
+    mock_ct.return_value.get_connector_template_for_type.return_value = _make_connector_template(
+        "Microsoft.Onvif", version="2.0.0"
+    )
+    mock_ct.return_value.get_endpoint_version_for_type.return_value = "2.0.0"
+    mock_ct.return_value.get_endpoint_schema.return_value = {
+        "connectorType": "Microsoft.Onvif",
+        "endpointConfig": strict_schema,
+    }
+    # unknownField is rejected by additionalProperties: false
+    mocker.patch(
+        "azext_edge.edge.providers.adr.helpers.process_additional_configuration",
+        return_value='{"unknownField": "bad"}',
+    )
+
+    with pytest.raises(InvalidArgumentValueError):
+        add_inbound_device_endpoint(
+            cmd=mocked_cmd,
+            connector_type="Microsoft.Onvif",
+            instance_name="my-instance",
+            instance_resource_group="my-rg",
+            device_name="my-device",
+            endpoint_name="ep1",
+            endpoint_address="http://1.2.3.4:80/onvif",
+            endpoint_config='{"unknownField": "bad"}',
+        )
+
+    mock_ct.return_value.get_endpoint_schema.assert_called_once_with(
+        instance_name="my-instance",
+        instance_resource_group="my-rg",
+        connector_type="Microsoft.Onvif",
+    )
+
+
+def test_add_inbound_device_endpoint_non_opcua_non_standard_dialect_skips_validation(
+    mocked_cmd,
+    mocker,
+    mocked_get_namespace_for_instance,
+    mocked_responses: responses,
+):
+    """Non-standard schema dialect causes validation to be skipped (warning logged, no error)."""
+    non_standard_schema = {
+        "$schema": "https://custom.ops.io/schemas/v1/endpoint",  # not json-schema.org
+        "type": "object",
+        "properties": {"port": {"type": "integer"}},
+        "additionalProperties": False,
+    }
+    connector_type = "Microsoft.Onvif"
+    version_from_template = "2.0.0"
+
+    mock_ct = mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates"
+    )
+    mock_ct.return_value.get_connector_template_for_type.return_value = _make_connector_template(
+        connector_type, version=version_from_template
+    )
+    mock_ct.return_value.get_endpoint_version_for_type.return_value = version_from_template
+    mock_ct.return_value.get_endpoint_schema.return_value = {
+        "connectorType": connector_type,
+        "endpointConfig": non_standard_schema,
+    }
+
+    endpoint_config_str = '{"unknownField": "would-fail-if-validated"}'
+    mocker.patch(
+        "azext_edge.edge.providers.adr.helpers.process_additional_configuration",
+        return_value=endpoint_config_str,
+    )
+    # validate_data_against_schema must NOT be called since dialect is non-standard
+    mock_validate = mocker.patch(
+        "azext_edge.edge.util.schema_validation.validate_data_against_schema"
+    )
+
+    device_name = generate_random_string()
+    endpoint_name = f"ep-{generate_random_string()}"
+    endpoint_address = "http://192.168.1.10:80/onvif/device_service"
+    namespace_name = mocked_get_namespace_for_instance.return_value["name"]
+    resource_group_name = mocked_get_namespace_for_instance.return_value["resource_group"]
+
+    original_device = get_namespace_device_record(
+        device_name=device_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+    )
+    expected_inbound = {
+        endpoint_name: {
+            "endpointType": connector_type,
+            "address": endpoint_address,
+            "version": version_from_template,
+            "authentication": {"method": ADRAuthModes.anonymous.value},
+            "additionalConfiguration": endpoint_config_str,
+        }
+    }
+    updated_device = deepcopy(original_device)
+    updated_device["properties"]["endpoints"] = {"inbound": expected_inbound}
+
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_namespace_device_mgmt_uri(namespace_name, resource_group_name, device_name),
+        json=original_device,
+        status=200,
+        content_type="application/json",
+    )
+    mocked_responses.add(
+        method=responses.PATCH,
+        url=get_namespace_device_mgmt_uri(namespace_name, resource_group_name, device_name),
+        json=updated_device,
+        status=200,
+        content_type="application/json",
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_namespace_device_mgmt_uri(namespace_name, resource_group_name, device_name),
+        json=updated_device,
+        status=200,
+        content_type="application/json",
+    )
+
+    add_inbound_device_endpoint(
+        cmd=mocked_cmd,
+        connector_type=connector_type,
+        instance_name="my-instance",
+        instance_resource_group="my-rg",
+        device_name=device_name,
+        endpoint_name=endpoint_name,
+        endpoint_address=endpoint_address,
+        endpoint_config=endpoint_config_str,
+        wait_sec=0,
+    )
+
+    mock_validate.assert_not_called()
+
+
+def test_add_inbound_device_endpoint_non_opcua_get_endpoint_schema_called_with_config(
+    mocked_cmd,
+    mocker,
+    mocked_get_namespace_for_instance,
+    mocked_responses: responses,
+):
+    """Happy path: get_endpoint_schema is called for non-OPC UA when --endpoint-config is provided."""
+    connector_type = "Microsoft.Onvif"
+    version_from_template = "2.0.0"
+    valid_schema = {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {"port": {"type": "integer"}},
+    }
+
+    mock_ct = mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates"
+    )
+    mock_ct.return_value.get_connector_template_for_type.return_value = _make_connector_template(
+        connector_type, version=version_from_template
+    )
+    mock_ct.return_value.get_endpoint_version_for_type.return_value = version_from_template
+    mock_ct.return_value.get_endpoint_schema.return_value = {
+        "connectorType": connector_type,
+        "endpointConfig": valid_schema,
+    }
+
+    endpoint_config_str = '{"port": 8080}'
+    mocker.patch(
+        "azext_edge.edge.providers.adr.helpers.process_additional_configuration",
+        return_value=endpoint_config_str,
+    )
+
+    device_name = generate_random_string()
+    endpoint_name = f"ep-{generate_random_string()}"
+    endpoint_address = "http://192.168.1.10:80/onvif/device_service"
+    namespace_name = mocked_get_namespace_for_instance.return_value["name"]
+    resource_group_name = mocked_get_namespace_for_instance.return_value["resource_group"]
+
+    original_device = get_namespace_device_record(
+        device_name=device_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+    )
+    expected_inbound = {
+        endpoint_name: {
+            "endpointType": connector_type,
+            "address": endpoint_address,
+            "version": version_from_template,
+            "authentication": {"method": ADRAuthModes.anonymous.value},
+            "additionalConfiguration": endpoint_config_str,
+        }
+    }
+    updated_device = deepcopy(original_device)
+    updated_device["properties"]["endpoints"] = {"inbound": expected_inbound}
+
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_namespace_device_mgmt_uri(namespace_name, resource_group_name, device_name),
+        json=original_device,
+        status=200,
+        content_type="application/json",
+    )
+    mocked_responses.add(
+        method=responses.PATCH,
+        url=get_namespace_device_mgmt_uri(namespace_name, resource_group_name, device_name),
+        json=updated_device,
+        status=200,
+        content_type="application/json",
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_namespace_device_mgmt_uri(namespace_name, resource_group_name, device_name),
+        json=updated_device,
+        status=200,
+        content_type="application/json",
+    )
+
+    result = add_inbound_device_endpoint(
+        cmd=mocked_cmd,
+        connector_type=connector_type,
+        instance_name="my-instance",
+        instance_resource_group="my-rg",
+        device_name=device_name,
+        endpoint_name=endpoint_name,
+        endpoint_address=endpoint_address,
+        endpoint_config=endpoint_config_str,
+        wait_sec=0,
+    )
+
+    assert result == expected_inbound
+    mock_ct.return_value.get_endpoint_schema.assert_called_once_with(
+        instance_name="my-instance",
+        instance_resource_group="my-rg",
+        connector_type=connector_type,
+    )

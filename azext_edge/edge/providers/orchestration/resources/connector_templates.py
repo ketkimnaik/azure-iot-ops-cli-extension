@@ -595,7 +595,7 @@ class ConnectorTemplates(Queryable):
                         managed_config = runtime_config.get("managedConfigurationSettings", {})
                         image_config = managed_config.get("imageConfigurationSettings", {})
                         tag_settings = image_config.get("tagDigestSettings", {})
-                        tag_version = tag_settings.get("tag", "0.0.0")
+                        tag_version = tag_settings.get("tag") or "0.0.0"
                         matching.append((tag_version, template))
                         break
 
@@ -615,7 +615,7 @@ class ConnectorTemplates(Queryable):
                     if latest_version is None or parsed > semver.parse(latest_version):
                         latest_version = tag_version
                         latest_template = template
-                except (ValueError, AttributeError):
+                except (ValueError, AttributeError, TypeError):
                     if latest_version is None:
                         latest_version = tag_version
                         latest_template = template

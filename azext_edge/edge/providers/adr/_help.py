@@ -736,12 +736,12 @@ def load_iotops_adr_help():
     """
 
     helps[
-        "iot ops ns device endpoint inbound create"
+        "iot ops ns device endpoint inbound apply"
     ] = """
         type: command
-        short-summary: Add an inbound endpoint to a device using a generalized connector-type approach.
+        short-summary: Apply an inbound endpoint to a device using a generalized connector-type approach.
         long-summary: |
-          The generalized add command is schema-driven. For non-OPC UA connector types it looks up
+          The generalized apply command is schema-driven. For non-OPC UA connector types it looks up
           an existing connector template for the specified --connector-type, auto-resolves the
           endpoint version, and optionally validates --endpoint-config against the connector schema.
 
@@ -754,31 +754,31 @@ def load_iotops_adr_help():
         examples:
         - name: Discover default endpoint configuration template for an OPC UA connector
           text: >
-            az iot ops ns device endpoint inbound create --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-template config
+            az iot ops ns device endpoint inbound apply --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-template config
 
         - name: Discover full schema template (with types and constraints) for an OPC UA connector
           text: >
-            az iot ops ns device endpoint inbound create --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-template schema
+            az iot ops ns device endpoint inbound apply --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-template schema
 
-        - name: Add a generalized OPC UA inbound endpoint using a JSON config file
+        - name: Apply a generalized OPC UA inbound endpoint using a JSON config file
           text: >
-            az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config ./opcua-endpoint-config.json
+            az iot ops ns device endpoint inbound apply --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config ./opcua-endpoint-config.json
 
-        - name: Add a generalized OPC UA inbound endpoint using a YAML config file
+        - name: Apply a generalized OPC UA inbound endpoint using a YAML config file
           text: >
-            az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config ./opcua-endpoint-config.yaml
+            az iot ops ns device endpoint inbound apply --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config ./opcua-endpoint-config.yaml
 
-        - name: Add a generalized OPC UA inbound endpoint using inline JSON with nested objects
+        - name: Apply a generalized OPC UA inbound endpoint using inline JSON with nested objects
           text: >
-            az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config '{"applicationName":"line1-opcua-client","keepAliveMilliseconds":10000,"session":{"timeoutMilliseconds":60000,"reconnectPeriod":5000},"security":{"securityPolicy":"Basic256Sha256","securityMode":"SignAndEncrypt","autoAcceptUntrustedServerCertificates":true}}'
+            az iot ops ns device endpoint inbound apply --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config '{"applicationName":"line1-opcua-client","keepAliveMilliseconds":10000,"session":{"timeoutMilliseconds":60000,"reconnectPeriod":5000},"security":{"securityPolicy":"Basic256Sha256","securityMode":"SignAndEncrypt","autoAcceptUntrustedServerCertificates":true}}'
 
-        - name: Add a generalized ONVIF inbound endpoint using a config file with authentication
+        - name: Apply a generalized ONVIF inbound endpoint using a config file with authentication
           text: >
-            az iot ops ns device endpoint inbound create --device mydevice --name myONVIFEndpoint --endpoint-address "http://192.168.1.100:8000/onvif/device_service" --connector-type Microsoft.Onvif --instance myInstance -g myInstanceResourceGroup --endpoint-config ./onvif-config.json --user-ref auth-secret/username --pass-ref auth-secret/password
+            az iot ops ns device endpoint inbound apply --device mydevice --name myONVIFEndpoint --endpoint-address "http://192.168.1.100:8000/onvif/device_service" --connector-type Microsoft.Onvif --instance myInstance -g myInstanceResourceGroup --endpoint-config ./onvif-config.json --user-ref auth-secret/username --pass-ref auth-secret/password
 
-        - name: Add an inbound endpoint skipping connector template check (no schema validation, no version auto-resolution)
+        - name: Apply an inbound endpoint skipping connector template check (no schema validation, no version auto-resolution)
           text: >
-            az iot ops ns device endpoint inbound create --device mydevice --name myEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --skip-connector-check
+            az iot ops ns device endpoint inbound apply --device mydevice --name myEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --skip-connector-check
     """
 
     helps[
