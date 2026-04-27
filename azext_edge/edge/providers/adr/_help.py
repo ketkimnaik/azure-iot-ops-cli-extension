@@ -770,7 +770,7 @@ def load_iotops_adr_help():
 
         - name: Add a generalized OPC UA inbound endpoint using inline JSON with nested objects
           text: >
-            az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config '{"applicationName":"line1-opcua-client","keepAlive":10000,"session":{"timeout":60000,"reconnectPeriod":5000},"security":{"policy":"Basic256Sha256","mode":"SignAndEncrypt","autoAcceptCertificates":true}}'
+            az iot ops ns device endpoint inbound create --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config '{"applicationName":"line1-opcua-client","keepAliveMilliseconds":10000,"session":{"timeoutMilliseconds":60000,"reconnectPeriod":5000},"security":{"securityPolicy":"Basic256Sha256","securityMode":"SignAndEncrypt","autoAcceptUntrustedServerCertificates":true}}'
 
         - name: Add a generalized ONVIF inbound endpoint using a config file with authentication
           text: >
