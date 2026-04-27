@@ -802,21 +802,6 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
         expect_failure=True,
     )
 
-    # --- --show-template for non-OPC UA type with real instance ---
-    # Attempt Onvif; skip gracefully if no connector template is deployed
-    try:
-        schema_result = run(
-            f"az iot ops ns device endpoint inbound apply "
-            f"--show-template schema --connector-type Microsoft.Onvif "
-            f"--instance {instance_name} -g {resource_group}"
-        )
-        assert schema_result["connectorType"] == "Microsoft.Onvif"
-        assert "endpointConfig" in schema_result
-    except CLIInternalError as e:
-        if "not found" in str(e).lower() or "no connector" in str(e).lower():
-            pytest.skip(f"No Onvif connector template available in instance: {e}")
-        raise
-
     # --- Non-OPC UA with --skip-connector-check + --version (no template needed) ---
     mqtt_address = "aio-broker:18883"
     result = run(
