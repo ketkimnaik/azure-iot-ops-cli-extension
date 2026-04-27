@@ -198,7 +198,8 @@ def check_cluster_label_coverage(
 
     Args:
         prefixes: Name prefix(es) used to identify resources belonging to this service.
-        expected_label: Tuple of (label_key, label_value) e.g. ("app.kubernetes.io/name", "microsoft-iotoperations-dataflows").
+        expected_label: Tuple of (label_key, label_value) e.g.
+            ("app.kubernetes.io/name", "microsoft-iotoperations-dataflows").
         workload_types: Resource types to scan. Defaults to WORKLOAD_TYPES.
         known_exclusions: List of "namespace/name" strings to skip (intentionally unlabeled resources).
     """
@@ -244,7 +245,7 @@ def check_cluster_label_coverage(
 
     assert not missing_label_resources, (
         "Resources found on cluster with matching name prefix but missing/wrong label "
-        f"(would be silently skipped by support bundle):\n"
+        "(would be silently skipped by support bundle):\n"
         + "\n".join(missing_label_resources)
     )
 

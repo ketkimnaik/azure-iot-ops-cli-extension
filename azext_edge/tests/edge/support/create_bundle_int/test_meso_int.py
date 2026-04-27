@@ -9,7 +9,13 @@ from knack.log import get_logger
 
 from azext_edge.edge.common import OpsServiceType
 from ....helpers import get_multi_kubectl_workload_items
-from .helpers import BASE_ZIP_PATH, check_cluster_label_coverage, check_workload_resource_files, get_file_map, run_bundle_command
+from .helpers import (
+    BASE_ZIP_PATH,
+    check_cluster_label_coverage,
+    check_workload_resource_files,
+    get_file_map,
+    run_bundle_command,
+)
 
 logger = get_logger(__name__)
 
