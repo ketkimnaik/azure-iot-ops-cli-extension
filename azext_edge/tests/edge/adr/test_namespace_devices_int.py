@@ -782,10 +782,15 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
     )
     assert schema_template["connectorType"] == "Microsoft.OpcUa"
     ep_schema = schema_template["endpointConfig"]
-    # schema mode: each field is a dict with at least a "type" key
+    # schema mode: each field is a dict — either a leaf metadata dict {"type": ..., "default": ...}
+    # or a nested object dict (sub-fields recursed into, values are also dicts)
     for field_name, field_meta in ep_schema.items():
         assert isinstance(field_meta, dict), f"Field '{field_name}' should be a dict in schema mode"
-        assert "type" in field_meta, f"Field '{field_name}' missing 'type' in schema mode"
+        # Leaf fields: values are scalars (type string, default, constraints)
+        # Nested fields: all values are sub-field dicts
+        is_nested = field_meta and all(isinstance(v, dict) for v in field_meta.values())
+        if not is_nested:
+            assert "type" in field_meta, f"Leaf field '{field_name}' missing 'type' in schema mode"
 
     # --- Error: --show-template + --endpoint-config together is not allowed ---
     run(

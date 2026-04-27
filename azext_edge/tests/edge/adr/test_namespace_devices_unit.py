@@ -2841,3 +2841,224 @@ def test_add_inbound_device_endpoint_duplicate_no_replace_errors(
             replace=False,
             wait_sec=0,
         )
+
+
+# ---------------------------------------------------------------------------
+# _slim_schema unit tests
+# ---------------------------------------------------------------------------
+
+from azext_edge.edge.providers.adr.namespace_devices import _slim_schema  # noqa: E402
+
+
+def test_slim_schema_config_mode_flat():
+    """config mode: fields with defaults use the default; fields without default → None."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "withDefault": {"type": "integer", "default": 42},
+            "noDefault": {"type": "string"},
+        },
+    }
+    result = _slim_schema(schema, mode="config")
+    assert result == {"withDefault": 42, "noDefault": None}
+
+
+def test_slim_schema_schema_mode_flat():
+    """schema mode: every field is a metadata dict with type and default."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "withDefault": {"type": "integer", "default": 42},
+            "noDefault": {"type": "string"},
+        },
+    }
+    result = _slim_schema(schema, mode="schema")
+    assert result == {
+        "withDefault": {"type": "integer", "default": 42},
+        "noDefault": {"type": "string", "default": None},
+    }
+
+
+def test_slim_schema_nested_objects():
+    """Both modes recurse into nested objects (sub-properties)."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "security": {
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "default": "Sign"},
+                    "policy": {"type": "string"},
+                },
+            }
+        },
+    }
+    config = _slim_schema(schema, mode="config")
+    assert config == {"security": {"mode": "Sign", "policy": None}}
+
+    schema_result = _slim_schema(schema, mode="schema")
+    assert schema_result == {
+        "security": {
+            "mode": {"type": "string", "default": "Sign"},
+            "policy": {"type": "string", "default": None},
+        }
+    }
+
+
+@pytest.mark.parametrize("constraint_key,constraint_value", [
+    ("minimum", 0),
+    ("maximum", 100),
+    ("exclusiveMinimum", 1),
+    ("exclusiveMaximum", 99),
+    ("enum", ["a", "b", "c"]),
+    ("pattern", "^[a-z]+$"),
+])
+def test_slim_schema_schema_mode_constraints(constraint_key, constraint_value):
+    """schema mode: constraint keys are preserved in the metadata dict."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "field": {"type": "string", **{constraint_key: constraint_value}},
+        },
+    }
+    result = _slim_schema(schema, mode="schema")
+    assert result["field"][constraint_key] == constraint_value
+
+
+def test_slim_schema_config_mode_ignores_constraints():
+    """config mode: constraint keys are NOT included — only the default value is returned."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "field": {"type": "integer", "default": 5, "minimum": 0, "maximum": 100},
+        },
+    }
+    result = _slim_schema(schema, mode="config")
+    assert result == {"field": 5}
+
+
+def test_slim_schema_type_array_drops_null():
+    """When type is an array like ['string', 'null'], null is stripped in both modes."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "field": {"type": ["string", "null"]},
+        },
+    }
+    config = _slim_schema(schema, mode="config")
+    assert config == {"field": None}
+
+    schema_result = _slim_schema(schema, mode="schema")
+    assert schema_result["field"]["type"] == "string"
+
+
+# ---------------------------------------------------------------------------
+# --show-template + --endpoint-config mutual exclusion (unit)
+# ---------------------------------------------------------------------------
+
+def test_add_inbound_device_endpoint_show_template_with_config_errors(
+    mocked_cmd,
+    mocked_get_namespace_for_instance,
+):
+    """--show-template and --endpoint-config together must raise InvalidArgumentValueError."""
+    from azure.cli.core.azclierror import InvalidArgumentValueError as _IAE
+    with pytest.raises(_IAE, match="--show-template and --endpoint-config cannot be used together"):
+        add_inbound_device_endpoint(
+            cmd=mocked_cmd,
+            connector_type="Microsoft.OpcUa",
+            instance_name="my-instance",
+            instance_resource_group="my-rg",
+            show_template="config",
+            endpoint_config='{"applicationName": "test"}',
+        )
+
+
+# ---------------------------------------------------------------------------
+# Non-OpcUa happy path (ConnectorTemplates IS called)
+# ---------------------------------------------------------------------------
+
+def test_add_inbound_device_endpoint_success_non_opcua(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocker,
+    mocked_get_namespace_for_instance,
+):
+    """
+    Happy-path for a non-OPC UA connector type (Microsoft.Onvif).
+    ConnectorTemplates.get_connector_template_for_type must be called to resolve version.
+    """
+    connector_type = "Microsoft.Onvif"
+    version_from_template = "2.1.0"
+
+    mock_ct = mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates"
+    )
+    mock_ct.return_value.get_connector_template_for_type.return_value = _make_connector_template(
+        connector_type, version=version_from_template
+    )
+    mock_ct.return_value.get_endpoint_version_for_type.return_value = version_from_template
+
+    device_name = generate_random_string()
+    endpoint_name = f"ep-{generate_random_string()}"
+    endpoint_address = "http://192.168.1.10:80/onvif/device_service"
+
+    namespace_name = mocked_get_namespace_for_instance.return_value["name"]
+    resource_group_name = mocked_get_namespace_for_instance.return_value["resource_group"]
+
+    original_device = get_namespace_device_record(
+        device_name=device_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+    )
+
+    expected_inbound = {
+        endpoint_name: {
+            "endpointType": connector_type,
+            "address": endpoint_address,
+            "version": version_from_template,
+            "authentication": {"method": ADRAuthModes.anonymous.value},
+        }
+    }
+    updated_device = deepcopy(original_device)
+    updated_device["properties"]["endpoints"] = {"inbound": expected_inbound}
+
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_namespace_device_mgmt_uri(namespace_name, resource_group_name, device_name),
+        json=original_device,
+        status=200,
+        content_type="application/json",
+    )
+    mocked_responses.add(
+        method=responses.PATCH,
+        url=get_namespace_device_mgmt_uri(namespace_name, resource_group_name, device_name),
+        json=updated_device,
+        status=200,
+        content_type="application/json",
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_namespace_device_mgmt_uri(namespace_name, resource_group_name, device_name),
+        json=updated_device,
+        status=200,
+        content_type="application/json",
+    )
+
+    result = add_inbound_device_endpoint(
+        cmd=mocked_cmd,
+        connector_type=connector_type,
+        instance_name="my-instance",
+        instance_resource_group="my-rg",
+        device_name=device_name,
+        endpoint_name=endpoint_name,
+        endpoint_address=endpoint_address,
+        wait_sec=0,
+    )
+
+    assert result == expected_inbound
+    mock_ct.return_value.get_connector_template_for_type.assert_called_once()
+
+    patch_body = json.loads(mocked_responses.calls[1].request.body)
+    ep_patch = patch_body["properties"]["endpoints"]["inbound"][endpoint_name]
+    assert ep_patch["endpointType"] == connector_type
+    assert ep_patch["version"] == version_from_template
