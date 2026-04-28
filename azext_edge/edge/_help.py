@@ -747,6 +747,110 @@ def load_iotops_help():
     """
 
     helps[
+        "iot ops dataflowgraph"
+    ] = """
+        type: group
+        short-summary: Dataflow graph management.
+    """
+
+    helps[
+        "iot ops dataflowgraph apply"
+    ] = """
+        type: command
+        short-summary: Create or replace a dataflow graph associated with a dataflow profile.
+        long-summary: |
+          An example of the config file format is as follows:
+
+          ```
+          {
+            "mode": "Enabled",
+            "nodes": [
+              {
+                "name": "source-mqtt",
+                "nodeType": "Source",
+                "sourceSettings": {
+                  "endpointRef": "default-broker",
+                  "dataSources": ["sensors/temperature/#"]
+                }
+              },
+              {
+                "name": "dest-broker",
+                "nodeType": "Destination",
+                "destinationSettings": {
+                  "endpointRef": "my-kafka-endpoint",
+                  "dataDestination": "telemetry/temperature"
+                }
+              },
+              {
+                "name": "dest-otel",
+                "nodeType": "Destination",
+                "destinationSettings": {
+                  "endpointRef": "my-otel-endpoint",
+                  "dataDestination": "telemetry/all"
+                }
+              }
+            ],
+            "nodeConnections": [
+              { "from": { "name": "source-mqtt" }, "to": { "name": "dest-broker" } },
+              { "from": { "name": "source-mqtt" }, "to": { "name": "dest-otel" } }
+            ]
+          }
+          ```
+
+          The above example defines a fan-out graph: an MQTT source fans out to a Kafka destination
+          and an OpenTelemetry destination. Data flow graphs support only MQTT, Kafka, and
+          OpenTelemetry endpoints. The file can also be the full ARM resource wrapper
+          (properties is auto-extracted). extendedLocation is always auto-populated from --instance
+          and -g and must not be included in the file.
+
+          When used with apply the above content will create or replace a target dataflow graph resource.
+
+        examples:
+        - name: Create or replace a dataflow graph 'mygraph' associated with a profile 'myprofile' using a config file.
+          text: >
+            az iot ops dataflowgraph apply -n mygraph -p myprofile -i myinstance -g myresourcegroup --config-file /path/to/graph/config.json
+    """
+
+    helps[
+        "iot ops dataflowgraph delete"
+    ] = """
+        type: command
+        short-summary: Delete a dataflow graph associated with a dataflow profile.
+
+        examples:
+        - name: Delete a dataflow graph 'mygraph' associated with a profile 'myprofile'.
+          text: >
+            az iot ops dataflowgraph delete -n mygraph -p myprofile -i mycluster-ops-instance -g myresourcegroup
+        - name: Delete a dataflow graph 'mygraph' without a confirmation prompt.
+          text: >
+            az iot ops dataflowgraph delete -n mygraph -p myprofile -i mycluster-ops-instance -g myresourcegroup -y
+    """
+
+    helps[
+        "iot ops dataflowgraph show"
+    ] = """
+        type: command
+        short-summary: Show details of a dataflow graph associated with a dataflow profile.
+
+        examples:
+        - name: Show details of a dataflow graph 'mygraph' associated with a profile 'myprofile'.
+          text: >
+            az iot ops dataflowgraph show -n mygraph -p myprofile -i mycluster-ops-instance -g myresourcegroup
+    """
+
+    helps[
+        "iot ops dataflowgraph list"
+    ] = """
+        type: command
+        short-summary: List dataflow graphs associated with a dataflow profile.
+
+        examples:
+        - name: Enumerate dataflow graphs associated with the profile 'myprofile'.
+          text: >
+            az iot ops dataflowgraph list -p myprofile -i mycluster-ops-instance -g myresourcegroup
+    """
+
+    helps[
         "iot ops registry"
     ] = """
         type: group

@@ -314,6 +314,28 @@ def load_iotops_arguments(self, _):
             help="Dataflow profile name.",
         )
 
+    with self.argument_context("iot ops dataflowgraph") as context:
+        context.argument(
+            "instance_name",
+            options_list=["--instance", "-i"],
+            help="IoT Operations instance name.",
+        )
+        context.argument(
+            "dataflow_graph_name",
+            options_list=["--name", "-n"],
+            help="DataflowGraph name.",
+        )
+        context.argument(
+            "profile_name",
+            options_list=["--profile", "-p"],
+            help="Dataflow profile name.",
+        )
+        context.argument(
+            "config_file",
+            options_list=["--config-file"],
+            help="Path to a JSON file containing the dataflow graph properties.",
+        )
+
     with self.argument_context("iot ops dataflow profile") as context:
         context.argument(
             "profile_name",
