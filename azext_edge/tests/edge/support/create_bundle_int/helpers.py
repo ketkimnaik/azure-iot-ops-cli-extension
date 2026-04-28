@@ -224,7 +224,8 @@ def check_cluster_label_coverage(
         full_type = key_to_full_map.get(resource_type, resource_type)
         try:
             kubectl_items = run(f"kubectl get {full_type} -A -o json")
-        except CLIInternalError:
+        except CLIInternalError as e:
+            logger.warning("kubectl get %s failed, skipping label coverage check for this type: %s", full_type, e)
             continue
 
         for item in kubectl_items.get("items", []):
