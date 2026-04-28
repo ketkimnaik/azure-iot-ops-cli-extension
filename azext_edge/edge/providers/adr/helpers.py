@@ -187,18 +187,22 @@ def _detect_shell() -> str:
     import os
     import sys
 
-    # PowerShell (any version, any OS) always sets PSModulePath
-    if os.environ.get("PSModulePath"):
-        return "powershell"
     # Unix-like shells set $SHELL
     shell_path = os.environ.get("SHELL", "")
     if "zsh" in shell_path:
         return "zsh"
     if "bash" in shell_path:
         return "bash"
-    # Windows CMD
+    # On Windows, distinguish PowerShell from CMD via PSMODULEPATH.
+    # Check platform first because PSModulePath is set system-wide on Windows
+    # and would otherwise make the cmd branch unreachable.
     if sys.platform == "win32":
+        if os.environ.get("PSModulePath"):
+            return "powershell"
         return "cmd"
+    # Non-Windows, non-Unix-shell: check for PowerShell Core (pwsh on Linux/macOS)
+    if os.environ.get("PSModulePath"):
+        return "powershell"
     return "unknown"
 
 
@@ -244,7 +248,6 @@ def process_additional_configuration(
     Always returns a stringified JSON (as required by the API's additionalConfiguration field).
     """
     from ...util import read_file_content
-    from ...util.file_operations import deserialize_file_content
 
     if not additional_configuration:
         return
@@ -257,20 +260,19 @@ def process_additional_configuration(
         if not file_content:
             raise InvalidArgumentValueError("Given file is empty.")
 
-        # Parse the file content — supports JSON and YAML transparently
+        # Parse the already-read content directly — supports JSON and YAML transparently
+        import json as _json
+        import yaml
+        parsed = None
         try:
-            parsed = deserialize_file_content(additional_configuration)
-        except Exception:
-            # Fallback: try parsing the raw string as JSON
+            parsed = _json.loads(file_content)
+        except _json.JSONDecodeError:
             try:
-                import json as _json
-                parsed = _json.loads(file_content)
-            except _json.JSONDecodeError as e:
+                parsed = yaml.safe_load(file_content)
+            except yaml.YAMLError as e:
                 raise InvalidArgumentValueError(
                     f"{config_type.capitalize()} configuration file is not valid JSON or YAML: {e}"
                 )
-
-        import json as _json
         return _json.dumps(parsed)
 
     except FileOperationError:
