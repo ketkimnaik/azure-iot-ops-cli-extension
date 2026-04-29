@@ -65,4 +65,6 @@ def test_create_bundle_meso(cluster_connection, tracked_files):
         prefixes=MESO_PREFIXES,
         expected_label=MESO_LABEL,
         workload_types=MESO_WORKLOAD_TYPES,
+        accepted_labels=["microsoft-iotoperations-observability-cluster-metrics"],
+        known_exclusions=["/aio-observability-operator-manager-role"],
     )

@@ -187,6 +187,7 @@ def check_cluster_label_coverage(
     expected_label: Tuple[str, str],
     workload_types: Optional[List[str]] = None,
     known_exclusions: Optional[List[str]] = None,
+    accepted_labels: Optional[List[str]] = None,
 ):
     """
     Inverse label check: finds all cluster resources whose names match the given prefixes
@@ -202,6 +203,8 @@ def check_cluster_label_coverage(
             ("app.kubernetes.io/name", "microsoft-iotoperations-dataflows").
         workload_types: Resource types to scan. Defaults to WORKLOAD_TYPES.
         known_exclusions: List of "namespace/name" strings to skip (intentionally unlabeled resources).
+        accepted_labels: Additional label values (for the same key) that are considered valid,
+            e.g. sub-component labels that the support provider captures via a separate label selector.
     """
     if isinstance(prefixes, str):
         prefixes = [prefixes]
@@ -209,6 +212,8 @@ def check_cluster_label_coverage(
         workload_types = WORKLOAD_TYPES
     if known_exclusions is None:
         known_exclusions = []
+    if accepted_labels is None:
+        accepted_labels = []
 
     label_key, label_value = expected_label
     missing_label_resources = []
@@ -239,10 +244,11 @@ def check_cluster_label_coverage(
                 continue
 
             actual_label = item["metadata"].get("labels", {}).get(label_key)
-            if actual_label != label_value:
-                missing_label_resources.append(
-                    f"{full_type} {exclusion_key}: expected {label_key}={label_value}, got {actual_label}"
-                )
+            if actual_label == label_value or actual_label in accepted_labels:
+                continue
+            missing_label_resources.append(
+                f"{full_type} {exclusion_key}: expected {label_key}={label_value}, got {actual_label}"
+            )
 
     assert not missing_label_resources, (
         "Resources found on cluster with matching name prefix but missing/wrong label "

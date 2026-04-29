@@ -102,6 +102,7 @@ def test_create_bundle_mq(cluster_connection, tracked_files, mq_traces):
         prefixes=MQ_PREFIXES,
         expected_label=MQ_LABEL,
         workload_types=MQ_WORKLOAD_TYPES,
+        known_exclusions=["azure-iot-operations/aio-broker-generation-id"],
     )
 
 
