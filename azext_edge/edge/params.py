@@ -333,7 +333,7 @@ def load_iotops_arguments(self, _):
         context.argument(
             "config_file",
             options_list=["--config-file"],
-            help="Path to a JSON file containing the dataflow graph properties.",
+            help="Path to a JSON file containing the dataflowgraph properties.",
         )
 
     with self.argument_context("iot ops dataflow profile") as context:

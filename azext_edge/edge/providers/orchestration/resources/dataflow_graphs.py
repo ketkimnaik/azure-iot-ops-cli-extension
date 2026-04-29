@@ -6,7 +6,6 @@
 
 from typing import TYPE_CHECKING, Iterable, Optional
 
-from knack.log import get_logger
 from rich.console import Console
 
 from azure.cli.core.azclierror import InvalidArgumentValueError
@@ -17,26 +16,23 @@ from ....util.common import should_continue_prompt
 from ....util.queryable import Queryable
 from ..common import (
     DATAFLOW_ENDPOINT_TYPE_SETTINGS,
-    DataflowEndpointType,
+    KAFKA_ENDPOINT_TYPE,
+    MQTT_ENDPOINT_TYPE,
+    OPENTELEMETRY_ENDPOINT_TYPE,
 )
 from .instances import Instances
 from .reskit import get_file_config
 
-logger = get_logger(__name__)
-
 console = Console()
 
-# Endpoint types that are entirely unsupported in data flow graphs.
-# Only MQTT, Kafka, and OpenTelemetry endpoints are supported.
-_GRAPH_UNSUPPORTED_ENDPOINT_TYPES = frozenset([
-    DataflowEndpointType.DATAEXPLORER.value,
-    DataflowEndpointType.DATALAKESTORAGE.value,
-    DataflowEndpointType.FABRICONELAKE.value,
-    DataflowEndpointType.LOCALSTORAGE.value,
+# Endpoint types supported in data flow graphs (explicit allow-list).
+# MQTT, Kafka, and OpenTelemetry are supported.
+# All other types (DataExplorer, DataLakeStorage, FabricOneLake, LocalStorage, etc.) are not.
+_GRAPH_SUPPORTED_ENDPOINT_TYPES = frozenset([
+    MQTT_ENDPOINT_TYPE,
+    KAFKA_ENDPOINT_TYPE,
+    OPENTELEMETRY_ENDPOINT_TYPE,
 ])
-
-# OpenTelemetry is output-only; it cannot be used as a source endpoint.
-_OTEL_ENDPOINT_TYPE = DataflowEndpointType.OPENTELEMETRY.value
 
 
 if TYPE_CHECKING:
@@ -109,7 +105,7 @@ class DataFlowGraphs(Queryable):
             )
             return wait_for_terminal_state(poller, **kwargs)
 
-    def _validate_graph_config(
+    def _validate_graph_config(  # noqa: C901
         self,
         graph_config: dict,
         instance_name: str,
@@ -140,6 +136,11 @@ class DataFlowGraphs(Queryable):
                 raise InvalidArgumentValueError(
                     f"Node '{node_name}' has invalid nodeType '{node_type}'. "
                     f"Valid nodeType values are: {', '.join(sorted(VALID_NODE_TYPES))}."
+                )
+            if node_name in declared_names:
+                raise InvalidArgumentValueError(
+                    f"Duplicate node name '{node_name}' found at index {i}. "
+                    "Each node in the dataflow graph config must have a unique 'name'."
                 )
             declared_names.add(node_name)
 
@@ -172,6 +173,16 @@ class DataFlowGraphs(Queryable):
                     f"Declared node names: {', '.join(sorted(declared_names))}."
                 )
 
+        # Cache endpoint lookups to avoid repeated GETs for the same endpointRef
+        endpoint_cache: dict = {}
+
+        def get_endpoint_cached(endpoint_ref: str) -> dict:
+            if endpoint_ref not in endpoint_cache:
+                endpoint_cache[endpoint_ref] = self._get_endpoint(
+                    endpoint_ref, instance_name, resource_group_name
+                )
+            return endpoint_cache[endpoint_ref]
+
         # Validate each source node's endpoint
         for node in source_nodes:
             source_settings = node.get("sourceSettings", {})
@@ -180,17 +191,18 @@ class DataFlowGraphs(Queryable):
                 raise InvalidArgumentValueError(
                     f"Source node '{node.get('name')}' is missing 'sourceSettings.endpointRef'."
                 )
-            endpoint_obj = self._get_endpoint(endpoint_ref, instance_name, resource_group_name)
+            endpoint_obj = get_endpoint_cached(endpoint_ref)
             endpoint_props = endpoint_obj.get("properties", {})
             endpoint_type = endpoint_props.get("endpointType", "")
 
-            if endpoint_type in _GRAPH_UNSUPPORTED_ENDPOINT_TYPES:
+            if endpoint_type and endpoint_type not in _GRAPH_SUPPORTED_ENDPOINT_TYPES:
                 raise InvalidArgumentValueError(
                     f"Source node '{node.get('name')}' references endpoint '{endpoint_ref}' "
                     f"of type '{endpoint_type}', which is not supported in data flow graphs. "
-                    f"Only MQTT, Kafka, and OpenTelemetry endpoints are supported."
+                    f"Supported endpoint types are: "
+                    f"{', '.join(sorted(_GRAPH_SUPPORTED_ENDPOINT_TYPES))}."
                 )
-            if endpoint_type == _OTEL_ENDPOINT_TYPE:
+            if endpoint_type == OPENTELEMETRY_ENDPOINT_TYPE:
                 raise InvalidArgumentValueError(
                     f"Source node '{node.get('name')}' references OpenTelemetry endpoint '{endpoint_ref}'. "
                     f"OpenTelemetry is a destination-only endpoint type and cannot be used as a source."
@@ -214,14 +226,15 @@ class DataFlowGraphs(Queryable):
                 raise InvalidArgumentValueError(
                     f"Destination node '{node.get('name')}' is missing 'destinationSettings.endpointRef'."
                 )
-            endpoint_obj = self._get_endpoint(endpoint_ref, instance_name, resource_group_name)
+            endpoint_obj = get_endpoint_cached(endpoint_ref)
             endpoint_type = endpoint_obj.get("properties", {}).get("endpointType", "")
 
-            if endpoint_type in _GRAPH_UNSUPPORTED_ENDPOINT_TYPES:
+            if endpoint_type and endpoint_type not in _GRAPH_SUPPORTED_ENDPOINT_TYPES:
                 raise InvalidArgumentValueError(
                     f"Destination node '{node.get('name')}' references endpoint '{endpoint_ref}' "
                     f"of type '{endpoint_type}', which is not supported in data flow graphs. "
-                    f"Only MQTT, Kafka, and OpenTelemetry endpoints are supported."
+                    f"Supported endpoint types are: "
+                    f"{', '.join(sorted(_GRAPH_SUPPORTED_ENDPOINT_TYPES))}."
                 )
 
     def _get_endpoint(

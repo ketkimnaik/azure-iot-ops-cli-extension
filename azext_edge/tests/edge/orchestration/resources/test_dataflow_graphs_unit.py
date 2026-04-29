@@ -198,15 +198,15 @@ def test_dataflow_graph_list(mocked_cmd, mocked_responses: responses, records: i
         {
             "source_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint1",
-                instance_name=generate_random_string(),
-                resource_group_name=generate_random_string(),
+                instance_name="myinstance",
+                resource_group_name="myresourcegroup",
                 dataflow_endpoint_type="Mqtt",
                 host="aio-broker",
             ),
             "destination_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint2",
-                instance_name=generate_random_string(),
-                resource_group_name=generate_random_string(),
+                instance_name="myinstance",
+                resource_group_name="myresourcegroup",
                 dataflow_endpoint_type="Mqtt",
             ),
         },
@@ -214,15 +214,15 @@ def test_dataflow_graph_list(mocked_cmd, mocked_responses: responses, records: i
         {
             "source_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint1",
-                instance_name=generate_random_string(),
-                resource_group_name=generate_random_string(),
+                instance_name="myinstance",
+                resource_group_name="myresourcegroup",
                 dataflow_endpoint_type="Kafka",
                 group_id="my-consumer-group",
             ),
             "destination_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint2",
-                instance_name=generate_random_string(),
-                resource_group_name=generate_random_string(),
+                instance_name="myinstance",
+                resource_group_name="myresourcegroup",
                 dataflow_endpoint_type="Mqtt",
                 host="aio-broker",
             ),
@@ -231,15 +231,15 @@ def test_dataflow_graph_list(mocked_cmd, mocked_responses: responses, records: i
         {
             "source_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint1",
-                instance_name=generate_random_string(),
-                resource_group_name=generate_random_string(),
+                instance_name="myinstance",
+                resource_group_name="myresourcegroup",
                 dataflow_endpoint_type="Mqtt",
                 host="aio-broker",
             ),
             "destination_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint2",
-                instance_name=generate_random_string(),
-                resource_group_name=generate_random_string(),
+                instance_name="myinstance",
+                resource_group_name="myresourcegroup",
                 dataflow_endpoint_type="OpenTelemetry",
             ),
         },
@@ -247,15 +247,15 @@ def test_dataflow_graph_list(mocked_cmd, mocked_responses: responses, records: i
         {
             "source_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint1",
-                instance_name=generate_random_string(),
-                resource_group_name=generate_random_string(),
+                instance_name="myinstance",
+                resource_group_name="myresourcegroup",
                 dataflow_endpoint_type="Mqtt",
                 host="aio-broker",
             ),
             "destination_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint2",
-                instance_name=generate_random_string(),
-                resource_group_name=generate_random_string(),
+                instance_name="myinstance",
+                resource_group_name="myresourcegroup",
                 dataflow_endpoint_type="Kafka",
             ),
         },
@@ -269,8 +269,8 @@ def test_dataflow_graph_apply(
 ):
     graph_name = generate_random_string()
     profile_name = generate_random_string()
-    instance_name = generate_random_string()
-    resource_group_name = generate_random_string()
+    instance_name = "myinstance"
+    resource_group_name = "myresourcegroup"
 
     file_payload = get_mock_dataflow_graph_record(
         graph_name=graph_name,
@@ -386,6 +386,19 @@ def test_dataflow_graph_apply(
                 "nodeConnections": [],
             },
             "has invalid nodeType 'Relay'",
+        ),
+        # Duplicate node name
+        (
+            {
+                "nodes": [
+                    {"name": "dup-node", "nodeType": "Source",
+                     "sourceSettings": {"endpointRef": "ep1", "dataSources": ["t"]}},
+                    {"name": "dup-node", "nodeType": "Destination",
+                     "destinationSettings": {"endpointRef": "ep2", "dataDestination": "t"}},
+                ],
+                "nodeConnections": [],
+            },
+            "Duplicate node name 'dup-node'",
         ),
         # No Source node
         (

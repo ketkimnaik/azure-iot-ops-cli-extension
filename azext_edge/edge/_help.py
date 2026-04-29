@@ -750,14 +750,14 @@ def load_iotops_help():
         "iot ops dataflowgraph"
     ] = """
         type: group
-        short-summary: Dataflow graph management.
+        short-summary: DataflowGraph management.
     """
 
     helps[
         "iot ops dataflowgraph apply"
     ] = """
         type: command
-        short-summary: Create or replace a dataflow graph associated with a dataflow profile.
+        short-summary: Create or replace a DataflowGraph associated with a dataflow profile.
         long-summary: |
           An example of the config file format is as follows:
 
@@ -803,10 +803,10 @@ def load_iotops_help():
           (properties is auto-extracted). extendedLocation is always auto-populated from --instance
           and -g and must not be included in the file.
 
-          When used with apply the above content will create or replace a target dataflow graph resource.
+          When used with apply the above content will create or replace a target DataflowGraph resource.
 
         examples:
-        - name: Create or replace a dataflow graph 'mygraph' associated with a profile 'myprofile' using a config file.
+        - name: Create or replace a DataflowGraph 'mygraph' associated with a profile 'myprofile' using a config file.
           text: >
             az iot ops dataflowgraph apply -n mygraph -p myprofile -i myinstance -g myresourcegroup --config-file /path/to/graph/config.json
     """
@@ -815,13 +815,13 @@ def load_iotops_help():
         "iot ops dataflowgraph delete"
     ] = """
         type: command
-        short-summary: Delete a dataflow graph associated with a dataflow profile.
+        short-summary: Delete a DataflowGraph associated with a dataflow profile.
 
         examples:
-        - name: Delete a dataflow graph 'mygraph' associated with a profile 'myprofile'.
+        - name: Delete a DataflowGraph 'mygraph' associated with a profile 'myprofile'.
           text: >
             az iot ops dataflowgraph delete -n mygraph -p myprofile -i mycluster-ops-instance -g myresourcegroup
-        - name: Delete a dataflow graph 'mygraph' without a confirmation prompt.
+        - name: Delete a DataflowGraph 'mygraph' without a confirmation prompt.
           text: >
             az iot ops dataflowgraph delete -n mygraph -p myprofile -i mycluster-ops-instance -g myresourcegroup -y
     """
@@ -830,10 +830,10 @@ def load_iotops_help():
         "iot ops dataflowgraph show"
     ] = """
         type: command
-        short-summary: Show details of a dataflow graph associated with a dataflow profile.
+        short-summary: Show details of a DataflowGraph associated with a dataflow profile.
 
         examples:
-        - name: Show details of a dataflow graph 'mygraph' associated with a profile 'myprofile'.
+        - name: Show details of a DataflowGraph 'mygraph' associated with a profile 'myprofile'.
           text: >
             az iot ops dataflowgraph show -n mygraph -p myprofile -i mycluster-ops-instance -g myresourcegroup
     """
@@ -842,10 +842,10 @@ def load_iotops_help():
         "iot ops dataflowgraph list"
     ] = """
         type: command
-        short-summary: List dataflow graphs associated with a dataflow profile.
+        short-summary: List DataflowGraphs associated with a dataflow profile.
 
         examples:
-        - name: Enumerate dataflow graphs associated with the profile 'myprofile'.
+        - name: Enumerate DataflowGraphs associated with the profile 'myprofile'.
           text: >
             az iot ops dataflowgraph list -p myprofile -i mycluster-ops-instance -g myresourcegroup
     """
