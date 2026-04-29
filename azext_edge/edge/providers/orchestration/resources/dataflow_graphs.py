@@ -25,14 +25,21 @@ from .reskit import get_file_config
 
 console = Console()
 
-# Endpoint types supported in data flow graphs (explicit allow-list).
-# MQTT, Kafka, and OpenTelemetry are supported.
-# All other types (DataExplorer, DataLakeStorage, FabricOneLake, LocalStorage, etc.) are not.
-_GRAPH_SUPPORTED_ENDPOINT_TYPES = frozenset([
-    MQTT_ENDPOINT_TYPE,
-    KAFKA_ENDPOINT_TYPE,
-    OPENTELEMETRY_ENDPOINT_TYPE,
+# Endpoint settings families supported in data flow graphs.
+# Any endpoint type that maps to one of these settings families is supported.
+_GRAPH_SUPPORTED_ENDPOINT_SETTINGS = frozenset([
+    DATAFLOW_ENDPOINT_TYPE_SETTINGS[MQTT_ENDPOINT_TYPE],
+    DATAFLOW_ENDPOINT_TYPE_SETTINGS[KAFKA_ENDPOINT_TYPE],
+    DATAFLOW_ENDPOINT_TYPE_SETTINGS[OPENTELEMETRY_ENDPOINT_TYPE],
 ])
+# Endpoint types supported in data flow graphs.
+# MQTT, Kafka, and OpenTelemetry families are supported.
+# All other settings families (DataExplorer, DataLakeStorage, FabricOneLake, LocalStorage, etc.) are not.
+_GRAPH_SUPPORTED_ENDPOINT_TYPES = frozenset(
+    endpoint_type
+    for endpoint_type, settings_name in DATAFLOW_ENDPOINT_TYPE_SETTINGS.items()
+    if settings_name in _GRAPH_SUPPORTED_ENDPOINT_SETTINGS
+)
 
 
 if TYPE_CHECKING:

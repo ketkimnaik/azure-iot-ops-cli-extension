@@ -79,8 +79,9 @@ def test_dataflow_graph(dataflow_graph_test_setup, tracked_resources, tracked_fi
     instance = dataflow_graph_test_setup["instanceName"]
     profile_name = "default"
 
-    # Discover an MQTT endpoint to use for source and destination.
-    # The test relies on at least one MQTT-type endpoint existing in the instance.
+    # Discover an MQTT-family endpoint to use for source and destination.
+    # DataFlowGraphs validation accepts all MQTT-family endpoint types
+    # (Mqtt, AIOLocalMqtt, EventGrid, CustomMqtt).
     endpoints = run(f"az iot ops dataflow endpoint list -g {rg} -i {instance}")
     mqtt_endpoints = [
         ep for ep in endpoints
