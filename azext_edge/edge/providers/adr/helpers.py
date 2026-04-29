@@ -193,13 +193,12 @@ def _detect_shell() -> str:
         return "zsh"
     if "bash" in shell_path:
         return "bash"
-    # On Windows, distinguish PowerShell from CMD via PSMODULEPATH.
-    # Check platform first because PSModulePath is set system-wide on Windows
-    # and would otherwise make the cmd branch unreachable.
+    # On Windows, reliably distinguishing PowerShell from CMD via environment
+    # variables is not possible: PSModulePath is set system-wide for all processes
+    # and PROMPT can be inherited by PowerShell from a parent CMD session.
+    # Return a generic 'windows' identifier and show hints for both shells.
     if sys.platform == "win32":
-        if os.environ.get("PSModulePath"):
-            return "powershell"
-        return "cmd"
+        return "windows"
     # Non-Windows, non-Unix-shell: check for PowerShell Core (pwsh on Linux/macOS)
     if os.environ.get("PSModulePath"):
         return "powershell"
@@ -209,11 +208,13 @@ def _detect_shell() -> str:
 def _inline_json_quoting_hint() -> str:
     """Return a shell-specific quoting hint for inline JSON."""
     shell = _detect_shell()
-    if shell == "powershell":
+    if shell == "windows":
         return (
-            "Detected shell: PowerShell. "
-            "Wrap the JSON in single quotes and escape inner double quotes with backslash:\n"
-            "  --endpoint-config '{\\\"key\\\": \\\"value\\\", \\\"nested\\\": {\\\"k\\\": 1}}'"
+            "Detected shell: Windows (PowerShell or CMD). "
+            "In PowerShell, wrap in single quotes and escape inner double quotes:\n"
+            "  --endpoint-config '{\\\"key\\\": \\\"value\\\"}'\n"
+            "In CMD, escape each double quote with a backslash:\n"
+            "  --endpoint-config {\\\"key\\\": \\\"value\\\"}"
         )
     if shell in ("bash", "zsh"):
         return (
@@ -221,11 +222,11 @@ def _inline_json_quoting_hint() -> str:
             "Wrap the entire JSON value in single quotes (no escaping needed):\n"
             "  --endpoint-config '{\"key\": \"value\", \"nested\": {\"k\": 1}}'"
         )
-    if shell == "cmd":
+    if shell == "powershell":  # PowerShell Core (pwsh) on Linux/macOS
         return (
-            "Detected shell: Windows CMD. "
-            "Escape each double quote with a backslash:\n"
-            "  --endpoint-config {\\\"key\\\": \\\"value\\\"}"
+            "Detected shell: PowerShell Core (pwsh). "
+            "Wrap the JSON in single quotes and escape inner double quotes with backslash:\n"
+            "  --endpoint-config '{\\\"key\\\": \\\"value\\\", \\\"nested\\\": {\\\"k\\\": 1}}'"
         )
     return (
         "Tip: in Bash/Zsh wrap the JSON in single quotes; "
