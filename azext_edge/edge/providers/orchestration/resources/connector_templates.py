@@ -669,7 +669,19 @@ class ConnectorTemplates(Queryable):
             et = endpoint_type_info.get("endpointType")
             if et and et.lower() == connector_type.lower():
                 raw = endpoint_type_info.get("configurationSchemaRefs", [])
-                schema_refs = raw if isinstance(raw, list) else [raw]
+                if isinstance(raw, dict):
+                    # Dict shape: keys are named refs (e.g. additionalConfigSchemaRef).
+                    # Prefer additionalConfigSchemaRef; fall back to first string value found.
+                    ref = raw.get("additionalConfigSchemaRef") or next(
+                        (v for v in raw.values() if isinstance(v, str)), None
+                    )
+                    schema_refs = [ref] if ref else []
+                elif isinstance(raw, list):
+                    schema_refs = [r for r in raw if isinstance(r, str)]
+                elif isinstance(raw, str):
+                    schema_refs = [raw]
+                else:
+                    schema_refs = []
                 break
 
         if schema_refs:

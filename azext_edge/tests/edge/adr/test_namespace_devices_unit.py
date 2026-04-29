@@ -2439,7 +2439,18 @@ def test_add_inbound_mqtt_device_endpoint(
 
 
 def _make_connector_template(connector_type: str, version: str = "1.0.0", schema_refs=None):
-    """Build a minimal mock connector template resource."""
+    """Build a minimal mock connector template resource.
+
+    configurationSchemaRefs uses the dict shape matching real connector templates
+    (e.g. keys like additionalConfigSchemaRef), not a plain list.
+    """
+    if schema_refs is None:
+        config_schema_refs = {}
+    elif isinstance(schema_refs, list):
+        # Wrap list into dict shape: first entry becomes additionalConfigSchemaRef
+        config_schema_refs = {"additionalConfigSchemaRef": schema_refs[0]} if schema_refs else {}
+    else:
+        config_schema_refs = schema_refs
     return {
         "name": f"template-{connector_type.lower()}",
         "properties": {
@@ -2448,7 +2459,7 @@ def _make_connector_template(connector_type: str, version: str = "1.0.0", schema
                 {
                     "endpointType": connector_type,
                     "version": version,
-                    "configurationSchemaRefs": schema_refs or [],
+                    "configurationSchemaRefs": config_schema_refs,
                 }
             ],
             "runtimeConfiguration": {
