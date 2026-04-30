@@ -470,6 +470,32 @@ def test_dataflow_graph_apply(
             },
             "references unknown 'to' node 'ghost'",
         ),
+        # nodeConnections is not a list (null)
+        (
+            {
+                "nodes": [
+                    {"name": "src", "nodeType": "Source",
+                     "sourceSettings": {"endpointRef": "ep1", "dataSources": ["t"]}},
+                    {"name": "dst", "nodeType": "Destination",
+                     "destinationSettings": {"endpointRef": "ep2", "dataDestination": "t"}},
+                ],
+                "nodeConnections": None,
+            },
+            "'nodeConnections' must be a list",
+        ),
+        # nodeConnection entry is not a dict
+        (
+            {
+                "nodes": [
+                    {"name": "src", "nodeType": "Source",
+                     "sourceSettings": {"endpointRef": "ep1", "dataSources": ["t"]}},
+                    {"name": "dst", "nodeType": "Destination",
+                     "destinationSettings": {"endpointRef": "ep2", "dataDestination": "t"}},
+                ],
+                "nodeConnections": ["not-a-dict"],
+            },
+            "nodeConnection at index 0 must be an object",
+        ),
     ],
 )
 def test_dataflow_graph_apply_structural_error(

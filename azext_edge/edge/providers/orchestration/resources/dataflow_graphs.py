@@ -169,7 +169,15 @@ class DataFlowGraphs(Queryable):
             )
 
         node_connections = graph_config.get("nodeConnections", [])
+        if not isinstance(node_connections, list):
+            raise InvalidArgumentValueError(
+                f"'nodeConnections' must be a list, got {type(node_connections).__name__}."
+            )
         for i, conn in enumerate(node_connections):
+            if not isinstance(conn, dict):
+                raise InvalidArgumentValueError(
+                    f"nodeConnection at index {i} must be an object, got {type(conn).__name__}."
+                )
             from_val = conn.get("from")
             to_val = conn.get("to")
             if not isinstance(from_val, dict) or not from_val.get("name"):
@@ -237,7 +245,8 @@ class DataFlowGraphs(Queryable):
             kafka_types = {DataflowEndpointType.EVENTHUB.value, DataflowEndpointType.CUSTOMKAFKA.value,
                            KAFKA_ENDPOINT_TYPE}
             if endpoint_type in kafka_types:
-                consumer_group_id = endpoint_props.get("kafkaSettings", {}).get("consumerGroupId", "")
+                kafka_settings = endpoint_props.get("kafkaSettings") or {}
+                consumer_group_id = kafka_settings.get("consumerGroupId", "")
                 if not consumer_group_id:
                     raise InvalidArgumentValueError(
                         f"Source node '{node.get('name')}' references Kafka endpoint '{endpoint_ref}', "
