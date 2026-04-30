@@ -89,7 +89,8 @@ def test_dataflow_graph(dataflow_graph_test_setup, tracked_resources, tracked_fi
     ]
     if not mqtt_endpoints:
         pytest.skip(
-            "No MQTT endpoint found in instance — skipping dataflow graph integration test. "
+            "No MQTT-family endpoint (Mqtt, AIOLocalMqtt, EventGrid, CustomMqtt) found in instance — "
+            "skipping dataflow graph integration test. "
             "Create at least one MQTT endpoint before running this test."
         )
 

@@ -14,32 +14,33 @@ from azure.core.exceptions import ResourceNotFoundError
 from ....util.az_client import wait_for_terminal_state
 from ....util.common import should_continue_prompt
 from ....util.queryable import Queryable
-from ..common import (
-    DATAFLOW_ENDPOINT_TYPE_SETTINGS,
-    KAFKA_ENDPOINT_TYPE,
-    MQTT_ENDPOINT_TYPE,
-    OPENTELEMETRY_ENDPOINT_TYPE,
-)
+from ..common import DataflowEndpointType, KAFKA_ENDPOINT_TYPE, MQTT_ENDPOINT_TYPE
 from .instances import Instances
 from .reskit import get_file_config
 
 console = Console()
 
-# Endpoint settings families supported in data flow graphs.
-# Any endpoint type that maps to one of these settings families is supported.
-_GRAPH_SUPPORTED_ENDPOINT_SETTINGS = frozenset([
-    DATAFLOW_ENDPOINT_TYPE_SETTINGS[MQTT_ENDPOINT_TYPE],
-    DATAFLOW_ENDPOINT_TYPE_SETTINGS[KAFKA_ENDPOINT_TYPE],
-    DATAFLOW_ENDPOINT_TYPE_SETTINGS[OPENTELEMETRY_ENDPOINT_TYPE],
+# Endpoint types supported in data flow graphs (MQTT family + Kafka family + OpenTelemetry).
+# DataExplorer, DataLakeStorage, FabricOneLake, LocalStorage are not supported.
+_GRAPH_SUPPORTED_ENDPOINT_TYPES = frozenset([
+    # MQTT family
+    DataflowEndpointType.AIOLOCALMQTT.value,
+    DataflowEndpointType.EVENTGRID.value,
+    DataflowEndpointType.CUSTOMMQTT.value,
+    MQTT_ENDPOINT_TYPE,  # legacy generic Mqtt type
+    # Kafka family
+    DataflowEndpointType.EVENTHUB.value,
+    DataflowEndpointType.FABRICREALTIME.value,
+    DataflowEndpointType.CUSTOMKAFKA.value,
+    KAFKA_ENDPOINT_TYPE,  # legacy generic Kafka type
+    # OpenTelemetry
+    DataflowEndpointType.OPENTELEMETRY.value,
 ])
-# Endpoint types supported in data flow graphs.
-# MQTT, Kafka, and OpenTelemetry families are supported.
-# All other settings families (DataExplorer, DataLakeStorage, FabricOneLake, LocalStorage, etc.) are not.
-_GRAPH_SUPPORTED_ENDPOINT_TYPES = frozenset(
-    endpoint_type
-    for endpoint_type, settings_name in DATAFLOW_ENDPOINT_TYPE_SETTINGS.items()
-    if settings_name in _GRAPH_SUPPORTED_ENDPOINT_SETTINGS
-)
+# Destination-only endpoint types (cannot be used as a source node).
+_DESTINATION_ONLY_ENDPOINT_TYPES = frozenset([
+    DataflowEndpointType.FABRICREALTIME.value,
+    DataflowEndpointType.OPENTELEMETRY.value,
+])
 
 
 if TYPE_CHECKING:
@@ -121,13 +122,17 @@ class DataFlowGraphs(Queryable):
         VALID_NODE_TYPES = {"Source", "Graph", "Destination"}
 
         nodes = graph_config.get("nodes", [])
-        if not nodes:
+        if not isinstance(nodes, list) or not nodes:
             raise InvalidArgumentValueError(
                 "'nodes' is required and must contain at least one node in the dataflow graph config."
             )
 
         declared_names = set()
         for i, node in enumerate(nodes):
+            if not isinstance(node, dict):
+                raise InvalidArgumentValueError(
+                    f"Node at index {i} must be an object, got {type(node).__name__}."
+                )
             node_name = node.get("name", "")
             node_type = node.get("nodeType", "")
 
@@ -165,16 +170,24 @@ class DataFlowGraphs(Queryable):
 
         node_connections = graph_config.get("nodeConnections", [])
         for i, conn in enumerate(node_connections):
-            from_val = conn.get("from", {})
-            to_val = conn.get("to", {})
-            from_name = from_val.get("name", "") if isinstance(from_val, dict) else from_val
-            to_name = to_val.get("name", "") if isinstance(to_val, dict) else to_val
-            if from_name and from_name not in declared_names:
+            from_val = conn.get("from")
+            to_val = conn.get("to")
+            if not isinstance(from_val, dict) or not from_val.get("name"):
+                raise InvalidArgumentValueError(
+                    f"nodeConnection at index {i} is missing a valid 'from.name' field."
+                )
+            if not isinstance(to_val, dict) or not to_val.get("name"):
+                raise InvalidArgumentValueError(
+                    f"nodeConnection at index {i} is missing a valid 'to.name' field."
+                )
+            from_name = from_val["name"]
+            to_name = to_val["name"]
+            if from_name not in declared_names:
                 raise InvalidArgumentValueError(
                     f"nodeConnection at index {i} references unknown 'from' node '{from_name}'. "
                     f"Declared node names: {', '.join(sorted(declared_names))}."
                 )
-            if to_name and to_name not in declared_names:
+            if to_name not in declared_names:
                 raise InvalidArgumentValueError(
                     f"nodeConnection at index {i} references unknown 'to' node '{to_name}'. "
                     f"Declared node names: {', '.join(sorted(declared_names))}."
@@ -193,6 +206,11 @@ class DataFlowGraphs(Queryable):
         # Validate each source node's endpoint
         for node in source_nodes:
             source_settings = node.get("sourceSettings", {})
+            if not isinstance(source_settings, dict):
+                raise InvalidArgumentValueError(
+                    f"Source node '{node.get('name')}' has an invalid 'sourceSettings' field: "
+                    f"expected an object, got {type(source_settings).__name__}."
+                )
             endpoint_ref = source_settings.get("endpointRef", "")
             if not endpoint_ref:
                 raise InvalidArgumentValueError(
@@ -209,14 +227,16 @@ class DataFlowGraphs(Queryable):
                     f"Supported endpoint types are: "
                     f"{', '.join(sorted(_GRAPH_SUPPORTED_ENDPOINT_TYPES))}."
                 )
-            if endpoint_type == OPENTELEMETRY_ENDPOINT_TYPE:
+            if endpoint_type in _DESTINATION_ONLY_ENDPOINT_TYPES:
                 raise InvalidArgumentValueError(
-                    f"Source node '{node.get('name')}' references OpenTelemetry endpoint '{endpoint_ref}'. "
-                    f"OpenTelemetry is a destination-only endpoint type and cannot be used as a source."
+                    f"Source node '{node.get('name')}' references endpoint '{endpoint_ref}' "
+                    f"of type '{endpoint_type}', which is destination-only and cannot be used as a source."
                 )
 
             # Kafka source endpoints require a consumerGroupId on the endpoint
-            if DATAFLOW_ENDPOINT_TYPE_SETTINGS.get(endpoint_type) == "kafkaSettings":
+            kafka_types = {DataflowEndpointType.EVENTHUB.value, DataflowEndpointType.CUSTOMKAFKA.value,
+                           KAFKA_ENDPOINT_TYPE}
+            if endpoint_type in kafka_types:
                 consumer_group_id = endpoint_props.get("kafkaSettings", {}).get("consumerGroupId", "")
                 if not consumer_group_id:
                     raise InvalidArgumentValueError(
@@ -228,6 +248,11 @@ class DataFlowGraphs(Queryable):
         # Validate each destination node's endpoint
         for node in destination_nodes:
             dest_settings = node.get("destinationSettings", {})
+            if not isinstance(dest_settings, dict):
+                raise InvalidArgumentValueError(
+                    f"Destination node '{node.get('name')}' has an invalid 'destinationSettings' field: "
+                    f"expected an object, got {type(dest_settings).__name__}."
+                )
             endpoint_ref = dest_settings.get("endpointRef", "")
             if not endpoint_ref:
                 raise InvalidArgumentValueError(

@@ -194,46 +194,46 @@ def test_dataflow_graph_list(mocked_cmd, mocked_responses: responses, records: i
 @pytest.mark.parametrize(
     "scenario",
     [
-        # MQTT source → MQTT destination
+        # MQTT source (AIOLocalMqtt) → MQTT destination (CustomMqtt)
         {
             "source_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint1",
                 instance_name="myinstance",
                 resource_group_name="myresourcegroup",
-                dataflow_endpoint_type="Mqtt",
+                dataflow_endpoint_type="AIOLocalMqtt",
                 host="aio-broker",
             ),
             "destination_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint2",
                 instance_name="myinstance",
                 resource_group_name="myresourcegroup",
-                dataflow_endpoint_type="Mqtt",
+                dataflow_endpoint_type="CustomMqtt",
             ),
         },
-        # Kafka source (with consumerGroupId) → MQTT destination
+        # Kafka source (EventHub, with consumerGroupId) → MQTT destination (AIOLocalMqtt)
         {
             "source_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint1",
                 instance_name="myinstance",
                 resource_group_name="myresourcegroup",
-                dataflow_endpoint_type="Kafka",
+                dataflow_endpoint_type="EventHub",
                 group_id="my-consumer-group",
             ),
             "destination_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint2",
                 instance_name="myinstance",
                 resource_group_name="myresourcegroup",
-                dataflow_endpoint_type="Mqtt",
+                dataflow_endpoint_type="AIOLocalMqtt",
                 host="aio-broker",
             ),
         },
-        # MQTT source → OpenTelemetry destination
+        # MQTT source (EventGrid) → OpenTelemetry destination
         {
             "source_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint1",
                 instance_name="myinstance",
                 resource_group_name="myresourcegroup",
-                dataflow_endpoint_type="Mqtt",
+                dataflow_endpoint_type="EventGrid",
                 host="aio-broker",
             ),
             "destination_endpoint": get_mock_dataflow_endpoint_record(
@@ -243,7 +243,23 @@ def test_dataflow_graph_list(mocked_cmd, mocked_responses: responses, records: i
                 dataflow_endpoint_type="OpenTelemetry",
             ),
         },
-        # MQTT source → Kafka destination
+        # MQTT source (AIOLocalMqtt) → Kafka destination (CustomKafka)
+        {
+            "source_endpoint": get_mock_dataflow_endpoint_record(
+                dataflow_endpoint_name="myendpoint1",
+                instance_name="myinstance",
+                resource_group_name="myresourcegroup",
+                dataflow_endpoint_type="AIOLocalMqtt",
+                host="aio-broker",
+            ),
+            "destination_endpoint": get_mock_dataflow_endpoint_record(
+                dataflow_endpoint_name="myendpoint2",
+                instance_name="myinstance",
+                resource_group_name="myresourcegroup",
+                dataflow_endpoint_type="CustomKafka",
+            ),
+        },
+        # Legacy generic Mqtt source → legacy generic Mqtt destination
         {
             "source_endpoint": get_mock_dataflow_endpoint_record(
                 dataflow_endpoint_name="myendpoint1",
@@ -256,7 +272,7 @@ def test_dataflow_graph_list(mocked_cmd, mocked_responses: responses, records: i
                 dataflow_endpoint_name="myendpoint2",
                 instance_name="myinstance",
                 resource_group_name="myresourcegroup",
-                dataflow_endpoint_type="Kafka",
+                dataflow_endpoint_type="Mqtt",
             ),
         },
     ],
@@ -537,7 +553,7 @@ def test_dataflow_graph_apply_structural_error(
                     dataflow_endpoint_name="myendpoint1",
                     instance_name="myinstance",
                     resource_group_name="myresourcegroup",
-                    dataflow_endpoint_type="Mqtt",
+                    dataflow_endpoint_type="AIOLocalMqtt",
                     host="aio-broker",
                 ),
                 "destination_endpoint": None,
@@ -583,16 +599,43 @@ def test_dataflow_graph_apply_structural_error(
                 ),
                 "destination_endpoint": None,
             },
-            "OpenTelemetry is a destination-only endpoint type and cannot be used as a source",
+            "destination-only and cannot be used as a source",
         ),
-        # Kafka source missing consumerGroupId
+        # Source endpoint is FabricRealTime (destination-only)
         (
             {
                 "source_endpoint": get_mock_dataflow_endpoint_record(
                     dataflow_endpoint_name="myendpoint1",
                     instance_name="myinstance",
                     resource_group_name="myresourcegroup",
-                    dataflow_endpoint_type="Kafka",
+                    dataflow_endpoint_type="FabricRealTime",
+                ),
+                "destination_endpoint": None,
+            },
+            "destination-only and cannot be used as a source",
+        ),
+        # Kafka source missing consumerGroupId (EventHub)
+        (
+            {
+                "source_endpoint": get_mock_dataflow_endpoint_record(
+                    dataflow_endpoint_name="myendpoint1",
+                    instance_name="myinstance",
+                    resource_group_name="myresourcegroup",
+                    dataflow_endpoint_type="EventHub",
+                    # no group_id → consumerGroupId=""
+                ),
+                "destination_endpoint": None,
+            },
+            "A consumer group ID is required for Kafka source endpoints",
+        ),
+        # Kafka source missing consumerGroupId (CustomKafka)
+        (
+            {
+                "source_endpoint": get_mock_dataflow_endpoint_record(
+                    dataflow_endpoint_name="myendpoint1",
+                    instance_name="myinstance",
+                    resource_group_name="myresourcegroup",
+                    dataflow_endpoint_type="CustomKafka",
                     # no group_id → consumerGroupId=""
                 ),
                 "destination_endpoint": None,
@@ -621,7 +664,7 @@ def test_dataflow_graph_apply_structural_error(
                     dataflow_endpoint_name="myendpoint1",
                     instance_name="myinstance",
                     resource_group_name="myresourcegroup",
-                    dataflow_endpoint_type="Mqtt",
+                    dataflow_endpoint_type="AIOLocalMqtt",
                     host="aio-broker",
                 ),
                 "destination_endpoint": None,
@@ -635,7 +678,7 @@ def test_dataflow_graph_apply_structural_error(
                     dataflow_endpoint_name="myendpoint1",
                     instance_name="myinstance",
                     resource_group_name="myresourcegroup",
-                    dataflow_endpoint_type="Mqtt",
+                    dataflow_endpoint_type="AIOLocalMqtt",
                     host="aio-broker",
                 ),
                 "destination_endpoint": get_mock_dataflow_endpoint_record(
@@ -654,7 +697,7 @@ def test_dataflow_graph_apply_structural_error(
                     dataflow_endpoint_name="myendpoint1",
                     instance_name="myinstance",
                     resource_group_name="myresourcegroup",
-                    dataflow_endpoint_type="Mqtt",
+                    dataflow_endpoint_type="AIOLocalMqtt",
                     host="aio-broker",
                 ),
                 "destination_endpoint": get_mock_dataflow_endpoint_record(
