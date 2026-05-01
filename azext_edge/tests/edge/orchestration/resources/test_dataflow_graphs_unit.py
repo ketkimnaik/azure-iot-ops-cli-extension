@@ -444,6 +444,19 @@ def test_dataflow_graph_apply(
             },
             "must contain at least one node with nodeType 'Destination'",
         ),
+        # nodeConnection is a self-loop (from == to)
+        (
+            {
+                "nodes": [
+                    {"name": "src", "nodeType": "Source",
+                     "sourceSettings": {"endpointRef": "ep1", "dataSources": ["t"]}},
+                    {"name": "dst", "nodeType": "Destination",
+                     "destinationSettings": {"endpointRef": "ep2", "dataDestination": "t"}},
+                ],
+                "nodeConnections": [{"from": {"name": "src"}, "to": {"name": "src"}}],
+            },
+            "is a self-loop",
+        ),
         # nodeConnection references unknown 'from' node
         (
             {
@@ -481,7 +494,7 @@ def test_dataflow_graph_apply(
                 ],
                 "nodeConnections": None,
             },
-            "'nodeConnections' must be a list",
+            "'nodeConnections' is required and must contain at least one connection",
         ),
         # nodeConnection entry is not a dict
         (
@@ -513,19 +526,6 @@ def test_dataflow_graph_apply_structural_error(
     # Wrap in ARM resource so get_file_config extracts properties
     file_payload = {"properties": graph_properties}
     mocked_get_file_config.return_value = json.dumps(file_payload)
-
-    mock_instance_record = get_mock_instance_record(
-        name=instance_name, resource_group_name=resource_group_name
-    )
-    mocked_responses.add(
-        method=responses.GET,
-        url=get_instance_endpoint(
-            resource_group_name=resource_group_name,
-            instance_name=instance_name,
-        ),
-        json=mock_instance_record,
-        status=200,
-    )
 
     with pytest.raises(InvalidArgumentValueError) as exc:
         apply_dataflow_graph(
@@ -767,19 +767,6 @@ def test_dataflow_graph_apply_endpoint_error(
     }
     file_payload = {"properties": graph_properties}
     mocked_get_file_config.return_value = json.dumps(file_payload)
-
-    mock_instance_record = get_mock_instance_record(
-        name=instance_name, resource_group_name=resource_group_name
-    )
-    mocked_responses.add(
-        method=responses.GET,
-        url=get_instance_endpoint(
-            resource_group_name=resource_group_name,
-            instance_name=instance_name,
-        ),
-        json=mock_instance_record,
-        status=200,
-    )
 
     source_endpoint = scenario.get("source_endpoint")
     if source_endpoint:

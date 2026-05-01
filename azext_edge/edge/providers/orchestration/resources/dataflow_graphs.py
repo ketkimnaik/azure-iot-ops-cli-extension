@@ -41,6 +41,8 @@ _DESTINATION_ONLY_ENDPOINT_TYPES = frozenset([
     DataflowEndpointType.FABRICREALTIME.value,
     DataflowEndpointType.OPENTELEMETRY.value,
 ])
+# Valid node types in a dataflow graph config.
+_VALID_NODE_TYPES = frozenset(["Source", "Graph", "Destination"])
 
 
 if TYPE_CHECKING:
@@ -95,13 +97,14 @@ class DataFlowGraphs(Queryable):
     ) -> dict:
         resource = {}
         graph_config = get_file_config(config_file)
+
+        self._validate_graph_config(graph_config, instance_name, resource_group_name)
+
         resource["extendedLocation"] = self.instances.get_ext_loc(
             name=instance_name,
             resource_group_name=resource_group_name,
         )
         resource["properties"] = graph_config
-
-        self._validate_graph_config(graph_config, instance_name, resource_group_name)
 
         with console.status("Working..."):
             poller = self.ops.begin_create_or_update(
@@ -119,8 +122,6 @@ class DataFlowGraphs(Queryable):
         instance_name: str,
         resource_group_name: str,
     ):
-        VALID_NODE_TYPES = {"Source", "Graph", "Destination"}
-
         nodes = graph_config.get("nodes", [])
         if not isinstance(nodes, list) or not nodes:
             raise InvalidArgumentValueError(
@@ -144,10 +145,10 @@ class DataFlowGraphs(Queryable):
                 raise InvalidArgumentValueError(
                     f"Node '{node_name}' is missing a 'nodeType'."
                 )
-            if node_type not in VALID_NODE_TYPES:
+            if node_type not in _VALID_NODE_TYPES:
                 raise InvalidArgumentValueError(
                     f"Node '{node_name}' has invalid nodeType '{node_type}'. "
-                    f"Valid nodeType values are: {', '.join(sorted(VALID_NODE_TYPES))}."
+                    f"Valid nodeType values are: {', '.join(sorted(_VALID_NODE_TYPES))}."
                 )
             if node_name in declared_names:
                 raise InvalidArgumentValueError(
@@ -158,6 +159,7 @@ class DataFlowGraphs(Queryable):
 
         source_nodes = [n for n in nodes if n.get("nodeType") == "Source"]
         destination_nodes = [n for n in nodes if n.get("nodeType") == "Destination"]
+        graph_nodes = [n for n in nodes if n.get("nodeType") == "Graph"]
 
         if not source_nodes:
             raise InvalidArgumentValueError(
@@ -169,9 +171,9 @@ class DataFlowGraphs(Queryable):
             )
 
         node_connections = graph_config.get("nodeConnections", [])
-        if not isinstance(node_connections, list):
+        if not isinstance(node_connections, list) or not node_connections:
             raise InvalidArgumentValueError(
-                f"'nodeConnections' must be a list, got {type(node_connections).__name__}."
+                "'nodeConnections' is required and must contain at least one connection in the dataflow graph config."
             )
         for i, conn in enumerate(node_connections):
             if not isinstance(conn, dict):
@@ -190,6 +192,10 @@ class DataFlowGraphs(Queryable):
                 )
             from_name = from_val["name"]
             to_name = to_val["name"]
+            if from_name == to_name:
+                raise InvalidArgumentValueError(
+                    f"nodeConnection at index {i} is a self-loop: 'from' and 'to' both reference node '{from_name}'."
+                )
             if from_name not in declared_names:
                 raise InvalidArgumentValueError(
                     f"nodeConnection at index {i} references unknown 'from' node '{from_name}'. "
@@ -278,6 +284,23 @@ class DataFlowGraphs(Queryable):
                     f"{', '.join(sorted(_GRAPH_SUPPORTED_ENDPOINT_TYPES))}."
                 )
 
+        # Validate each graph node's settings
+        for node in graph_nodes:
+            graph_settings = node.get("graphSettings", {})
+            if not isinstance(graph_settings, dict):
+                raise InvalidArgumentValueError(
+                    f"Graph node '{node.get('name')}' has an invalid 'graphSettings' field: "
+                    f"expected an object, got {type(graph_settings).__name__}."
+                )
+            if not graph_settings.get("registryEndpointRef"):
+                raise InvalidArgumentValueError(
+                    f"Graph node '{node.get('name')}' is missing 'graphSettings.registryEndpointRef'."
+                )
+            if not graph_settings.get("artifact"):
+                raise InvalidArgumentValueError(
+                    f"Graph node '{node.get('name')}' is missing 'graphSettings.artifact'."
+                )
+
     def _get_endpoint(
         self,
         endpoint_name: str,
@@ -286,19 +309,16 @@ class DataFlowGraphs(Queryable):
     ) -> dict:
         """Fetch a dataflow endpoint by name, raising a clear error if not found."""
         try:
-            endpoint_obj = self.ops_endpoint.get(
+            return self.ops_endpoint.get(
                 instance_name=instance_name,
                 resource_group_name=resource_group_name,
                 dataflow_endpoint_name=endpoint_name,
             )
         except ResourceNotFoundError:
-            endpoint_obj = None
-        if not endpoint_obj:
             raise ResourceNotFoundError(
                 f"Dataflow endpoint '{endpoint_name}' not found in instance '{instance_name}'. "
                 "Please provide a valid 'endpointRef' using --config-file."
             )
-        return endpoint_obj
 
     def delete(
         self,
