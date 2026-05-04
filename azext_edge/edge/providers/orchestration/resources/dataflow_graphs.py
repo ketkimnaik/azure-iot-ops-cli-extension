@@ -116,12 +116,43 @@ class DataFlowGraphs(Queryable):
             )
             return wait_for_terminal_state(poller, **kwargs)
 
-    def _validate_graph_config(  # noqa: C901
+    def _validate_graph_config(
         self,
         graph_config: dict,
         instance_name: str,
         resource_group_name: str,
     ):
+        nodes, declared_names = self._validate_nodes(graph_config)
+
+        source_nodes = [n for n in nodes if n.get("nodeType") == "Source"]
+        destination_nodes = [n for n in nodes if n.get("nodeType") == "Destination"]
+        graph_nodes = [n for n in nodes if n.get("nodeType") == "Graph"]
+
+        if not source_nodes:
+            raise InvalidArgumentValueError(
+                "The dataflow graph config must contain at least one node with nodeType 'Source'."
+            )
+        if not destination_nodes:
+            raise InvalidArgumentValueError(
+                "The dataflow graph config must contain at least one node with nodeType 'Destination'."
+            )
+
+        self._validate_node_connections(graph_config, declared_names)
+
+        endpoint_cache: dict = {}
+
+        def get_endpoint_cached(endpoint_ref: str) -> dict:
+            if endpoint_ref not in endpoint_cache:
+                endpoint_cache[endpoint_ref] = self._get_endpoint(
+                    endpoint_ref, instance_name, resource_group_name
+                )
+            return endpoint_cache[endpoint_ref]
+
+        self._validate_source_nodes(source_nodes, get_endpoint_cached)
+        self._validate_destination_nodes(destination_nodes, get_endpoint_cached)
+        self._validate_graph_nodes(graph_nodes)
+
+    def _validate_nodes(self, graph_config: dict):
         nodes = graph_config.get("nodes", [])
         if not isinstance(nodes, list) or not nodes:
             raise InvalidArgumentValueError(
@@ -157,19 +188,9 @@ class DataFlowGraphs(Queryable):
                 )
             declared_names.add(node_name)
 
-        source_nodes = [n for n in nodes if n.get("nodeType") == "Source"]
-        destination_nodes = [n for n in nodes if n.get("nodeType") == "Destination"]
-        graph_nodes = [n for n in nodes if n.get("nodeType") == "Graph"]
+        return nodes, declared_names
 
-        if not source_nodes:
-            raise InvalidArgumentValueError(
-                "The dataflow graph config must contain at least one node with nodeType 'Source'."
-            )
-        if not destination_nodes:
-            raise InvalidArgumentValueError(
-                "The dataflow graph config must contain at least one node with nodeType 'Destination'."
-            )
-
+    def _validate_node_connections(self, graph_config: dict, declared_names: set):
         node_connections = graph_config.get("nodeConnections", [])
         if not isinstance(node_connections, list) or not node_connections:
             raise InvalidArgumentValueError(
@@ -207,17 +228,8 @@ class DataFlowGraphs(Queryable):
                     f"Declared node names: {', '.join(sorted(declared_names))}."
                 )
 
-        # Cache endpoint lookups to avoid repeated GETs for the same endpointRef
-        endpoint_cache: dict = {}
-
-        def get_endpoint_cached(endpoint_ref: str) -> dict:
-            if endpoint_ref not in endpoint_cache:
-                endpoint_cache[endpoint_ref] = self._get_endpoint(
-                    endpoint_ref, instance_name, resource_group_name
-                )
-            return endpoint_cache[endpoint_ref]
-
-        # Validate each source node's endpoint
+    def _validate_source_nodes(self, source_nodes: list, get_endpoint_cached):
+        kafka_types = {DataflowEndpointType.EVENTHUB.value, DataflowEndpointType.CUSTOMKAFKA.value, KAFKA_ENDPOINT_TYPE}
         for node in source_nodes:
             source_settings = node.get("sourceSettings", {})
             if not isinstance(source_settings, dict):
@@ -247,20 +259,16 @@ class DataFlowGraphs(Queryable):
                     f"of type '{endpoint_type}', which is destination-only and cannot be used as a source."
                 )
 
-            # Kafka source endpoints require a consumerGroupId on the endpoint
-            kafka_types = {DataflowEndpointType.EVENTHUB.value, DataflowEndpointType.CUSTOMKAFKA.value,
-                           KAFKA_ENDPOINT_TYPE}
             if endpoint_type in kafka_types:
                 kafka_settings = endpoint_props.get("kafkaSettings") or {}
-                consumer_group_id = kafka_settings.get("consumerGroupId", "")
-                if not consumer_group_id:
+                if not kafka_settings.get("consumerGroupId", ""):
                     raise InvalidArgumentValueError(
                         f"Source node '{node.get('name')}' references Kafka endpoint '{endpoint_ref}', "
                         f"but the endpoint does not have 'kafkaSettings.consumerGroupId' set. "
                         f"A consumer group ID is required for Kafka source endpoints."
                     )
 
-        # Validate each destination node's endpoint
+    def _validate_destination_nodes(self, destination_nodes: list, get_endpoint_cached):
         for node in destination_nodes:
             dest_settings = node.get("destinationSettings", {})
             if not isinstance(dest_settings, dict):
@@ -284,7 +292,7 @@ class DataFlowGraphs(Queryable):
                     f"{', '.join(sorted(_GRAPH_SUPPORTED_ENDPOINT_TYPES))}."
                 )
 
-        # Validate each graph node's settings
+    def _validate_graph_nodes(self, graph_nodes: list):
         for node in graph_nodes:
             graph_settings = node.get("graphSettings", {})
             if not isinstance(graph_settings, dict):
