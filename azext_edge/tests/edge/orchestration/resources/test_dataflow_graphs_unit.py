@@ -28,6 +28,10 @@ from .test_instances_unit import (
     get_instance_endpoint,
     get_mock_instance_record,
 )
+from .registry_endpoint.test_registry_endpoints_unit import (
+    get_registry_endpoint_endpoint,
+    get_mock_registry_endpoint_record,
+)
 from ....generators import generate_random_string
 from .conftest import get_base_endpoint, get_mock_resource
 
@@ -844,3 +848,223 @@ def test_dataflow_graph_delete(mocked_cmd, mocked_responses: responses, confirm_
     )
 
     assert len(mocked_responses.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# apply - graph node validation errors (artifact format + registryEndpointRef)
+# ---------------------------------------------------------------------------
+
+_GRAPH_NODE_BASE_PROPERTIES = {
+    "nodes": [
+        {
+            "name": "src",
+            "nodeType": "Source",
+            "sourceSettings": {"endpointRef": "myendpoint1", "dataSources": ["t"]},
+        },
+        {
+            "name": "dst",
+            "nodeType": "Destination",
+            "destinationSettings": {"endpointRef": "myendpoint2", "dataDestination": "t"},
+        },
+        {
+            "name": "graph-node",
+            "nodeType": "Graph",
+            "graphSettings": {
+                "registryEndpointRef": "myregistry",
+                "artifact": "myartifact:1.0",
+            },
+        },
+    ],
+    "nodeConnections": [
+        {"from": {"name": "src"}, "to": {"name": "graph-node"}},
+        {"from": {"name": "graph-node"}, "to": {"name": "dst"}},
+    ],
+}
+
+
+@pytest.mark.parametrize(
+    "graph_settings_override, expected_error_text",
+    [
+        # Missing registryEndpointRef
+        (
+            {"artifact": "myartifact:1.0"},
+            "is missing 'graphSettings.registryEndpointRef'",
+        ),
+        # Missing artifact
+        (
+            {"registryEndpointRef": "myregistry"},
+            "is missing 'graphSettings.artifact'",
+        ),
+        # artifact with no colon
+        (
+            {"registryEndpointRef": "myregistry", "artifact": "myartifact"},
+            "Expected format: '<artifact-name>:<version>'",
+        ),
+        # artifact colon at start
+        (
+            {"registryEndpointRef": "myregistry", "artifact": ":1.0"},
+            "Expected format: '<artifact-name>:<version>'",
+        ),
+        # artifact colon at end
+        (
+            {"registryEndpointRef": "myregistry", "artifact": "myartifact:"},
+            "Expected format: '<artifact-name>:<version>'",
+        ),
+    ],
+)
+def test_dataflow_graph_apply_graph_node_error(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_get_file_config,
+    graph_settings_override: dict,
+    expected_error_text: str,
+):
+    import copy
+
+    graph_name = generate_random_string()
+    profile_name = generate_random_string()
+    instance_name = "myinstance"
+    resource_group_name = "myresourcegroup"
+
+    graph_properties = copy.deepcopy(_GRAPH_NODE_BASE_PROPERTIES)
+    for node in graph_properties["nodes"]:
+        if node["nodeType"] == "Graph":
+            node["graphSettings"] = graph_settings_override
+
+    file_payload = {"properties": graph_properties}
+    mocked_get_file_config.return_value = json.dumps(file_payload)
+
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_dataflow_endpoint_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+            dataflow_endpoint_name="myendpoint1",
+        ),
+        json=get_mock_dataflow_endpoint_record(
+            dataflow_endpoint_name="myendpoint1",
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            dataflow_endpoint_type="AIOLocalMqtt",
+            host="aio-broker",
+        ),
+        status=200,
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_dataflow_endpoint_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+            dataflow_endpoint_name="myendpoint2",
+        ),
+        json=get_mock_dataflow_endpoint_record(
+            dataflow_endpoint_name="myendpoint2",
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            dataflow_endpoint_type="CustomMqtt",
+        ),
+        status=200,
+    )
+
+    # If registryEndpointRef is present, the code fetches it before validating artifact format
+    if "registryEndpointRef" in graph_settings_override:
+        mocked_responses.add(
+            method=responses.GET,
+            url=get_registry_endpoint_endpoint(
+                resource_group_name=resource_group_name,
+                instance_name=instance_name,
+                registry_endpoint_name=graph_settings_override["registryEndpointRef"],
+            ),
+            json=get_mock_registry_endpoint_record(
+                registry_endpoint_name=graph_settings_override["registryEndpointRef"],
+                instance_name=instance_name,
+                resource_group_name=resource_group_name,
+            ),
+            status=200,
+        )
+
+    with pytest.raises(InvalidArgumentValueError) as exc:
+        apply_dataflow_graph(
+            cmd=mocked_cmd,
+            dataflow_graph_name=graph_name,
+            profile_name=profile_name,
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            config_file="config.json",
+            wait_sec=0.1,
+        )
+
+    assert expected_error_text in exc.value.args[0]
+
+
+def test_dataflow_graph_apply_registry_endpoint_not_found(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_get_file_config,
+):
+    import copy
+
+    graph_name = generate_random_string()
+    profile_name = generate_random_string()
+    instance_name = "myinstance"
+    resource_group_name = "myresourcegroup"
+
+    graph_properties = copy.deepcopy(_GRAPH_NODE_BASE_PROPERTIES)
+    file_payload = {"properties": graph_properties}
+    mocked_get_file_config.return_value = json.dumps(file_payload)
+
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_dataflow_endpoint_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+            dataflow_endpoint_name="myendpoint1",
+        ),
+        json=get_mock_dataflow_endpoint_record(
+            dataflow_endpoint_name="myendpoint1",
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            dataflow_endpoint_type="AIOLocalMqtt",
+            host="aio-broker",
+        ),
+        status=200,
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_dataflow_endpoint_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+            dataflow_endpoint_name="myendpoint2",
+        ),
+        json=get_mock_dataflow_endpoint_record(
+            dataflow_endpoint_name="myendpoint2",
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            dataflow_endpoint_type="CustomMqtt",
+        ),
+        status=200,
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_registry_endpoint_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+            registry_endpoint_name="myregistry",
+        ),
+        json={"error": {"code": "ResourceNotFound", "message": "not found"}},
+        status=404,
+    )
+
+    with pytest.raises(ResourceNotFoundError) as exc:
+        apply_dataflow_graph(
+            cmd=mocked_cmd,
+            dataflow_graph_name=graph_name,
+            profile_name=profile_name,
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            config_file="config.json",
+            wait_sec=0.1,
+        )
+
+    assert "myregistry" in exc.value.args[0]
+    assert "not found in instance 'myinstance'" in exc.value.args[0]

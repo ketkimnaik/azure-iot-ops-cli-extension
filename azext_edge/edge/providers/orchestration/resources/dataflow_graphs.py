@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from ....vendor.clients.iotopsmgmt.operations import (
         DataflowEndpointOperations,
         DataflowGraphOperations,
+        RegistryEndpointOperations,
     )
 
 
@@ -59,6 +60,7 @@ class DataFlowGraphs(Queryable):
         self.iotops_mgmt_client = self.instances.iotops_mgmt_client
         self.ops: "DataflowGraphOperations" = self.iotops_mgmt_client.dataflow_graph
         self.ops_endpoint: "DataflowEndpointOperations" = self.iotops_mgmt_client.dataflow_endpoint
+        self.ops_registry_endpoint: "RegistryEndpointOperations" = self.iotops_mgmt_client.registry_endpoint
 
     def show(
         self,
@@ -150,7 +152,17 @@ class DataFlowGraphs(Queryable):
 
         self._validate_source_nodes(source_nodes, get_endpoint_cached)
         self._validate_destination_nodes(destination_nodes, get_endpoint_cached)
-        self._validate_graph_nodes(graph_nodes)
+
+        registry_endpoint_cache: dict = {}
+
+        def get_registry_endpoint_cached(registry_endpoint_ref: str) -> dict:
+            if registry_endpoint_ref not in registry_endpoint_cache:
+                registry_endpoint_cache[registry_endpoint_ref] = self._get_registry_endpoint(
+                    registry_endpoint_ref, instance_name, resource_group_name
+                )
+            return registry_endpoint_cache[registry_endpoint_ref]
+
+        self._validate_graph_nodes(graph_nodes, get_registry_endpoint_cached)
 
     def _validate_nodes(self, graph_config: dict):
         nodes = graph_config.get("nodes", [])
@@ -292,7 +304,7 @@ class DataFlowGraphs(Queryable):
                     f"{', '.join(sorted(_GRAPH_SUPPORTED_ENDPOINT_TYPES))}."
                 )
 
-    def _validate_graph_nodes(self, graph_nodes: list):
+    def _validate_graph_nodes(self, graph_nodes: list, get_registry_endpoint_cached):
         for node in graph_nodes:
             graph_settings = node.get("graphSettings", {})
             if not isinstance(graph_settings, dict):
@@ -300,13 +312,21 @@ class DataFlowGraphs(Queryable):
                     f"Graph node '{node.get('name')}' has an invalid 'graphSettings' field: "
                     f"expected an object, got {type(graph_settings).__name__}."
                 )
-            if not graph_settings.get("registryEndpointRef"):
+            registry_endpoint_ref = graph_settings.get("registryEndpointRef", "")
+            if not registry_endpoint_ref:
                 raise InvalidArgumentValueError(
                     f"Graph node '{node.get('name')}' is missing 'graphSettings.registryEndpointRef'."
                 )
-            if not graph_settings.get("artifact"):
+            get_registry_endpoint_cached(registry_endpoint_ref)
+            artifact = graph_settings.get("artifact", "")
+            if not artifact:
                 raise InvalidArgumentValueError(
                     f"Graph node '{node.get('name')}' is missing 'graphSettings.artifact'."
+                )
+            if ":" not in artifact or artifact.startswith(":") or artifact.endswith(":"):
+                raise InvalidArgumentValueError(
+                    f"Graph node '{node.get('name')}' has an invalid 'graphSettings.artifact' value '{artifact}'. "
+                    "Expected format: '<artifact-name>:<version>'."
                 )
 
     def _get_endpoint(
@@ -326,6 +346,25 @@ class DataFlowGraphs(Queryable):
             raise ResourceNotFoundError(
                 f"Dataflow endpoint '{endpoint_name}' not found in instance '{instance_name}'. "
                 "Please provide a valid 'endpointRef' using --config-file."
+            )
+
+    def _get_registry_endpoint(
+        self,
+        registry_endpoint_name: str,
+        instance_name: str,
+        resource_group_name: str,
+    ) -> dict:
+        """Fetch a registry endpoint by name, raising a clear error if not found."""
+        try:
+            return self.ops_registry_endpoint.get(
+                instance_name=instance_name,
+                resource_group_name=resource_group_name,
+                registry_endpoint_name=registry_endpoint_name,
+            )
+        except ResourceNotFoundError:
+            raise ResourceNotFoundError(
+                f"Registry endpoint '{registry_endpoint_name}' not found in instance '{instance_name}'. "
+                "Please provide a valid 'registryEndpointRef' using --config-file."
             )
 
     def delete(
