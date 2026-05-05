@@ -462,7 +462,7 @@ def add_inbound_mqtt_device_endpoint(
     )
 
 
-def add_inbound_device_endpoint(
+def apply_inbound_device_endpoint(
     cmd,
     connector_type: str,
     instance_name: str,
@@ -480,10 +480,10 @@ def add_inbound_device_endpoint(
     password_reference: Optional[str] = None,
     username_reference: Optional[str] = None,
     trust_list: Optional[str] = None,
-    replace: Optional[bool] = False,
+    no_replace: Optional[bool] = False,
     **kwargs
 ):
-    return NamespaceDevices(cmd).add_inbound_endpoint_by_connector_type(
+    return NamespaceDevices(cmd).apply_inbound_endpoint_by_connector_type(
         device_name=device_name,
         instance_name=instance_name,
         instance_resource_group=instance_resource_group,
@@ -500,7 +500,7 @@ def add_inbound_device_endpoint(
         password_reference=password_reference,
         username_reference=username_reference,
         trust_list=trust_list,
-        replace=replace,
+        no_replace=no_replace,
         **kwargs
     )
 

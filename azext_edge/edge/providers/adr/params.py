@@ -882,9 +882,13 @@ def load_adr_arguments(self, _):
             options_list=["--show-template"],
             help=(
                 "Show a starter configuration template for the connector type and exit without creating an endpoint. "
-                "config: fields shown with their default values; null if no default; "
-                "output can be passed to --endpoint-config. "
-                "schema: every field includes type, default, and constraints (min, max, enum, pattern)."
+                "config: fields shown with their default values (null if no default); output is directly usable as --endpoint-config. "
+                "oneOf/anyOf fields with multiple variants collapse to the first non-null variant and emit a WARNING — "
+                "run with 'schema' mode to see all options. "
+                "allOf fields merge all non-null sub-schemas into one flat object. "
+                "schema: every field includes type, default, and constraints (min, max, enum, pattern); "
+                "oneOf/anyOf/allOf fields show ALL variants including null (indicating a nullable field). "
+                "Null sub-schemas are only filtered in config mode."
             ),
             arg_type=get_enum_type(EndpointTemplateMode),
         )
@@ -894,6 +898,12 @@ def load_adr_arguments(self, _):
             help="Skip validation that a connector template exists for the connector type. "
             "The endpoint version will not be auto-resolved and no schema validation is performed. "
             "Cannot be combined with --endpoint-config.",
+            arg_type=get_three_state_flag(),
+        )
+        context.argument(
+            "no_replace",
+            options_list=["--no-replace"],
+            help="Prevent replacing an existing endpoint with the same name. By default, apply upserts the endpoint.",
             arg_type=get_three_state_flag(),
         )
 

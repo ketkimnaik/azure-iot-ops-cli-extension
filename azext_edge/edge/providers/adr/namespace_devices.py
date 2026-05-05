@@ -441,7 +441,7 @@ class NamespaceDevices(Queryable):
 
         return _load_opcua_metadata_file()
 
-    def add_inbound_endpoint_by_connector_type(  # noqa: C901
+    def apply_inbound_endpoint_by_connector_type(  # noqa: C901
         self,
         instance_name: str,
         instance_resource_group: str,
@@ -459,7 +459,7 @@ class NamespaceDevices(Queryable):
         password_reference: Optional[str] = None,
         username_reference: Optional[str] = None,
         trust_list: Optional[str] = None,
-        replace: Optional[bool] = False,
+        no_replace: Optional[bool] = False,
         **kwargs
     ):
         """
@@ -484,25 +484,32 @@ class NamespaceDevices(Queryable):
                 )
             template_mode = show_template.lower()
             if is_opcua:
-                opcua_metadata = _load_opcua_metadata_file()
                 # When real instance args are provided, check if OPC UA is disabled on
-                # the instance.  For dummy / offline args (e.g. integration-test scaffolding)
-                # the ARM call may fail with a not-found error; fall back to the bundled
-                # metadata in that case.  ValidationError (OPC UA explicitly Disabled) is
+                # the instance (_get_opcua_info returns the bundled metadata on success).
+                # For dummy / offline args (e.g. integration-test scaffolding) the ARM
+                # call may fail with a not-found error; fall back to the bundled metadata
+                # in that case.  ValidationError (OPC UA explicitly Disabled) is
                 # intentionally NOT caught so the disabled-check still propagates.
+                opcua_metadata = None
                 if instance_name and instance_resource_group:
-                    from azure.core.exceptions import HttpResponseError
+                    from azure.core.exceptions import ResourceNotFoundError as _AzureNotFoundError
 
                     try:
                         opcua_metadata = self._get_opcua_info(instance_name, instance_resource_group)
-                    except HttpResponseError:
+                    except _AzureNotFoundError:
                         pass  # instance / resource-group not found – use bundled metadata
+                if opcua_metadata is None:
+                    opcua_metadata = _load_opcua_metadata_file()
                 schema = {}
                 for ep in opcua_metadata.get("inboundEndpoints", []):
                     if ep.get("endpointType", "").lower() == DeviceEndpointType.OPCUA.value.lower():
                         schema = ep.get("additionalConfigurationSchema", {})
                         break
-                return {"connectorType": connector_type, "endpointConfig": _slim_schema(schema, mode=template_mode)}
+                slim_warnings: List[str] = []
+                slimmed = _slim_schema(schema, mode=template_mode, _warnings=slim_warnings)
+                for w in slim_warnings:
+                    logger.warning(w)
+                return {"connectorType": connector_type, "endpointConfig": slimmed}
 
             connector_templates = ConnectorTemplates(cmd=self.cmd)
             raw = connector_templates.get_endpoint_schema(
@@ -512,7 +519,10 @@ class NamespaceDevices(Queryable):
             )
             # slim the endpointConfig portion if present
             if isinstance(raw, dict) and "endpointConfig" in raw:
-                raw["endpointConfig"] = _slim_schema(raw["endpointConfig"], mode=template_mode)
+                slim_warnings = []
+                raw["endpointConfig"] = _slim_schema(raw["endpointConfig"], mode=template_mode, _warnings=slim_warnings)
+                for w in slim_warnings:
+                    logger.warning(w)
             return raw
 
         # Provider-level required arg guards (CLI enforces these too, but provider
@@ -591,6 +601,14 @@ class NamespaceDevices(Queryable):
                         instance_resource_group=instance_resource_group,
                         connector_type=connector_type,
                     ).get("endpointConfig", {})
+                    if not _endpoint_schema:
+                        from azure.cli.core.azclierror import ValidationError
+
+                        raise ValidationError(
+                            f"Schema retrieval failed for connector type '{connector_type}'. "
+                            "Endpoint config validation cannot proceed. "
+                            "Rerun with --skip-connector-check to bypass validation."
+                        )
                 if _endpoint_schema:
                     from ...util.schema_validation import check_json_schema, validate_data_against_schema
 
@@ -633,9 +651,9 @@ class NamespaceDevices(Queryable):
         namespace = parse_resource_id(device["id"])
         original_endpoints = _get_endpoints(device)
 
-        if endpoint_name in original_endpoints and not replace:
+        if endpoint_name in original_endpoints and no_replace:
             raise InvalidArgumentValueError(
-                f"Inbound endpoint '{endpoint_name}' already exists. Use --replace to update it."
+                f"Inbound endpoint '{endpoint_name}' already exists. Use the default apply behavior (omit --no-replace) to allow updates."
             )
 
         original_endpoints[endpoint_name] = endpoint_body
@@ -780,7 +798,12 @@ def _get_endpoints(device: dict, inbound: bool = True) -> dict:
     return device_endpoints.get("inbound", {}) if inbound else device_endpoints
 
 
-def _slim_schema(schema: dict, mode: str = EndpointTemplateMode.CONFIG.value) -> dict:
+def _slim_schema(
+    schema: dict,
+    mode: str = EndpointTemplateMode.CONFIG.value,
+    _warnings: Optional[List[str]] = None,
+    _field_path: str = "",
+) -> dict:
     """
     Converts a JSON schema into a user-friendly config template.
 
@@ -792,52 +815,108 @@ def _slim_schema(schema: dict, mode: str = EndpointTemplateMode.CONFIG.value) ->
       schema  - Every field includes a metadata dict with keys: type, default,
                 and any constraints present (minimum, maximum, enum, pattern).
                 Useful for discovering the full schema before crafting a config.
+
+    Handles: properties, items (arrays), oneOf/anyOf (schema mode preserves all non-null
+    variants; config mode collapses to first non-null and records a warning),
+    allOf (merged properties). $ref is not resolved (requires the root document).
+
+    Args:
+        schema: JSON schema dict to process.
+        mode: 'config' or 'schema'.
+        _warnings: mutable list collecting field paths with collapsed variants (config mode).
+        _field_path: dot-separated path to the current field, used in warning messages.
     """
     _CONSTRAINT_KEYS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "enum", "pattern")
 
     if not isinstance(schema, dict):
         return schema
 
-    props = schema.get("properties", {})
-    if not props:
-        # Leaf node (no sub-properties)
-        default = schema.get("default")
-        raw_type = schema.get("type", "string")
-        if isinstance(raw_type, list):
-            non_null = [t for t in raw_type if t != "null"]
-            raw_type = non_null[0] if non_null else "string"
+    # Resolve oneOf/anyOf
+    for compose_key in ("oneOf", "anyOf"):
+        variants = schema.get(compose_key)
+        if variants:
+            non_null_variants = [v for v in variants if not (isinstance(v, dict) and v.get("type") == "null")]
+
+            if mode == EndpointTemplateMode.SCHEMA.value and len(variants) > 1:
+                # schema mode: preserve ALL variants including null so the user sees the full picture
+                parent_keys = {k: v for k, v in schema.items() if k != compose_key}
+                return {
+                    **parent_keys,
+                    compose_key: [_slim_schema(v, mode=mode, _warnings=_warnings, _field_path=_field_path) for v in variants],
+                }
+
+            # config mode (or only one real variant): collapse to first non-null
+            chosen = non_null_variants[0] if non_null_variants else variants[0]
+            if _warnings is not None and len(non_null_variants) > 1:
+                label = _field_path or "<root>"
+                _warnings.append(
+                    f"Field '{label}' has {len(non_null_variants)} {compose_key} variants; "
+                    "only the first was used. Run --show-template schema to see all options."
+                )
+            merged = {k: v for k, v in schema.items() if k != compose_key}
+            merged.update(chosen)
+            return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path)
+
+    # allOf: schema mode preserves each sub-schema slimmed; config mode merges into one object
+    if "allOf" in schema:
+        non_null_subs = [s for s in schema["allOf"] if isinstance(s, dict) and s.get("type") != "null"]
 
         if mode == EndpointTemplateMode.SCHEMA.value:
-            entry = {"type": raw_type, "default": default}
+            parent_keys = {k: v for k, v in schema.items() if k != "allOf"}
+            return {
+                **parent_keys,
+                "allOf": [_slim_schema(s, mode=mode, _warnings=_warnings, _field_path=_field_path) for s in schema["allOf"]],
+            }
+
+        # config mode: merge all sub-schema properties into one object
+        merged = {k: v for k, v in schema.items() if k != "allOf"}
+        for sub in non_null_subs:
+            for k, v in sub.items():
+                if k == "properties":
+                    merged.setdefault("properties", {}).update(v)
+                elif k not in merged:
+                    merged[k] = v
+        return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path)
+
+    props = schema.get("properties", {})
+    raw_type = schema.get("type", "string")
+    if isinstance(raw_type, list):
+        non_null = [t for t in raw_type if t != "null"]
+        raw_type = non_null[0] if non_null else "string"
+    default = schema.get("default")
+
+    if props:
+        # Object with properties — recurse into each field
+        return {
+            field: _slim_schema(
+                field_schema,
+                mode=mode,
+                _warnings=_warnings,
+                _field_path=f"{_field_path}.{field}" if _field_path else field,
+            )
+            for field, field_schema in props.items()
+        }
+
+    # Array with an items sub-schema
+    if raw_type == "array" and "items" in schema:
+        slimmed_item = _slim_schema(schema["items"], mode=mode, _warnings=_warnings, _field_path=f"{_field_path}[]")
+        if mode == EndpointTemplateMode.SCHEMA.value:
+            entry = {"type": "array", "default": default, "items": slimmed_item}
             for k in _CONSTRAINT_KEYS:
                 if k in schema:
                     entry[k] = schema[k]
             return entry
+        return [slimmed_item] if slimmed_item is not None else default
 
-        # config mode
-        return default  # None if no default
+    # Scalar leaf
+    if mode == EndpointTemplateMode.SCHEMA.value:
+        entry = {"type": raw_type, "default": default}
+        for k in _CONSTRAINT_KEYS:
+            if k in schema:
+                entry[k] = schema[k]
+        return entry
 
-    result = {}
-    for field, field_schema in props.items():
-        if "properties" in field_schema:
-            result[field] = _slim_schema(field_schema, mode=mode)
-        else:
-            raw_type = field_schema.get("type", "string")
-            if isinstance(raw_type, list):
-                non_null = [t for t in raw_type if t != "null"]
-                raw_type = non_null[0] if non_null else "string"
-            default = field_schema.get("default")
-
-            if mode == EndpointTemplateMode.SCHEMA.value:
-                entry = {"type": raw_type, "default": default}
-                for k in _CONSTRAINT_KEYS:
-                    if k in field_schema:
-                        entry[k] = field_schema[k]
-                result[field] = entry
-            else:
-                # config mode: use default value, or null if no default
-                result[field] = default
-    return result
+    return default
 
 
 # Connector types that do NOT support certificate-based authentication.

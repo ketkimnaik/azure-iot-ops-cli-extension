@@ -779,6 +779,10 @@ def load_iotops_adr_help():
         - name: Apply an inbound endpoint skipping connector template check (no schema validation, no version auto-resolution)
           text: >
             az iot ops ns device endpoint inbound apply --device mydevice --name myEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --skip-connector-check
+
+        - name: Apply an inbound endpoint but error if it already exists (prevent overwrite)
+          text: >
+            az iot ops ns device endpoint inbound apply --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --no-replace
     """
 
     helps[

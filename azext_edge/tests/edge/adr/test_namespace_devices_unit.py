@@ -33,7 +33,7 @@ from azext_edge.edge.commands_namespaces import (
     add_inbound_rest_device_endpoint,
     add_inbound_sse_device_endpoint,
     add_inbound_mqtt_device_endpoint,
-    add_inbound_device_endpoint,
+    apply_inbound_device_endpoint,
 )
 from azext_edge.edge.providers.adr.common import ADRAuthModes
 from azext_edge.edge.providers.adr.namespace_devices import DeviceEndpointType
@@ -1809,7 +1809,7 @@ def test_add_inbound_opcua_device_endpoint(
     (DeviceEndpointType.MQTT.value, add_inbound_mqtt_device_endpoint),
     ("custom", add_inbound_custom_device_endpoint)
 ])
-def test_add_inbound_device_endpoint_error(
+def test_apply_inbound_device_endpoint_error(
     mocked_cmd,
     mocked_responses: responses,
     endpoint_type: str,
@@ -2434,7 +2434,7 @@ def test_add_inbound_mqtt_device_endpoint(
 
 
 # ---------------------------------------------------------------------------
-# Tests for the generalized add_inbound_device_endpoint command
+# Tests for the generalized apply_inbound_device_endpoint command
 # ---------------------------------------------------------------------------
 
 
@@ -2479,7 +2479,7 @@ def _make_connector_template(connector_type: str, version: str = "1.0.0", schema
     ("Microsoft.Onvif", "config"),
     ("Microsoft.Onvif", "schema"),
 ])
-def test_add_inbound_device_endpoint_show_template(
+def test_apply_inbound_device_endpoint_show_template(
     mocked_cmd,
     mocker,
     connector_type: str,
@@ -2533,7 +2533,7 @@ def test_add_inbound_device_endpoint_show_template(
     instance_name = f"inst-{generate_random_string()}"
     instance_resource_group = f"rg-{generate_random_string()}"
 
-    result = add_inbound_device_endpoint(
+    result = apply_inbound_device_endpoint(
         cmd=mocked_cmd,
         connector_type=connector_type,
         instance_name=instance_name,
@@ -2551,10 +2551,10 @@ def test_add_inbound_device_endpoint_show_template(
         )
 
 
-def test_add_inbound_device_endpoint_skip_connector_check_with_config_file_errors(mocked_cmd):
+def test_apply_inbound_device_endpoint_skip_connector_check_with_config_file_errors(mocked_cmd):
     """--skip-connector-check and --endpoint-config together must raise InvalidArgumentValueError."""
     with pytest.raises(InvalidArgumentValueError, match="--skip-connector-check cannot be used when --endpoint-config"):
-        add_inbound_device_endpoint(
+        apply_inbound_device_endpoint(
             cmd=mocked_cmd,
             connector_type="Microsoft.OpcUa",
             instance_name="my-instance",
@@ -2572,7 +2572,7 @@ def test_add_inbound_device_endpoint_skip_connector_check_with_config_file_error
     ("endpoint_name", {"endpoint_name": None}),
     ("endpoint_address", {"endpoint_address": None}),
 ])
-def test_add_inbound_device_endpoint_missing_required_args(
+def test_apply_inbound_device_endpoint_missing_required_args(
     mocked_cmd,
     mocker,
     missing_arg: str,
@@ -2597,10 +2597,10 @@ def test_add_inbound_device_endpoint_missing_required_args(
     base_kwargs.update(kwargs_override)
 
     with pytest.raises(RequiredArgumentMissingError):
-        add_inbound_device_endpoint(cmd=mocked_cmd, **base_kwargs)
+        apply_inbound_device_endpoint(cmd=mocked_cmd, **base_kwargs)
 
 
-def test_add_inbound_device_endpoint_no_template_errors(
+def test_apply_inbound_device_endpoint_no_template_errors(
     mocked_cmd,
     mocker,
 ):
@@ -2615,7 +2615,7 @@ def test_add_inbound_device_endpoint_no_template_errors(
     mock_ct.return_value.get_connector_template_for_type.return_value = None
 
     with pytest.raises(ResourceNotFoundError, match="No connector template found for connector type"):
-        add_inbound_device_endpoint(
+        apply_inbound_device_endpoint(
             cmd=mocked_cmd,
             connector_type=connector_type,
             instance_name="my-instance",
@@ -2633,7 +2633,7 @@ def test_add_inbound_device_endpoint_no_template_errors(
     (False, False),
     (True, True),
 ])
-def test_add_inbound_device_endpoint_success(
+def test_apply_inbound_device_endpoint_success(
     mocked_cmd,
     mocked_responses: responses,
     mocker,
@@ -2644,14 +2644,14 @@ def test_add_inbound_device_endpoint_success(
     replace: bool,
 ):
     """
-    Happy-path tests for add_inbound_device_endpoint.
+    Happy-path tests for apply_inbound_device_endpoint.
     Covers: with/without config file, skip/no-skip connector check, replace semantics.
     """
     # --endpoint-config and --skip-connector-check are mutually exclusive; skip the invalid combination.
     if with_config_file and skip_connector_check:
         pytest.skip(
             "mutually exclusive combination — covered by "
-            "test_add_inbound_device_endpoint_skip_connector_check_with_config_file_errors"
+            "test_apply_inbound_device_endpoint_skip_connector_check_with_config_file_errors"
         )
 
     connector_type = "Microsoft.OpcUa"
@@ -2760,7 +2760,7 @@ def test_add_inbound_device_endpoint_success(
         content_type="application/json",
     )
 
-    result = add_inbound_device_endpoint(
+    result = apply_inbound_device_endpoint(
         cmd=mocked_cmd,
         connector_type=connector_type,
         instance_name=instance_name,
@@ -2793,7 +2793,7 @@ def test_add_inbound_device_endpoint_success(
         assert "additionalConfiguration" not in endpoint_patch
 
 
-def test_add_inbound_device_endpoint_duplicate_no_replace_errors(
+def test_apply_inbound_device_endpoint_duplicate_no_replace_errors(
     mocked_cmd,
     mocked_responses: responses,
     mocker,
@@ -2841,7 +2841,7 @@ def test_add_inbound_device_endpoint_duplicate_no_replace_errors(
     )
 
     with pytest.raises(InvalidArgumentValueError, match="already exists"):
-        add_inbound_device_endpoint(
+        apply_inbound_device_endpoint(
             cmd=mocked_cmd,
             connector_type=connector_type,
             instance_name="my-instance",
@@ -2849,7 +2849,7 @@ def test_add_inbound_device_endpoint_duplicate_no_replace_errors(
             device_name=device_name,
             endpoint_name=endpoint_name,
             endpoint_address="opc.tcp://new:4840",
-            replace=False,
+            no_replace=True,
             wait_sec=0,
         )
 
@@ -2963,18 +2963,180 @@ def test_slim_schema_type_array_drops_null():
     assert schema_result["field"]["type"] == "string"
 
 
+def test_slim_schema_items_array_config_mode():
+    """config mode: array field with items sub-schema renders as a list with one slimmed item."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "tags": {
+                "type": "array",
+                "items": {"type": "string", "default": "tag"},
+            },
+        },
+    }
+    result = _slim_schema(schema, mode="config")
+    assert result == {"tags": ["tag"]}
+
+
+def test_slim_schema_items_array_schema_mode():
+    """schema mode: array field exposes type, default, and items metadata."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+    }
+    result = _slim_schema(schema, mode="schema")
+    assert result == {
+        "tags": {
+            "type": "array",
+            "default": None,
+            "items": {"type": "string", "default": None},
+        }
+    }
+
+
+def test_slim_schema_oneof_picks_first_non_null_variant():
+    """oneOf: the first non-null variant is selected and its properties are used."""
+    schema = {
+        "oneOf": [
+            {"type": "null"},
+            {
+                "type": "object",
+                "properties": {
+                    "port": {"type": "integer", "default": 8080},
+                },
+            },
+        ]
+    }
+    result = _slim_schema(schema, mode="config")
+    assert result == {"port": 8080}
+
+
+def test_slim_schema_anyof_picks_first_non_null_variant():
+    """anyOf: the first non-null variant is selected in config mode."""
+    schema = {
+        "anyOf": [
+            {"type": "null"},
+            {"type": "string", "default": "hello"},
+        ]
+    }
+    result = _slim_schema(schema, mode="config")
+    assert result == "hello"
+
+
+def test_slim_schema_oneof_multi_variant_config_mode_picks_first():
+    """config mode with multiple real oneOf variants: first non-null is used (must be concrete)."""
+    schema = {
+        "oneOf": [
+            {"type": "null"},
+            {"type": "string", "default": "basic"},
+            {"type": "string", "default": "advanced"},
+        ]
+    }
+    result = _slim_schema(schema, mode="config")
+    assert result == "basic"
+
+
+def test_slim_schema_oneof_multi_variant_schema_mode_preserves_all():
+    """schema mode with multiple oneOf variants: all variants including null are preserved."""
+    schema = {
+        "oneOf": [
+            {"type": "null"},
+            {"type": "string", "default": "basic"},
+            {"type": "string", "default": "advanced"},
+        ]
+    }
+    result = _slim_schema(schema, mode="schema")
+    assert "oneOf" in result
+    assert result["oneOf"] == [
+        {"type": "null", "default": None},
+        {"type": "string", "default": "basic"},
+        {"type": "string", "default": "advanced"},
+    ]
+
+
+def test_slim_schema_anyof_multi_variant_schema_mode_preserves_all():
+    """schema mode with multiple anyOf object variants: all variants including null are preserved."""
+    schema = {
+        "anyOf": [
+            {"type": "null"},
+            {"type": "object", "properties": {"host": {"type": "string", "default": "localhost"}}},
+            {"type": "object", "properties": {"url":  {"type": "string", "default": "http://"}}},
+        ]
+    }
+    result = _slim_schema(schema, mode="schema")
+    assert "anyOf" in result
+    assert len(result["anyOf"]) == 3
+    assert result["anyOf"][0] == {"type": "null", "default": None}
+    assert result["anyOf"][1] == {"host": {"type": "string", "default": "localhost"}}
+    assert result["anyOf"][2] == {"url":  {"type": "string", "default": "http://"}}
+
+
+def test_slim_schema_allof_merges_properties():
+    """allOf config mode: properties from all sub-schemas are merged into one flat object."""
+    schema = {
+        "allOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "default": "localhost"},
+                },
+            },
+            {
+                "properties": {
+                    "port": {"type": "integer", "default": 443},
+                },
+            },
+        ]
+    }
+    result = _slim_schema(schema, mode="config")
+    assert result == {"host": "localhost", "port": 443}
+
+
+def test_slim_schema_allof_schema_mode_preserves_structure():
+    """allOf schema mode: each sub-schema is slimmed separately and allOf key is preserved."""
+    schema = {
+        "allOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "default": "127.0.0.1"},
+                },
+            },
+            {
+                "properties": {
+                    "port": {"type": "integer", "default": 8080},
+                    "timeout": {"type": "integer", "default": 30},
+                },
+            },
+        ]
+    }
+    result = _slim_schema(schema, mode="schema")
+    assert "allOf" in result
+    assert len(result["allOf"]) == 2
+    assert result["allOf"][0] == {"host": {"type": "string", "default": "127.0.0.1"}}
+    assert result["allOf"][1] == {
+        "port": {"type": "integer", "default": 8080},
+        "timeout": {"type": "integer", "default": 30},
+    }
+
+
 # ---------------------------------------------------------------------------
 # --show-template + --endpoint-config mutual exclusion (unit)
 # ---------------------------------------------------------------------------
 
-def test_add_inbound_device_endpoint_show_template_with_config_errors(
+def test_apply_inbound_device_endpoint_show_template_with_config_errors(
     mocked_cmd,
     mocked_get_namespace_for_instance,
 ):
     """--show-template and --endpoint-config together must raise InvalidArgumentValueError."""
     from azure.cli.core.azclierror import InvalidArgumentValueError as _IAE
     with pytest.raises(_IAE, match="--show-template and --endpoint-config cannot be used together"):
-        add_inbound_device_endpoint(
+        apply_inbound_device_endpoint(
             cmd=mocked_cmd,
             connector_type="Microsoft.OpcUa",
             instance_name="my-instance",
@@ -2988,7 +3150,7 @@ def test_add_inbound_device_endpoint_show_template_with_config_errors(
 # Non-OpcUa happy path (ConnectorTemplates IS called)
 # ---------------------------------------------------------------------------
 
-def test_add_inbound_device_endpoint_success_non_opcua(
+def test_apply_inbound_device_endpoint_success_non_opcua(
     mocked_cmd,
     mocked_responses: responses,
     mocker,
@@ -3055,7 +3217,7 @@ def test_add_inbound_device_endpoint_success_non_opcua(
         content_type="application/json",
     )
 
-    result = add_inbound_device_endpoint(
+    result = apply_inbound_device_endpoint(
         cmd=mocked_cmd,
         connector_type=connector_type,
         instance_name="my-instance",
@@ -3080,7 +3242,7 @@ def test_add_inbound_device_endpoint_success_non_opcua(
 # ---------------------------------------------------------------------------
 
 
-def test_add_inbound_device_endpoint_opcua_config_fails_schema_validation(
+def test_apply_inbound_device_endpoint_opcua_config_fails_schema_validation(
     mocked_cmd,
     mocker,
     mocked_get_namespace_for_instance,
@@ -3097,7 +3259,7 @@ def test_add_inbound_device_endpoint_opcua_config_fails_schema_validation(
     )
 
     with pytest.raises(InvalidArgumentValueError, match="endpoint"):
-        add_inbound_device_endpoint(
+        apply_inbound_device_endpoint(
             cmd=mocked_cmd,
             connector_type="Microsoft.OpcUa",
             instance_name="my-instance",
@@ -3109,7 +3271,7 @@ def test_add_inbound_device_endpoint_opcua_config_fails_schema_validation(
         )
 
 
-def test_add_inbound_device_endpoint_non_opcua_config_fails_schema_validation(
+def test_apply_inbound_device_endpoint_non_opcua_config_fails_schema_validation(
     mocked_cmd,
     mocker,
     mocked_get_namespace_for_instance,
@@ -3141,7 +3303,7 @@ def test_add_inbound_device_endpoint_non_opcua_config_fails_schema_validation(
     )
 
     with pytest.raises(InvalidArgumentValueError):
-        add_inbound_device_endpoint(
+        apply_inbound_device_endpoint(
             cmd=mocked_cmd,
             connector_type="Microsoft.Onvif",
             instance_name="my-instance",
@@ -3159,7 +3321,7 @@ def test_add_inbound_device_endpoint_non_opcua_config_fails_schema_validation(
     )
 
 
-def test_add_inbound_device_endpoint_non_opcua_non_standard_dialect_skips_validation(
+def test_apply_inbound_device_endpoint_non_opcua_non_standard_dialect_skips_validation(
     mocked_cmd,
     mocker,
     mocked_get_namespace_for_instance,
@@ -3242,7 +3404,7 @@ def test_add_inbound_device_endpoint_non_opcua_non_standard_dialect_skips_valida
         content_type="application/json",
     )
 
-    add_inbound_device_endpoint(
+    apply_inbound_device_endpoint(
         cmd=mocked_cmd,
         connector_type=connector_type,
         instance_name="my-instance",
@@ -3257,7 +3419,7 @@ def test_add_inbound_device_endpoint_non_opcua_non_standard_dialect_skips_valida
     mock_validate.assert_not_called()
 
 
-def test_add_inbound_device_endpoint_non_opcua_get_endpoint_schema_called_with_config(
+def test_apply_inbound_device_endpoint_non_opcua_get_endpoint_schema_called_with_config(
     mocked_cmd,
     mocker,
     mocked_get_namespace_for_instance,
@@ -3335,7 +3497,7 @@ def test_add_inbound_device_endpoint_non_opcua_get_endpoint_schema_called_with_c
         content_type="application/json",
     )
 
-    result = add_inbound_device_endpoint(
+    result = apply_inbound_device_endpoint(
         cmd=mocked_cmd,
         connector_type=connector_type,
         instance_name="my-instance",
