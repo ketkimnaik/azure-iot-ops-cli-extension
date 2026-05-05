@@ -788,20 +788,31 @@ def load_iotops_help():
                   "endpointRef": "my-otel-endpoint",
                   "dataDestination": "telemetry/all"
                 }
+              },
+              {
+                "name": "graph-processor",
+                "nodeType": "Graph",
+                "graphSettings": {
+                  "registryEndpointRef": "my-registry-endpoint",
+                  "artifact": "my-processing-module:1.0.0"
+                }
               }
             ],
             "nodeConnections": [
-              { "from": { "name": "source-mqtt" }, "to": { "name": "dest-broker" } },
-              { "from": { "name": "source-mqtt" }, "to": { "name": "dest-otel" } }
+              { "from": { "name": "source-mqtt" }, "to": { "name": "graph-processor" } },
+              { "from": { "name": "graph-processor" }, "to": { "name": "dest-broker" } },
+              { "from": { "name": "graph-processor" }, "to": { "name": "dest-otel" } }
             ]
           }
           ```
 
-          The above example defines a fan-out graph: an MQTT source fans out to a Kafka destination
-          and an OpenTelemetry destination. Data flow graphs support only MQTT, Kafka, and
-          OpenTelemetry endpoints. The file can also be the full ARM resource wrapper
-          (properties is auto-extracted). extendedLocation is always auto-populated from --instance
-          and -g and must not be included in the file.
+          The above example defines a graph with an MQTT source flowing through a Graph processing
+          node that fans out to a Kafka destination and an OpenTelemetry destination. Graph nodes
+          reference an artifact (format: `<name>:<version>`) from a registry endpoint.
+          Supported nodeTypes are: Source, Destination, and Graph. Data flow graphs support only
+          MQTT, Kafka, and OpenTelemetry endpoints. The file can also be the full ARM resource
+          wrapper (properties is auto-extracted). extendedLocation is always auto-populated from
+          --instance and -g and must not be included in the file.
 
           When used with apply the above content will create or replace a target DataflowGraph resource.
 
