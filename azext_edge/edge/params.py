@@ -18,7 +18,7 @@ from knack.arguments import CaseInsensitiveList
 from azext_edge.edge.providers.edge_api.dataflow import DataflowResourceKinds
 
 from ._validators import validate_namespace, validate_resource_name
-from .common import DEFAULT_DATAFLOW_PROFILE, OpsServiceType
+from .common import OpsServiceType
 from .providers.check.common import ResourceOutputDetailLevel
 from .providers.edge_api import DeviceRegistryResourceKinds, MqResourceKinds
 from .providers.orchestration.common import (
@@ -311,8 +311,7 @@ def load_iotops_arguments(self, _):
         context.argument(
             "profile_name",
             options_list=["--profile", "-p"],
-            default=DEFAULT_DATAFLOW_PROFILE,
-            help="Dataflow profile name.",
+            help="Dataflow profile name. Default: 'default'.",
         )
 
     with self.argument_context("iot ops dataflowgraph") as context:
@@ -329,8 +328,7 @@ def load_iotops_arguments(self, _):
         context.argument(
             "profile_name",
             options_list=["--profile", "-p"],
-            default=DEFAULT_DATAFLOW_PROFILE,
-            help="Dataflow profile name.",
+            help="Dataflow profile name. Default: 'default'.",
         )
         context.argument(
             "config_file",
