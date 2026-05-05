@@ -882,7 +882,8 @@ def load_adr_arguments(self, _):
             options_list=["--show-template"],
             help=(
                 "Show a starter configuration template for the connector type and exit without creating an endpoint. "
-                "config: fields shown with their default values (null if no default); output is directly usable as --endpoint-config. "
+                "config: fields shown with their default values (null if no default); "
+                "output is directly usable as --endpoint-config. "
                 "oneOf/anyOf fields with multiple variants collapse to the first non-null variant and emit a WARNING — "
                 "run with 'schema' mode to see all options. "
                 "allOf fields merge all non-null sub-schemas into one flat object. "

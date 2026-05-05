@@ -653,7 +653,8 @@ class NamespaceDevices(Queryable):
 
         if endpoint_name in original_endpoints and no_replace:
             raise InvalidArgumentValueError(
-                f"Inbound endpoint '{endpoint_name}' already exists. Use the default apply behavior (omit --no-replace) to allow updates."
+                f"Inbound endpoint '{endpoint_name}' already exists. "
+                "Use the default apply behavior (omit --no-replace) to allow updates."
             )
 
         original_endpoints[endpoint_name] = endpoint_body
@@ -798,6 +799,59 @@ def _get_endpoints(device: dict, inbound: bool = True) -> dict:
     return device_endpoints.get("inbound", {}) if inbound else device_endpoints
 
 
+def _slim_compose_variants(schema, compose_key, variants, mode, _warnings, _field_path):
+    """Handle oneOf/anyOf variants for _slim_schema."""
+    non_null_variants = [v for v in variants if not (isinstance(v, dict) and v.get("type") == "null")]
+    parent_keys = {k: v for k, v in schema.items() if k != compose_key}
+
+    if mode == EndpointTemplateMode.SCHEMA.value and len(variants) > 1:
+        # schema mode: preserve ALL variants including null so the user sees the full picture
+        return {
+            **parent_keys,
+            compose_key: [
+                _slim_schema(v, mode=mode, _warnings=_warnings, _field_path=_field_path)
+                for v in variants
+            ],
+        }
+
+    # config mode (or only one real variant): collapse to first non-null
+    chosen = non_null_variants[0] if non_null_variants else variants[0]
+    if _warnings is not None and len(non_null_variants) > 1:
+        label = _field_path or "<root>"
+        _warnings.append(
+            f"Field '{label}' has {len(non_null_variants)} {compose_key} variants; "
+            "only the first was used. Run --show-template schema to see all options."
+        )
+    merged = {**parent_keys}
+    merged.update(chosen)
+    return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path)
+
+
+def _slim_allof(schema, mode, _warnings, _field_path):
+    """Handle allOf for _slim_schema."""
+    non_null_subs = [s for s in schema["allOf"] if isinstance(s, dict) and s.get("type") != "null"]
+    parent_keys = {k: v for k, v in schema.items() if k != "allOf"}
+
+    if mode == EndpointTemplateMode.SCHEMA.value:
+        return {
+            **parent_keys,
+            "allOf": [
+                _slim_schema(s, mode=mode, _warnings=_warnings, _field_path=_field_path)
+                for s in schema["allOf"]
+            ],
+        }
+
+    # config mode: merge all sub-schema properties into one object
+    merged = {**parent_keys}
+    for sub in non_null_subs:
+        for k, v in sub.items():
+            if k == "properties":
+                merged.setdefault("properties", {}).update(v)
+            elif k not in merged:
+                merged[k] = v
+    return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path)
+
+
 def _slim_schema(
     schema: dict,
     mode: str = EndpointTemplateMode.CONFIG.value,
@@ -816,9 +870,9 @@ def _slim_schema(
                 and any constraints present (minimum, maximum, enum, pattern).
                 Useful for discovering the full schema before crafting a config.
 
-    Handles: properties, items (arrays), oneOf/anyOf (schema mode preserves all non-null
-    variants; config mode collapses to first non-null and records a warning),
-    allOf (merged properties). $ref is not resolved (requires the root document).
+    Handles: properties, items (arrays), oneOf/anyOf (schema mode preserves all
+    variants including null; config mode collapses to first non-null and records
+    a warning), allOf (merged properties). $ref is not resolved.
 
     Args:
         schema: JSON schema dict to process.
@@ -835,48 +889,11 @@ def _slim_schema(
     for compose_key in ("oneOf", "anyOf"):
         variants = schema.get(compose_key)
         if variants:
-            non_null_variants = [v for v in variants if not (isinstance(v, dict) and v.get("type") == "null")]
+            return _slim_compose_variants(schema, compose_key, variants, mode, _warnings, _field_path)
 
-            if mode == EndpointTemplateMode.SCHEMA.value and len(variants) > 1:
-                # schema mode: preserve ALL variants including null so the user sees the full picture
-                parent_keys = {k: v for k, v in schema.items() if k != compose_key}
-                return {
-                    **parent_keys,
-                    compose_key: [_slim_schema(v, mode=mode, _warnings=_warnings, _field_path=_field_path) for v in variants],
-                }
-
-            # config mode (or only one real variant): collapse to first non-null
-            chosen = non_null_variants[0] if non_null_variants else variants[0]
-            if _warnings is not None and len(non_null_variants) > 1:
-                label = _field_path or "<root>"
-                _warnings.append(
-                    f"Field '{label}' has {len(non_null_variants)} {compose_key} variants; "
-                    "only the first was used. Run --show-template schema to see all options."
-                )
-            merged = {k: v for k, v in schema.items() if k != compose_key}
-            merged.update(chosen)
-            return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path)
-
-    # allOf: schema mode preserves each sub-schema slimmed; config mode merges into one object
+    # Resolve allOf
     if "allOf" in schema:
-        non_null_subs = [s for s in schema["allOf"] if isinstance(s, dict) and s.get("type") != "null"]
-
-        if mode == EndpointTemplateMode.SCHEMA.value:
-            parent_keys = {k: v for k, v in schema.items() if k != "allOf"}
-            return {
-                **parent_keys,
-                "allOf": [_slim_schema(s, mode=mode, _warnings=_warnings, _field_path=_field_path) for s in schema["allOf"]],
-            }
-
-        # config mode: merge all sub-schema properties into one object
-        merged = {k: v for k, v in schema.items() if k != "allOf"}
-        for sub in non_null_subs:
-            for k, v in sub.items():
-                if k == "properties":
-                    merged.setdefault("properties", {}).update(v)
-                elif k not in merged:
-                    merged[k] = v
-        return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path)
+        return _slim_allof(schema, mode, _warnings, _field_path)
 
     props = schema.get("properties", {})
     raw_type = schema.get("type", "string")

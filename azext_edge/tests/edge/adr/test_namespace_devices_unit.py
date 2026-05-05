@@ -3065,7 +3065,7 @@ def test_slim_schema_anyof_multi_variant_schema_mode_preserves_all():
         "anyOf": [
             {"type": "null"},
             {"type": "object", "properties": {"host": {"type": "string", "default": "localhost"}}},
-            {"type": "object", "properties": {"url":  {"type": "string", "default": "http://"}}},
+            {"type": "object", "properties": {"url": {"type": "string", "default": "http://"}}},
         ]
     }
     result = _slim_schema(schema, mode="schema")
@@ -3073,7 +3073,7 @@ def test_slim_schema_anyof_multi_variant_schema_mode_preserves_all():
     assert len(result["anyOf"]) == 3
     assert result["anyOf"][0] == {"type": "null", "default": None}
     assert result["anyOf"][1] == {"host": {"type": "string", "default": "localhost"}}
-    assert result["anyOf"][2] == {"url":  {"type": "string", "default": "http://"}}
+    assert result["anyOf"][2] == {"url": {"type": "string", "default": "http://"}}
 
 
 def test_slim_schema_allof_merges_properties():
