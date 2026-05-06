@@ -819,23 +819,29 @@ def test_dataflow_graph_apply_endpoint_error(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("confirm_yes", [True])
-def test_dataflow_graph_delete(mocked_cmd, mocked_responses: responses, confirm_yes):
+@pytest.mark.parametrize("confirm_yes", [True, False, None])
+def test_dataflow_graph_delete(mocked_cmd, mocked_responses: responses, confirm_yes, mocker):
     graph_name = generate_random_string()
     profile_name = generate_random_string()
     instance_name = generate_random_string()
     resource_group_name = generate_random_string()
 
-    mocked_responses.add(
-        method=responses.DELETE,
-        url=get_dataflow_graph_endpoint(
-            graph_name=graph_name,
-            profile_name=profile_name,
-            instance_name=instance_name,
-            resource_group_name=resource_group_name,
-        ),
-        status=204,
-    )
+    if not confirm_yes:
+        mocker.patch(
+            "azext_edge.edge.providers.orchestration.resources.dataflow_graphs.should_continue_prompt",
+            return_value=False,
+        )
+    else:
+        mocked_responses.add(
+            method=responses.DELETE,
+            url=get_dataflow_graph_endpoint(
+                graph_name=graph_name,
+                profile_name=profile_name,
+                instance_name=instance_name,
+                resource_group_name=resource_group_name,
+            ),
+            status=204,
+        )
 
     delete_dataflow_graph(
         cmd=mocked_cmd,
@@ -847,7 +853,8 @@ def test_dataflow_graph_delete(mocked_cmd, mocked_responses: responses, confirm_
         wait_sec=0.1,
     )
 
-    assert len(mocked_responses.calls) == 1
+    expected_calls = 0 if not confirm_yes else 1
+    assert len(mocked_responses.calls) == expected_calls
 
 
 # ---------------------------------------------------------------------------
