@@ -799,7 +799,131 @@ def _get_endpoints(device: dict, inbound: bool = True) -> dict:
     return device_endpoints.get("inbound", {}) if inbound else device_endpoints
 
 
-def _slim_compose_variants(schema, compose_key, variants, mode, _warnings, _field_path):
+def _collect_anchors(schema: dict) -> dict:
+    """
+    Walk a schema tree iteratively and collect all {anchor_name: subschema} pairs from
+    both "$anchor" (Draft 2019-09+) and "$id" bare-fragment values (Draft 7).
+    Uses an explicit stack to avoid recursion-depth limits on deeply nested schemas.
+    """
+    anchors: dict = {}
+    stack = [schema]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        anchor = node.get("$anchor")
+        if anchor and isinstance(anchor, str):
+            anchors[anchor] = node
+        # Draft 7 named id: "$id": "#name" — treat bare fragment as an anchor
+        schema_id = node.get("$id", "")
+        if isinstance(schema_id, str) and schema_id.startswith("#") and len(schema_id) > 1:
+            anchors[schema_id.lstrip("#")] = node
+        for value in node.values():
+            if isinstance(value, dict):
+                stack.append(value)
+            elif isinstance(value, list):
+                stack.extend(v for v in value if isinstance(v, dict))
+    return anchors
+
+
+class SchemaResolver:
+    """
+    Wraps a referencing.Resolver with additional anchor maps so that named
+    anchor refs (#Name) and $dynamicRef are handled without requiring draft-
+    specific dialect processing.
+
+    Attributes:
+        resolver: referencing.Resolver for JSON Pointer and external URL refs.
+        anchors: {anchor_name: subschema} pre-scanned from the root schema.
+        external_anchors: {base_uri: {anchor_name: subschema}} for fetched external schemas.
+    """
+
+    def __init__(self, resolver, anchors: dict, external_anchors: dict):
+        self.resolver = resolver
+        self.anchors = anchors
+        self.external_anchors = external_anchors
+
+
+def _make_ref_resolver(root_schema: dict) -> SchemaResolver:
+    """
+    Build a draft-agnostic JSON Schema $ref resolver for the given root schema.
+
+    Covers all ref styles:
+      - JSON Pointer  : "#/$defs/Foo"        → referencing.Resolver.lookup
+      - Named anchor  : "#Foo"               → pre-scanned anchor map (no draft needed)
+      - Draft-7 id    : "$id": "#Foo"        → same anchor map
+      - External URL  : "https://..."        → requests.get + anchor map for that document
+      - $dynamicRef   : "#Foo"               → falls back to anchor map (outermost scope)
+    External URL refs are fetched with a 5-second timeout; failures are caught
+    and logged so the template generation can continue without the resolved content.
+    """
+    import requests
+
+    from referencing import Registry, Resource
+    from referencing.exceptions import Unretrievable
+
+    external_anchors: dict = {}
+
+    def _retrieve_external(uri: str):
+        try:
+            response = requests.get(uri, timeout=5)
+            response.raise_for_status()
+            fetched = response.json()
+            if isinstance(fetched, dict):
+                external_anchors[uri] = _collect_anchors(fetched)
+            return Resource.opaque(fetched)
+        except Exception as exc:
+            raise Unretrievable(ref=uri) from exc
+
+    registry = Registry(retrieve=_retrieve_external).with_resource(
+        "mem://root", Resource.opaque(root_schema)
+    )
+    return SchemaResolver(
+        resolver=registry.resolver(base_uri="mem://root"),
+        anchors=_collect_anchors(root_schema),
+        external_anchors=external_anchors,
+    )
+
+
+def _resolve_ref(ref: str, schema_resolver: SchemaResolver) -> Optional[dict]:
+    """
+    Resolve a $ref or $dynamicRef string using the SchemaResolver.
+
+    Resolution order:
+      1. Named anchor ref "#Name" or $dynamicRef "#Name"
+         → look up in root anchor map, then external anchor maps.
+      2. JSON Pointer ref "#/path/to/node"
+         → delegate to referencing.Resolver.lookup.
+      3. External URL ref "https://..."
+         → delegate to referencing.Resolver.lookup (fetches and caches).
+    Returns None on any failure and logs a warning.
+    """
+    from referencing.exceptions import Unresolvable
+
+    # Named anchor or $dynamicRef: bare fragment that is not a JSON Pointer
+    if ref.startswith("#") and not ref.startswith("#/") and len(ref) > 1:
+        name = ref[1:]
+        if name in schema_resolver.anchors:
+            return schema_resolver.anchors[name]
+        # Check anchors from already-fetched external schemas
+        for ext_anchors in schema_resolver.external_anchors.values():
+            if name in ext_anchors:
+                return ext_anchors[name]
+        logger.warning("Could not resolve $ref '%s'; template may be incomplete.", ref)
+        return None
+
+    # JSON Pointer or external URL — delegate to the referencing library
+    try:
+        return schema_resolver.resolver.lookup(ref).contents
+    except Unresolvable:
+        logger.warning("Could not resolve $ref '%s'; template may be incomplete.", ref)
+        return None
+    except Exception:
+        logger.warning("Unexpected error resolving $ref '%s'; template may be incomplete.", ref)
+        return None
+
+
+def _slim_compose_variants(schema, compose_key, variants, mode, _warnings, _field_path, _resolver):
     """Handle oneOf/anyOf variants for _slim_schema."""
     non_null_variants = [v for v in variants if not (isinstance(v, dict) and v.get("type") == "null")]
     parent_keys = {k: v for k, v in schema.items() if k != compose_key}
@@ -809,7 +933,7 @@ def _slim_compose_variants(schema, compose_key, variants, mode, _warnings, _fiel
         return {
             **parent_keys,
             compose_key: [
-                _slim_schema(v, mode=mode, _warnings=_warnings, _field_path=_field_path)
+                _slim_schema(v, mode=mode, _warnings=_warnings, _field_path=_field_path, _resolver=_resolver)
                 for v in variants
             ],
         }
@@ -824,10 +948,10 @@ def _slim_compose_variants(schema, compose_key, variants, mode, _warnings, _fiel
         )
     merged = {**parent_keys}
     merged.update(chosen)
-    return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path)
+    return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _resolver=_resolver)
 
 
-def _slim_allof(schema, mode, _warnings, _field_path):
+def _slim_allof(schema, mode, _warnings, _field_path, _resolver):
     """Handle allOf for _slim_schema."""
     non_null_subs = [s for s in schema["allOf"] if isinstance(s, dict) and s.get("type") != "null"]
     parent_keys = {k: v for k, v in schema.items() if k != "allOf"}
@@ -836,7 +960,7 @@ def _slim_allof(schema, mode, _warnings, _field_path):
         return {
             **parent_keys,
             "allOf": [
-                _slim_schema(s, mode=mode, _warnings=_warnings, _field_path=_field_path)
+                _slim_schema(s, mode=mode, _warnings=_warnings, _field_path=_field_path, _resolver=_resolver)
                 for s in schema["allOf"]
             ],
         }
@@ -849,7 +973,7 @@ def _slim_allof(schema, mode, _warnings, _field_path):
                 merged.setdefault("properties", {}).update(v)
             elif k not in merged:
                 merged[k] = v
-    return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path)
+    return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _resolver=_resolver)
 
 
 def _slim_schema(
@@ -857,6 +981,7 @@ def _slim_schema(
     mode: str = EndpointTemplateMode.CONFIG.value,
     _warnings: Optional[List[str]] = None,
     _field_path: str = "",
+    _resolver=None,
 ) -> dict:
     """
     Converts a JSON schema into a user-friendly config template.
@@ -872,28 +997,49 @@ def _slim_schema(
 
     Handles: properties, items (arrays), oneOf/anyOf (schema mode preserves all
     variants including null; config mode collapses to first non-null and records
-    a warning), allOf (merged properties). $ref is not resolved.
+    a warning), allOf (merged properties), $ref (internal JSON Pointer and named
+    anchor refs resolved via the referencing library; external URLs fetched with
+    5s timeout and skipped on failure), additionalProperties (schema-valued,
+    surfaced as '<additionalKey>' entry).
 
     Args:
         schema: JSON schema dict to process.
         mode: 'config' or 'schema'.
         _warnings: mutable list collecting field paths with collapsed variants (config mode).
         _field_path: dot-separated path to the current field, used in warning messages.
+        _resolver: referencing.Resolver built from the root schema; created on first call.
     """
     _CONSTRAINT_KEYS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "enum", "pattern")
 
     if not isinstance(schema, dict):
         return schema
 
+    # Build resolver once on first call
+    if _resolver is None:
+        _resolver = _make_ref_resolver(schema)
+
+    # Resolve $ref before anything else; merge sibling keys per JSON Schema spec
+    if "$ref" in schema:
+        resolved = _resolve_ref(schema["$ref"], _resolver)
+        if resolved is not None:
+            merged = {**resolved, **{k: v for k, v in schema.items() if k != "$ref"}}
+            return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _resolver=_resolver)
+        # Unresolvable ref — fall through with remaining sibling keys
+        schema = {k: v for k, v in schema.items() if k != "$ref"}
+        if not schema:
+            return None
+
     # Resolve oneOf/anyOf
     for compose_key in ("oneOf", "anyOf"):
         variants = schema.get(compose_key)
         if variants:
-            return _slim_compose_variants(schema, compose_key, variants, mode, _warnings, _field_path)
+            return _slim_compose_variants(
+                schema, compose_key, variants, mode, _warnings, _field_path, _resolver
+            )
 
     # Resolve allOf
     if "allOf" in schema:
-        return _slim_allof(schema, mode, _warnings, _field_path)
+        return _slim_allof(schema, mode, _warnings, _field_path, _resolver)
 
     props = schema.get("properties", {})
     raw_type = schema.get("type", "string")
@@ -904,19 +1050,34 @@ def _slim_schema(
 
     if props:
         # Object with properties — recurse into each field
-        return {
+        result = {
             field: _slim_schema(
                 field_schema,
                 mode=mode,
                 _warnings=_warnings,
                 _field_path=f"{_field_path}.{field}" if _field_path else field,
+                _resolver=_resolver,
             )
             for field, field_schema in props.items()
         }
+        # additionalProperties as a schema — surface as a sentinel entry
+        add_props = schema.get("additionalProperties")
+        if isinstance(add_props, dict):
+            result["<additionalKey>"] = _slim_schema(
+                add_props,
+                mode=mode,
+                _warnings=_warnings,
+                _field_path=f"{_field_path}.<additionalKey>" if _field_path else "<additionalKey>",
+                _resolver=_resolver,
+            )
+        return result
 
     # Array with an items sub-schema
     if raw_type == "array" and "items" in schema:
-        slimmed_item = _slim_schema(schema["items"], mode=mode, _warnings=_warnings, _field_path=f"{_field_path}[]")
+        slimmed_item = _slim_schema(
+            schema["items"], mode=mode, _warnings=_warnings,
+            _field_path=f"{_field_path}[]", _resolver=_resolver,
+        )
         if mode == EndpointTemplateMode.SCHEMA.value:
             entry = {"type": "array", "default": default, "items": slimmed_item}
             for k in _CONSTRAINT_KEYS:

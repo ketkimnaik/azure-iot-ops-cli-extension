@@ -3125,6 +3125,106 @@ def test_slim_schema_allof_schema_mode_preserves_structure():
     }
 
 
+def test_slim_schema_ref_internal_json_pointer():
+    """$ref with internal JSON Pointer (#/...) is resolved against the root schema."""
+    schema = {
+        "$defs": {
+            "AuthConfig": {
+                "type": "object",
+                "properties": {
+                    "username": {"type": "string", "default": "admin"},
+                    "password": {"type": "string"},
+                },
+            }
+        },
+        "type": "object",
+        "properties": {
+            "host": {"type": "string", "default": "localhost"},
+            "auth": {"$ref": "#/$defs/AuthConfig"},
+        },
+    }
+    result_config = _slim_schema(schema, mode="config")
+    assert result_config["host"] == "localhost"
+    assert result_config["auth"] == {"username": "admin", "password": None}
+
+    result_schema = _slim_schema(schema, mode="schema")
+    assert result_schema["host"] == {"type": "string", "default": "localhost"}
+    assert result_schema["auth"] == {
+        "username": {"type": "string", "default": "admin"},
+        "password": {"type": "string", "default": None},
+    }
+
+
+def test_slim_schema_ref_named_anchor():
+    """$ref with a named anchor (#Name) is resolved via _collect_anchors pre-scan, which
+    finds $anchor keywords without requiring draft-specific dialect processing."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "conn": {"$ref": "#ConnDef"},
+            "ConnDef": {
+                "$anchor": "ConnDef",
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "default": "127.0.0.1"},
+                    "port": {"type": "integer", "default": 8080},
+                },
+            },
+        },
+    }
+    result = _slim_schema(schema, mode="config")
+    # Named anchor resolved via anchor map — returns the concrete subschema values
+    assert result["conn"] == {"host": "127.0.0.1", "port": 8080}
+
+
+def test_slim_schema_ref_unresolvable_skipped():
+    """Unresolvable $ref (bad pointer) is skipped and remaining sibling keys are processed."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "field": {
+                "$ref": "#/$defs/DoesNotExist",
+                "default": "fallback",
+            },
+        },
+    }
+    result = _slim_schema(schema, mode="config")
+    # $ref unresolvable, sibling 'default' key remains → scalar fallback
+    assert result["field"] == "fallback"
+
+
+def test_slim_schema_additional_properties_schema():
+    """additionalProperties as a schema is surfaced as '<additionalKey>' in both modes."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "default": "myDevice"},
+        },
+        "additionalProperties": {"type": "string"},
+    }
+    result_config = _slim_schema(schema, mode="config")
+    assert result_config["name"] == "myDevice"
+    assert result_config["<additionalKey>"] is None  # string with no default → None
+
+    result_schema = _slim_schema(schema, mode="schema")
+    assert result_schema["name"] == {"type": "string", "default": "myDevice"}
+    assert result_schema["<additionalKey>"] == {"type": "string", "default": None}
+
+
+def test_slim_schema_additional_properties_false_ignored():
+    """additionalProperties: false is not a schema — it must NOT appear in the output."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "host": {"type": "string", "default": "localhost"},
+        },
+        "additionalProperties": False,
+    }
+    result = _slim_schema(schema, mode="config")
+    assert result == {"host": "localhost"}
+    assert "<additionalKey>" not in result
+
+
 # ---------------------------------------------------------------------------
 # --show-template + --endpoint-config mutual exclusion (unit)
 # ---------------------------------------------------------------------------

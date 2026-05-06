@@ -889,7 +889,10 @@ def load_adr_arguments(self, _):
                 "allOf fields merge all non-null sub-schemas into one flat object. "
                 "schema: every field includes type, default, and constraints (min, max, enum, pattern); "
                 "oneOf/anyOf/allOf fields show ALL variants including null (indicating a nullable field). "
-                "Null sub-schemas are only filtered in config mode."
+                "Null sub-schemas are only filtered in config mode. "
+                "$ref fields are resolved: internal JSON Pointer (#/path) and named anchors (#Name) are "
+                "resolved against the root schema; external URLs are fetched (5s timeout) and skipped on failure. "
+                "additionalProperties schemas are surfaced as a '<additionalKey>' entry showing the value schema."
             ),
             arg_type=get_enum_type(EndpointTemplateMode),
         )
