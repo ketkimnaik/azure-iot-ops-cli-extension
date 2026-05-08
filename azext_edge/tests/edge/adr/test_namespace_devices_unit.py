@@ -2890,6 +2890,41 @@ def test_slim_schema_schema_mode_flat():
     }
 
 
+def test_slim_schema_schema_mode_required_visible():
+    """schema mode: 'required' list is included in the output so users know which fields are mandatory.
+    config mode: 'required' is NOT included (it only affects the null-field warning)."""
+    schema = {
+        "type": "object",
+        "required": ["name", "enabled"],
+        "properties": {
+            "name": {"type": "string"},
+            "enabled": {"type": "boolean", "default": True},
+            "optional": {"type": "integer", "default": 0},
+        },
+    }
+    schema_result = _slim_schema(schema, mode="schema")
+    assert schema_result["required"] == ["name", "enabled"]
+    assert schema_result["name"] == {"type": "string", "default": None}
+    assert schema_result["enabled"] == {"type": "boolean", "default": True}
+    assert schema_result["optional"] == {"type": "integer", "default": 0}
+
+    config_result = _slim_schema(schema, mode="config")
+    assert "required" not in config_result
+    assert config_result == {"name": None, "enabled": True, "optional": 0}
+
+
+def test_slim_schema_schema_mode_no_required_no_key():
+    """schema mode: when there is no 'required' in the schema, the key is omitted from output."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "field": {"type": "string"},
+        },
+    }
+    result = _slim_schema(schema, mode="schema")
+    assert "required" not in result
+
+
 def test_slim_schema_nested_objects():
     """Both modes recurse into nested objects (sub-properties)."""
     schema = {

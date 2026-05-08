@@ -476,7 +476,7 @@ class NamespaceDevices(Queryable):
                     break
             slim_warnings: List[str] = []
             slimmed = _slim_schema(schema, mode=template_mode, _warnings=slim_warnings)
-            for w in slim_warnings:
+            for w in _consolidate_warnings(slim_warnings):
                 logger.warning(w)
             if template_mode == EndpointTemplateMode.SCHEMA.value and isinstance(slimmed, dict):
                 slimmed.pop("$id", None)
@@ -491,7 +491,7 @@ class NamespaceDevices(Queryable):
         if isinstance(raw, dict) and "endpointConfig" in raw:
             slim_warnings = []
             raw["endpointConfig"] = _slim_schema(raw["endpointConfig"], mode=template_mode, _warnings=slim_warnings)
-            for w in slim_warnings:
+            for w in _consolidate_warnings(slim_warnings):
                 logger.warning(w)
             if template_mode == EndpointTemplateMode.SCHEMA.value and isinstance(raw["endpointConfig"], dict):
                 raw["endpointConfig"].pop("$id", None)
@@ -561,6 +561,13 @@ class NamespaceDevices(Queryable):
             config_type="endpoint",
         )
 
+        # Auto-unwrap if the user passed --show-template output directly.
+        # That output is a dict with 'connectorType' and 'endpointConfig' keys;
+        # --endpoint-config expects only the inner endpointConfig value.
+        _parsed = json.loads(additional_configuration)
+        if isinstance(_parsed, dict) and "endpointConfig" in _parsed and "connectorType" in _parsed:
+            additional_configuration = json.dumps(_parsed["endpointConfig"])
+
         if skip_connector_check:
             return additional_configuration
 
@@ -596,9 +603,12 @@ class NamespaceDevices(Queryable):
                     _ENDPOINT_SCHEMA_DRAFT_URI,
                 )
             else:
+                # Strip null values before validation — null means "not provided" for optional fields.
+                # The --show-template config output uses null as a placeholder for fields with no default.
+                config_data = _strip_nulls(json.loads(additional_configuration))
                 validate_data_against_schema(
                     _endpoint_schema,
-                    json.loads(additional_configuration),
+                    config_data,
                     name="endpoint",
                 )
 
@@ -867,6 +877,37 @@ def _get_endpoints(device: dict, inbound: bool = True) -> dict:
     return device_endpoints.get("inbound", {}) if inbound else device_endpoints
 
 
+def _consolidate_warnings(warnings: List[str]) -> List[str]:
+    """Merge all per-field 'required fields' warnings into a single combined warning."""
+    _REQ_PREFIX = (
+        "The following required fields have no default value; "
+        "replace null with a real value before applying: "
+    )
+    req_fields: List[str] = []
+    other: List[str] = []
+    for w in warnings:
+        if w.startswith(_REQ_PREFIX):
+            req_fields.extend(w[len(_REQ_PREFIX):].split(", "))
+        else:
+            other.append(w)
+    if req_fields:
+        other.append(_REQ_PREFIX + ", ".join(req_fields))
+    return other
+
+
+def _strip_nulls(obj: Any) -> Any:
+    """Recursively remove None/null values from a config dict before schema validation.
+
+    Optional fields left as null in --show-template config output mean 'not provided'
+    and should be omitted rather than validated as null.
+    """
+    if isinstance(obj, dict):
+        return {k: _strip_nulls(v) for k, v in obj.items() if v is not None}
+    if isinstance(obj, list):
+        return [_strip_nulls(v) for v in obj if v is not None]
+    return obj
+
+
 def _resolve_ref(ref: str, root_schema: dict) -> Optional[dict]:
     """
     Resolve a $ref string against the root schema's ``definitions`` block.
@@ -1068,17 +1109,33 @@ def _slim_schema(
     default = schema.get("default")
 
     if props:
-        # Object with properties — recurse into each field
-        return {
-            field: _slim_schema(
+        # Object with properties — recurse into each field.
+        # In config mode, emit a single warning listing all required fields with no default (null).
+        # In schema mode, include the "required" list so users can see which fields are mandatory.
+        required_in_schema = schema.get("required", [])
+        required_fields = set(required_in_schema) if mode == EndpointTemplateMode.CONFIG.value else set()
+        result = {}
+        null_required: List[str] = []
+        for field, field_schema in props.items():
+            slimmed = _slim_schema(
                 field_schema,
                 mode=mode,
                 _warnings=_warnings,
                 _field_path=f"{_field_path}.{field}" if _field_path else field,
                 _root_schema=_root_schema,
             )
-            for field, field_schema in props.items()
-        }
+            if mode == EndpointTemplateMode.CONFIG.value and slimmed is None and field in required_fields:
+                null_required.append(f"{_field_path}.{field}" if _field_path else field)
+            result[field] = slimmed
+        if null_required and _warnings is not None:
+            _warnings.append(
+                "The following required fields have no default value; "
+                "replace null with a real value before applying: "
+                + ", ".join(f"'{f}'" for f in null_required)
+            )
+        if mode == EndpointTemplateMode.SCHEMA.value and required_in_schema:
+            result["required"] = required_in_schema
+        return result
 
     # Array with an items sub-schema
     if raw_type == "array" and "items" in schema:
