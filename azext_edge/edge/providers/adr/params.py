@@ -875,6 +875,8 @@ def load_adr_arguments(self, _):
             options_list=["--endpoint-config", "--ec"],
             help="Inline JSON string or path to a JSON/YAML file (.json, .yaml, .yml) containing "
             "connector-specific endpoint configuration. The template can be discovered with --show-template. "
+            "When the connector schema uses JSON Schema Draft-07, the config is validated against it; "
+            "other dialects are accepted but validation is skipped. "
             "Cannot be combined with --skip-connector-check.",
         )
         context.argument(

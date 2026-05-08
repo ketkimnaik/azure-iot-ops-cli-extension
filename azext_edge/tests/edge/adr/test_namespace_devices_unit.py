@@ -3016,16 +3016,17 @@ def test_slim_schema_oneof_picks_first_non_null_variant():
     assert result == {"port": 8080}
 
 
-def test_slim_schema_anyof_picks_first_non_null_variant():
-    """anyOf: the first non-null variant is selected in config mode."""
+def test_slim_schema_anyof_ignored():
+    """anyOf is unsupported and silently ignored; result is the scalar/null fallback."""
     schema = {
         "anyOf": [
             {"type": "null"},
             {"type": "string", "default": "hello"},
         ]
     }
+    # anyOf key is ignored; schema has no properties/items/type → scalar leaf with default=None
     result = _slim_schema(schema, mode="config")
-    assert result == "hello"
+    assert result is None
 
 
 def test_slim_schema_oneof_multi_variant_config_mode_picks_first():
@@ -3059,8 +3060,8 @@ def test_slim_schema_oneof_multi_variant_schema_mode_preserves_all():
     ]
 
 
-def test_slim_schema_anyof_multi_variant_schema_mode_preserves_all():
-    """schema mode with multiple anyOf object variants: all variants including null are preserved."""
+def test_slim_schema_anyof_ignored_schema_mode():
+    """anyOf is unsupported; in schema mode it is silently ignored and the schema falls through."""
     schema = {
         "anyOf": [
             {"type": "null"},
@@ -3069,11 +3070,9 @@ def test_slim_schema_anyof_multi_variant_schema_mode_preserves_all():
         ]
     }
     result = _slim_schema(schema, mode="schema")
-    assert "anyOf" in result
-    assert len(result["anyOf"]) == 3
-    assert result["anyOf"][0] == {"type": "null", "default": None}
-    assert result["anyOf"][1] == {"host": {"type": "string", "default": "localhost"}}
-    assert result["anyOf"][2] == {"url": {"type": "string", "default": "http://"}}
+    # anyOf key is ignored; schema has no properties/items/type → scalar metadata dict
+    assert "anyOf" not in result
+    assert result == {"type": "string", "default": None}
 
 
 def test_slim_schema_allof_merges_properties():
@@ -3125,10 +3124,10 @@ def test_slim_schema_allof_schema_mode_preserves_structure():
     }
 
 
-def test_slim_schema_ref_internal_json_pointer():
-    """$ref with internal JSON Pointer (#/...) is resolved against the root schema."""
+def test_slim_schema_ref_definitions_path():
+    """$ref with #/definitions/... (Draft-07 style) is resolved against the root schema."""
     schema = {
-        "$defs": {
+        "definitions": {
             "AuthConfig": {
                 "type": "object",
                 "properties": {
@@ -3140,7 +3139,7 @@ def test_slim_schema_ref_internal_json_pointer():
         "type": "object",
         "properties": {
             "host": {"type": "string", "default": "localhost"},
-            "auth": {"$ref": "#/$defs/AuthConfig"},
+            "auth": {"$ref": "#/definitions/AuthConfig"},
         },
     }
     result_config = _slim_schema(schema, mode="config")
@@ -3155,9 +3154,9 @@ def test_slim_schema_ref_internal_json_pointer():
     }
 
 
-def test_slim_schema_ref_named_anchor():
-    """$ref with a named anchor (#Name) is resolved via _collect_anchors pre-scan, which
-    finds $anchor keywords without requiring draft-specific dialect processing."""
+def test_slim_schema_ref_named_anchor_ignored():
+    """$ref with a named anchor (#Name) is unsupported and silently ignored.
+    Only #/definitions/... paths are resolved; bare-fragment anchors return None."""
     schema = {
         "type": "object",
         "properties": {
@@ -3173,28 +3172,28 @@ def test_slim_schema_ref_named_anchor():
         },
     }
     result = _slim_schema(schema, mode="config")
-    # Named anchor resolved via anchor map — returns the concrete subschema values
-    assert result["conn"] == {"host": "127.0.0.1", "port": 8080}
+    # Named anchor ref is not a #/definitions/... path → silently ignored → None
+    assert result["conn"] is None
 
 
 def test_slim_schema_ref_unresolvable_skipped():
-    """Unresolvable $ref (bad pointer) is skipped and remaining sibling keys are processed."""
+    """Unsupported $ref formats are silently dropped; remaining sibling keys are processed."""
     schema = {
         "type": "object",
         "properties": {
             "field": {
-                "$ref": "#/$defs/DoesNotExist",
+                "$ref": "#/definitions/DoesNotExist",
                 "default": "fallback",
             },
         },
     }
     result = _slim_schema(schema, mode="config")
-    # $ref unresolvable, sibling 'default' key remains → scalar fallback
+    # $ref path not found in definitions; sibling 'default' key remains → scalar fallback
     assert result["field"] == "fallback"
 
 
-def test_slim_schema_additional_properties_schema():
-    """additionalProperties as a schema is surfaced as '<additionalKey>' in both modes."""
+def test_slim_schema_additional_properties_ignored():
+    """additionalProperties is unsupported and must NOT appear in the output in any form."""
     schema = {
         "type": "object",
         "properties": {
@@ -3203,12 +3202,12 @@ def test_slim_schema_additional_properties_schema():
         "additionalProperties": {"type": "string"},
     }
     result_config = _slim_schema(schema, mode="config")
-    assert result_config["name"] == "myDevice"
-    assert result_config["<additionalKey>"] is None  # string with no default → None
+    assert result_config == {"name": "myDevice"}
+    assert "<additionalKey>" not in result_config
 
     result_schema = _slim_schema(schema, mode="schema")
-    assert result_schema["name"] == {"type": "string", "default": "myDevice"}
-    assert result_schema["<additionalKey>"] == {"type": "string", "default": None}
+    assert result_schema == {"name": {"type": "string", "default": "myDevice"}}
+    assert "<additionalKey>" not in result_schema
 
 
 def test_slim_schema_additional_properties_false_ignored():
@@ -3223,6 +3222,179 @@ def test_slim_schema_additional_properties_false_ignored():
     result = _slim_schema(schema, mode="config")
     assert result == {"host": "localhost"}
     assert "<additionalKey>" not in result
+
+
+def test_slim_schema_const_config_mode():
+    """const in config mode returns the fixed value directly."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "version": {"const": "1.0.0"},
+            "name": {"type": "string", "default": "test"},
+        },
+    }
+    result = _slim_schema(schema, mode="config")
+    assert result == {"version": "1.0.0", "name": "test"}
+
+
+def test_slim_schema_const_schema_mode():
+    """const in schema mode returns a metadata dict with type 'const'."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "version": {"const": "1.0.0"},
+        },
+    }
+    result = _slim_schema(schema, mode="schema")
+    assert result["version"] == {"type": "const", "const": "1.0.0"}
+
+
+def test_slim_schema_ref_with_sibling_overrides():
+    """$ref properties are overridden by sibling keys per JSON Schema spec."""
+    schema = {
+        "definitions": {
+            "interval": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 86400000,
+            }
+        },
+        "type": "object",
+        "properties": {
+            "publishingInterval": {
+                "title": "Publishing interval (ms)",
+                "default": 100,
+                "$ref": "#/definitions/interval",
+            },
+            "samplingInterval": {
+                "title": "Sampling interval (ms)",
+                "default": 500,
+                "$ref": "#/definitions/interval",
+            },
+        },
+    }
+    result = _slim_schema(schema, mode="config")
+    assert result == {"publishingInterval": 100, "samplingInterval": 500}
+
+    result_schema = _slim_schema(schema, mode="schema")
+    assert result_schema["publishingInterval"]["type"] == "integer"
+    assert result_schema["publishingInterval"]["default"] == 100
+    assert result_schema["publishingInterval"]["minimum"] == 1
+    assert result_schema["samplingInterval"]["default"] == 500
+
+
+# ---------------------------------------------------------------------------
+# check_json_schema dialect guard (used by mgmt actions and namespace_devices)
+# ---------------------------------------------------------------------------
+
+def test_check_json_schema_accepts_json_schema_org_dialects():
+    """check_json_schema accepts any json-schema.org dialect (Draft-04 through 2020-12).
+
+    mgmt actions may use any standard JSON Schema draft, so the shared utility
+    accepts all json-schema.org URIs.  The stricter Draft-07-only gate lives
+    inline in namespace_devices.py apply flow only.
+    """
+    from azext_edge.edge.util.schema_validation import check_json_schema
+
+    for dialect in [
+        "http://json-schema.org/draft-07/schema#",
+        "https://json-schema.org/draft/2020-12/schema",
+        "http://json-schema.org/draft-04/schema#",
+        "http://json-schema.org/draft-06/schema#",
+    ]:
+        reason = check_json_schema({"$schema": dialect, "type": "object"})
+        assert reason is None, f"check_json_schema should accept json-schema.org dialect '{dialect}'"
+
+
+def test_check_json_schema_rejects_non_json_schema_org_dialects():
+    """check_json_schema rejects completely unknown/custom $schema URIs."""
+    from azext_edge.edge.util.schema_validation import check_json_schema
+
+    for bad_dialect in [
+        "custom://my-schema",
+        "https://example.com/my-schema",
+        "urn:my-org:schema:v1",
+    ]:
+        reason = check_json_schema({"$schema": bad_dialect, "type": "object"})
+        assert reason is not None, f"Expected rejection for dialect '{bad_dialect}'"
+        assert "not a recognized JSON Schema format" in reason
+
+
+def test_check_json_schema_allows_missing_schema_key():
+    """check_json_schema is lenient when $schema is absent."""
+    from azext_edge.edge.util.schema_validation import check_json_schema
+
+    schema = {"type": "object", "properties": {"x": {"type": "integer"}}}
+    assert check_json_schema(schema) is None
+
+
+def test_apply_inbound_endpoint_skips_validation_for_non_draft07_schema(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocker,
+    mocked_get_namespace_for_instance,
+):
+    """When the connector schema declares a non-Draft-07 dialect, validation is
+    skipped with a warning and the endpoint is applied without error."""
+    endpoint_config = json.dumps({"someKey": "someValue"})
+    non_draft07_schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {"someKey": {"type": "string"}},
+    }
+
+    device_name = generate_random_string()
+    endpoint_name = generate_random_string()
+    namespace_name = mocked_get_namespace_for_instance.return_value["name"]
+    resource_group_name = mocked_get_namespace_for_instance.return_value["resource_group"]
+
+    original_device = get_namespace_device_record(
+        device_name=device_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+    )
+    original_device["properties"]["endpoints"] = {"inbound": {}}
+
+    updated_device = deepcopy(original_device)
+    updated_device["properties"]["endpoints"]["inbound"][endpoint_name] = {
+        "endpointType": "Custom.MyConnector",
+        "address": "tcp://host:1234",
+        "version": "1.0",
+        "authentication": {"method": ADRAuthModes.anonymous.value},
+        "additionalConfiguration": endpoint_config,
+    }
+
+    mock_ct = mocker.patch("azext_edge.edge.providers.adr.namespace_devices.ConnectorTemplates")
+    mock_ct.return_value.get_connector_template_for_type.return_value = {"id": "fake"}
+    mock_ct.return_value.get_endpoint_version_for_type.return_value = "1.0"
+    mock_ct.return_value.get_endpoint_schema.return_value = {"endpointConfig": non_draft07_schema}
+
+    mocker.patch(
+        "azext_edge.edge.providers.adr.helpers.process_additional_configuration",
+        return_value=endpoint_config,
+    )
+
+    device_uri = get_namespace_device_mgmt_uri(
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        device_name=device_name,
+    )
+    mocked_responses.add(responses.GET, device_uri, json=original_device, status=200)
+    mocked_responses.add(responses.PATCH, device_uri, json=updated_device, status=200)
+    mocked_responses.add(responses.GET, device_uri, json=updated_device, status=200)
+
+    # Should not raise even though schema dialect is not Draft-07
+    apply_inbound_device_endpoint(
+        cmd=mocked_cmd,
+        connector_type="Custom.MyConnector",
+        instance_name="my-instance",
+        instance_resource_group="my-rg",
+        device_name=device_name,
+        endpoint_name=endpoint_name,
+        endpoint_address="tcp://host:1234",
+        endpoint_config=endpoint_config,
+        wait_sec=0,
+    )
 
 
 # ---------------------------------------------------------------------------

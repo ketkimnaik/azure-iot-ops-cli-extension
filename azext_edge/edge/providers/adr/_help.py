@@ -745,6 +745,11 @@ def load_iotops_adr_help():
           an existing connector template for the specified --connector-type, auto-resolves the
           endpoint version, and optionally validates --endpoint-config against the connector schema.
 
+          Schema validation of --endpoint-config is only performed when the connector's
+          additionalConfigurationSchema uses JSON Schema Draft-07
+          (http://json-schema.org/draft-07/schema#). If the schema uses a different dialect,
+          validation is skipped with a warning and the endpoint is still created.
+
           OPC UA (Microsoft.OpcUa) is a special case: it does not use Akri connector templates.
           Its schema and version are derived from bundled metadata. The instance must have OPC UA
           enabled (feature.opcua.mode != Disabled).

@@ -6,7 +6,7 @@
 
 import json
 import os
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from azure.cli.core.azclierror import (
     InvalidArgumentValueError,
@@ -19,7 +19,6 @@ from ...common import ListableEnum
 from .common import EndpointTemplateMode
 from ...util.az_client import (
     get_registry_mgmt_client,
-    get_resource_client,
     wait_for_terminal_state,
 )
 from ...util.common import parse_kvp_nargs, should_continue_prompt
@@ -32,12 +31,14 @@ if TYPE_CHECKING:
         NamespaceDevicesOperations,
         NamespacesOperations,
     )
-    from ...vendor.clients.resourcesmgmt.operations import ResourcesOperations
 
 
 console = Console()
 logger = get_logger(__name__)
 NAMESPACE_DEVICE_RESOURCE_TYPE = "Microsoft.DeviceRegistry/namespaces/devices"
+# Draft-07 is the only dialect supported for CLI-side config validation.
+# Schemas with other dialects are still accepted — validation is skipped with a warning.
+_ENDPOINT_SCHEMA_DRAFT_URI = "http://json-schema.org/draft-07/schema#"
 
 
 class DeviceEndpointType(ListableEnum):
@@ -78,12 +79,8 @@ class NamespaceDevices(Queryable):
         self.deviceregistry_mgmt_client = get_registry_mgmt_client(
             **self._get_client_kwargs()
         )
-        self.resource_mgmt_client = get_resource_client(
-            **self._get_client_kwargs()
-        )
         self.ops: "NamespaceDevicesOperations" = self.deviceregistry_mgmt_client.namespace_devices
         self.namespace_ops: "NamespacesOperations" = self.deviceregistry_mgmt_client.namespaces
-        self.resource_ops: "ResourcesOperations" = self.resource_mgmt_client.resources
 
     def create(
         self,
@@ -441,7 +438,173 @@ class NamespaceDevices(Queryable):
 
         return _load_opcua_metadata_file()
 
-    def apply_inbound_endpoint_by_connector_type(  # noqa: C901
+    def _handle_show_template(
+        self,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+        template_mode: str,
+        endpoint_config: Optional[str],
+    ) -> dict:
+        """Return a config/schema template for --show-template and exit early.
+
+        OPC UA uses bundled metadata; all other types fetch the connector template from ACR.
+        ValidationError (OPC UA explicitly Disabled) intentionally propagates; ARM 404s fall
+        back to the bundled metadata so offline / test callers still get a useful response.
+        """
+        if endpoint_config:
+            raise InvalidArgumentValueError(
+                "--show-template and --endpoint-config cannot be used together. "
+                "--show-template displays the template and exits without creating an endpoint."
+            )
+        is_opcua = connector_type.lower() == DeviceEndpointType.OPCUA.value.lower()
+        if is_opcua:
+            from azure.core.exceptions import ResourceNotFoundError as _AzureNotFoundError
+
+            opcua_metadata = None
+            if instance_name and instance_resource_group:
+                try:
+                    opcua_metadata = self._get_opcua_info(instance_name, instance_resource_group)
+                except _AzureNotFoundError:
+                    pass  # instance / resource-group not found – use bundled metadata
+            if opcua_metadata is None:
+                opcua_metadata = _load_opcua_metadata_file()
+            schema = {}
+            for ep in opcua_metadata.get("inboundEndpoints", []):
+                if ep.get("endpointType", "").lower() == DeviceEndpointType.OPCUA.value.lower():
+                    schema = ep.get("additionalConfigurationSchema", {})
+                    break
+            slim_warnings: List[str] = []
+            slimmed = _slim_schema(schema, mode=template_mode, _warnings=slim_warnings)
+            for w in slim_warnings:
+                logger.warning(w)
+            if template_mode == EndpointTemplateMode.SCHEMA.value and isinstance(slimmed, dict):
+                slimmed.pop("$id", None)
+            return {"connectorType": connector_type, "endpointConfig": slimmed}
+
+        connector_templates = ConnectorTemplates(cmd=self.cmd)
+        raw = connector_templates.get_endpoint_schema(
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            connector_type=connector_type,
+        )
+        if isinstance(raw, dict) and "endpointConfig" in raw:
+            slim_warnings = []
+            raw["endpointConfig"] = _slim_schema(raw["endpointConfig"], mode=template_mode, _warnings=slim_warnings)
+            for w in slim_warnings:
+                logger.warning(w)
+            if template_mode == EndpointTemplateMode.SCHEMA.value and isinstance(raw["endpointConfig"], dict):
+                raw["endpointConfig"].pop("$id", None)
+        return raw
+
+    def _resolve_connector_version(
+        self,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+        endpoint_version: Optional[str],
+        skip_connector_check: bool,
+        is_opcua: bool,
+    ) -> Optional[str]:
+        """Verify connector availability and auto-resolve the endpoint version.
+
+        OPC UA: verifies the feature is enabled; version is left as None (ADR manages it).
+        Custom/3P: looks up the connector template and resolves version from it when not supplied.
+        Returns unchanged endpoint_version (possibly None) when skip_connector_check is True.
+        """
+        if skip_connector_check:
+            return endpoint_version
+
+        if is_opcua:
+            self._get_opcua_info(instance_name, instance_resource_group)
+            return endpoint_version  # None — let ADR manage the OPC UA endpoint version
+
+        connector_templates = ConnectorTemplates(cmd=self.cmd)
+        template = connector_templates.get_connector_template_for_type(
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            connector_type=connector_type,
+        )
+        if template is None:
+            raise ResourceNotFoundError(
+                f"No connector template found for connector type '{connector_type}' "
+                f"in instance '{instance_name}'.\n"
+                "Create one with: az iot ops connector template create ..."
+            )
+        if endpoint_version is None:
+            endpoint_version = connector_templates.get_endpoint_version_for_type(
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                endpoint_type=connector_type,
+            )
+        return endpoint_version
+
+    def _load_and_validate_endpoint_config(
+        self,
+        endpoint_config: str,
+        connector_type: str,
+        is_opcua: bool,
+        skip_connector_check: bool,
+        instance_name: str,
+        instance_resource_group: str,
+    ) -> str:
+        """Load endpoint config from a file path or inline JSON and validate it against schema.
+
+        Validation is only performed when skip_connector_check is False and the connector's
+        additionalConfigurationSchema uses JSON Schema Draft-07.  Other dialects are accepted
+        but validation is skipped with a warning.  Returns the serialized JSON string.
+        """
+        from .helpers import process_additional_configuration
+
+        additional_configuration = process_additional_configuration(
+            additional_configuration=endpoint_config,
+            config_type="endpoint",
+        )
+
+        if skip_connector_check:
+            return additional_configuration
+
+        if is_opcua:
+            from .specs import NAMESPACE_DEVICE_OPCUA_ENDPOINT_SCHEMA as _endpoint_schema
+        else:
+            connector_templates = ConnectorTemplates(cmd=self.cmd)
+            _endpoint_schema = connector_templates.get_endpoint_schema(
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                connector_type=connector_type,
+            ).get("endpointConfig", {})
+            if not _endpoint_schema:
+                from azure.cli.core.azclierror import ValidationError
+
+                raise ValidationError(
+                    f"Schema retrieval failed for connector type '{connector_type}'. "
+                    "Endpoint config validation cannot proceed. "
+                    "Rerun with --skip-connector-check to bypass validation."
+                )
+
+        if _endpoint_schema:
+            from ...util.schema_validation import check_json_schema, validate_data_against_schema
+
+            skip_reason = check_json_schema(_endpoint_schema)
+            if skip_reason:
+                logger.warning("Skipping endpoint config validation: %s", skip_reason)
+            elif _endpoint_schema.get("$schema", "") not in ("", _ENDPOINT_SCHEMA_DRAFT_URI):
+                logger.warning(
+                    "Skipping endpoint config validation: schema dialect '%s' is not supported; "
+                    "only '%s' is accepted.",
+                    _endpoint_schema["$schema"],
+                    _ENDPOINT_SCHEMA_DRAFT_URI,
+                )
+            else:
+                validate_data_against_schema(
+                    _endpoint_schema,
+                    json.loads(additional_configuration),
+                    name="endpoint",
+                )
+
+        return additional_configuration
+
+    def apply_inbound_endpoint_by_connector_type(
         self,
         instance_name: str,
         instance_resource_group: str,
@@ -462,8 +625,7 @@ class NamespaceDevices(Queryable):
         no_replace: Optional[bool] = False,
         **kwargs
     ):
-        """
-        Generalized command for adding an inbound device endpoint using a connector type.
+        """Generalized command for adding an inbound device endpoint using a connector type.
 
         Supports template discovery (--show-template) and inline JSON or file-based endpoint
         configuration (--endpoint-config) driven by the connector template metadata.
@@ -471,59 +633,18 @@ class NamespaceDevices(Queryable):
         OPC UA (Microsoft.OpcUa) is handled separately: it does not use Akri connector
         templates. Its metadata (including version and schema) is bundled locally.
         """
-        from .helpers import process_additional_configuration, process_authentication
+        from .helpers import process_authentication
 
         is_opcua = connector_type.lower() == DeviceEndpointType.OPCUA.value.lower()
 
-        # --show-template: return config template and exit early (no device/name/address needed)
         if show_template:
-            if endpoint_config:
-                raise InvalidArgumentValueError(
-                    "--show-template and --endpoint-config cannot be used together. "
-                    "--show-template displays the template and exits without creating an endpoint."
-                )
-            template_mode = show_template.lower()
-            if is_opcua:
-                # When real instance args are provided, check if OPC UA is disabled on
-                # the instance (_get_opcua_info returns the bundled metadata on success).
-                # For dummy / offline args (e.g. integration-test scaffolding) the ARM
-                # call may fail with a not-found error; fall back to the bundled metadata
-                # in that case.  ValidationError (OPC UA explicitly Disabled) is
-                # intentionally NOT caught so the disabled-check still propagates.
-                opcua_metadata = None
-                if instance_name and instance_resource_group:
-                    from azure.core.exceptions import ResourceNotFoundError as _AzureNotFoundError
-
-                    try:
-                        opcua_metadata = self._get_opcua_info(instance_name, instance_resource_group)
-                    except _AzureNotFoundError:
-                        pass  # instance / resource-group not found – use bundled metadata
-                if opcua_metadata is None:
-                    opcua_metadata = _load_opcua_metadata_file()
-                schema = {}
-                for ep in opcua_metadata.get("inboundEndpoints", []):
-                    if ep.get("endpointType", "").lower() == DeviceEndpointType.OPCUA.value.lower():
-                        schema = ep.get("additionalConfigurationSchema", {})
-                        break
-                slim_warnings: List[str] = []
-                slimmed = _slim_schema(schema, mode=template_mode, _warnings=slim_warnings)
-                for w in slim_warnings:
-                    logger.warning(w)
-                return {"connectorType": connector_type, "endpointConfig": slimmed}
-
-            connector_templates = ConnectorTemplates(cmd=self.cmd)
-            raw = connector_templates.get_endpoint_schema(
+            return self._handle_show_template(
+                connector_type=connector_type,
                 instance_name=instance_name,
                 instance_resource_group=instance_resource_group,
-                connector_type=connector_type,
+                template_mode=show_template.lower(),
+                endpoint_config=endpoint_config,
             )
-            # slim the endpointConfig portion if present
-            if isinstance(raw, dict) and "endpointConfig" in raw:
-                slim_warnings = []
-                raw["endpointConfig"] = _slim_schema(raw["endpointConfig"], mode=template_mode, _warnings=slim_warnings)
-                for w in slim_warnings:
-                    logger.warning(w)
-            return raw
 
         # Provider-level required arg guards (CLI enforces these too, but provider
         # may be called directly in tests or other code paths).
@@ -545,84 +666,32 @@ class NamespaceDevices(Queryable):
             trust_list=trust_list,
         )
 
-        # --skip-connector-check only makes sense when endpoint_config is absent;
-        # if the user supplies endpoint_config we must validate a template exists.
         if skip_connector_check and endpoint_config:
             raise InvalidArgumentValueError(
                 "--skip-connector-check cannot be used when --endpoint-config is provided.\n"
                 "Create or verify a connector template first: az iot ops connector template create ..."
             )
 
-        # OPC UA: no connector template — use bundled metadata for enabled-check only.
-        # Version is intentionally left as None (let ADR manage it), matching DOE behavior.
-        if is_opcua and not skip_connector_check:
-            self._get_opcua_info(instance_name, instance_resource_group)
+        endpoint_version = self._resolve_connector_version(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            endpoint_version=endpoint_version,
+            skip_connector_check=skip_connector_check,
+            is_opcua=is_opcua,
+        )
 
-        # For all other connector types, when connector checks are enabled, look up the
-        # connector template to enforce template presence and auto-resolve endpoint
-        # version when not explicitly provided, even if endpoint_config is absent.
-        elif not skip_connector_check:
-            connector_templates = ConnectorTemplates(cmd=self.cmd)
-            template = connector_templates.get_connector_template_for_type(
-                instance_name=instance_name,
-                instance_resource_group=instance_resource_group,
-                connector_type=connector_type,
-            )
-            if template is None:
-                raise ResourceNotFoundError(
-                    f"No connector template found for connector type '{connector_type}' "
-                    f"in instance '{instance_name}'.\n"
-                    "Create one with: az iot ops connector template create ..."
-                )
-            # Auto-resolve endpoint version from the template using shared helper
-            if endpoint_version is None:
-                endpoint_version = connector_templates.get_endpoint_version_for_type(
-                    instance_name=instance_name,
-                    instance_resource_group=instance_resource_group,
-                    endpoint_type=connector_type,
-                )
-
-        # Process endpoint config from file
         additional_configuration = None
         if endpoint_config:
-            additional_configuration = process_additional_configuration(
-                additional_configuration=endpoint_config,
-                config_type="endpoint",
+            additional_configuration = self._load_and_validate_endpoint_config(
+                endpoint_config=endpoint_config,
+                connector_type=connector_type,
+                is_opcua=is_opcua,
+                skip_connector_check=skip_connector_check,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
             )
 
-            # Validate the parsed config against the connector's JSON Schema.
-            # Skipped when --skip-connector-check is set (user opts out of validation).
-            if not skip_connector_check:
-                if is_opcua:
-                    from .specs import NAMESPACE_DEVICE_OPCUA_ENDPOINT_SCHEMA as _endpoint_schema
-                else:
-                    _endpoint_schema = connector_templates.get_endpoint_schema(
-                        instance_name=instance_name,
-                        instance_resource_group=instance_resource_group,
-                        connector_type=connector_type,
-                    ).get("endpointConfig", {})
-                    if not _endpoint_schema:
-                        from azure.cli.core.azclierror import ValidationError
-
-                        raise ValidationError(
-                            f"Schema retrieval failed for connector type '{connector_type}'. "
-                            "Endpoint config validation cannot proceed. "
-                            "Rerun with --skip-connector-check to bypass validation."
-                        )
-                if _endpoint_schema:
-                    from ...util.schema_validation import check_json_schema, validate_data_against_schema
-
-                    skip_reason = check_json_schema(_endpoint_schema)
-                    if skip_reason:
-                        logger.warning("Skipping endpoint config validation: %s", skip_reason)
-                    else:
-                        validate_data_against_schema(
-                            _endpoint_schema,
-                            json.loads(additional_configuration),
-                            name="endpoint",
-                        )
-
-        # Build endpoint body
         endpoint_body = {
             "address": endpoint_address,
             "endpointType": connector_type,
@@ -642,7 +711,6 @@ class NamespaceDevices(Queryable):
         if trust_list:
             endpoint_body["trustSettings"] = {"trustList": trust_list}
 
-        # Fetch current device endpoints and validate replace semantics
         device = self.show(
             device_name=device_name,
             instance_name=instance_name,
@@ -799,141 +867,38 @@ def _get_endpoints(device: dict, inbound: bool = True) -> dict:
     return device_endpoints.get("inbound", {}) if inbound else device_endpoints
 
 
-def _collect_anchors(schema: dict) -> dict:
+def _resolve_ref(ref: str, root_schema: dict) -> Optional[dict]:
     """
-    Walk a schema tree iteratively and collect all {anchor_name: subschema} pairs from
-    both "$anchor" (Draft 2019-09+) and "$id" bare-fragment values (Draft 7).
-    Uses an explicit stack to avoid recursion-depth limits on deeply nested schemas.
+    Resolve a $ref string against the root schema's ``definitions`` block.
+
+    Only Draft-07-style ``#/definitions/...`` paths are supported.  Any other
+    ref format (external URLs, named anchors, ``$defs`` pointers, etc.) is
+    silently ignored and returns ``None``, matching the behaviour of the
+    Fluent UI form library this schema feeds into.
     """
-    anchors: dict = {}
-    stack = [schema]
-    while stack:
-        node = stack.pop()
-        if not isinstance(node, dict):
-            continue
-        anchor = node.get("$anchor")
-        if anchor and isinstance(anchor, str):
-            anchors[anchor] = node
-        # Draft 7 named id: "$id": "#name" — treat bare fragment as an anchor
-        schema_id = node.get("$id", "")
-        if isinstance(schema_id, str) and schema_id.startswith("#") and len(schema_id) > 1:
-            anchors[schema_id.lstrip("#")] = node
-        for value in node.values():
-            if isinstance(value, dict):
-                stack.append(value)
-            elif isinstance(value, list):
-                stack.extend(v for v in value if isinstance(v, dict))
-    return anchors
-
-
-class SchemaResolver:
-    """
-    Wraps a referencing.Resolver with additional anchor maps so that named
-    anchor refs (#Name) and $dynamicRef are handled without requiring draft-
-    specific dialect processing.
-
-    Attributes:
-        resolver: referencing.Resolver for JSON Pointer and external URL refs.
-        anchors: {anchor_name: subschema} pre-scanned from the root schema.
-        external_anchors: {base_uri: {anchor_name: subschema}} for fetched external schemas.
-    """
-
-    def __init__(self, resolver, anchors: dict, external_anchors: dict):
-        self.resolver = resolver
-        self.anchors = anchors
-        self.external_anchors = external_anchors
-
-
-def _make_ref_resolver(root_schema: dict) -> SchemaResolver:
-    """
-    Build a draft-agnostic JSON Schema $ref resolver for the given root schema.
-
-    Covers all ref styles:
-      - JSON Pointer  : "#/$defs/Foo"        → referencing.Resolver.lookup
-      - Named anchor  : "#Foo"               → pre-scanned anchor map (no draft needed)
-      - Draft-7 id    : "$id": "#Foo"        → same anchor map
-      - External URL  : "https://..."        → requests.get + anchor map for that document
-      - $dynamicRef   : "#Foo"               → falls back to anchor map (outermost scope)
-    External URL refs are fetched with a 5-second timeout; failures are caught
-    and logged so the template generation can continue without the resolved content.
-    """
-    import requests
-
-    from referencing import Registry, Resource
-    from referencing.exceptions import Unretrievable
-
-    external_anchors: dict = {}
-
-    def _retrieve_external(uri: str):
-        try:
-            response = requests.get(uri, timeout=5)
-            response.raise_for_status()
-            fetched = response.json()
-            if isinstance(fetched, dict):
-                external_anchors[uri] = _collect_anchors(fetched)
-            return Resource.opaque(fetched)
-        except Exception as exc:
-            raise Unretrievable(ref=uri) from exc
-
-    registry = Registry(retrieve=_retrieve_external).with_resource(
-        "mem://root", Resource.opaque(root_schema)
-    )
-    return SchemaResolver(
-        resolver=registry.resolver(base_uri="mem://root"),
-        anchors=_collect_anchors(root_schema),
-        external_anchors=external_anchors,
-    )
-
-
-def _resolve_ref(ref: str, schema_resolver: SchemaResolver) -> Optional[dict]:
-    """
-    Resolve a $ref or $dynamicRef string using the SchemaResolver.
-
-    Resolution order:
-      1. Named anchor ref "#Name" or $dynamicRef "#Name"
-         → look up in root anchor map, then external anchor maps.
-      2. JSON Pointer ref "#/path/to/node"
-         → delegate to referencing.Resolver.lookup.
-      3. External URL ref "https://..."
-         → delegate to referencing.Resolver.lookup (fetches and caches).
-    Returns None on any failure and logs a warning.
-    """
-    from referencing.exceptions import Unresolvable
-
-    # Named anchor or $dynamicRef: bare fragment that is not a JSON Pointer
-    if ref.startswith("#") and not ref.startswith("#/") and len(ref) > 1:
-        name = ref[1:]
-        if name in schema_resolver.anchors:
-            return schema_resolver.anchors[name]
-        # Check anchors from already-fetched external schemas
-        for ext_anchors in schema_resolver.external_anchors.values():
-            if name in ext_anchors:
-                return ext_anchors[name]
-        logger.warning("Could not resolve $ref '%s'; template may be incomplete.", ref)
+    if not isinstance(ref, str) or not ref.startswith("#/definitions/"):
         return None
-
-    # JSON Pointer or external URL — delegate to the referencing library
-    try:
-        return schema_resolver.resolver.lookup(ref).contents
-    except Unresolvable:
-        logger.warning("Could not resolve $ref '%s'; template may be incomplete.", ref)
-        return None
-    except Exception:
-        logger.warning("Unexpected error resolving $ref '%s'; template may be incomplete.", ref)
-        return None
+    # "#/definitions/foo/bar" → ["definitions", "foo", "bar"]
+    parts = ref[2:].split("/")
+    node: Any = root_schema
+    for part in parts:
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node if isinstance(node, dict) else None
 
 
-def _slim_compose_variants(schema, compose_key, variants, mode, _warnings, _field_path, _resolver):
-    """Handle oneOf/anyOf variants for _slim_schema."""
+def _slim_oneof(schema, variants, mode, _warnings, _field_path, _root_schema):
+    """Handle oneOf discriminated union variants for _slim_schema."""
     non_null_variants = [v for v in variants if not (isinstance(v, dict) and v.get("type") == "null")]
-    parent_keys = {k: v for k, v in schema.items() if k != compose_key}
+    parent_keys = {k: v for k, v in schema.items() if k != "oneOf"}
 
     if mode == EndpointTemplateMode.SCHEMA.value and len(variants) > 1:
         # schema mode: preserve ALL variants including null so the user sees the full picture
         return {
             **parent_keys,
-            compose_key: [
-                _slim_schema(v, mode=mode, _warnings=_warnings, _field_path=_field_path, _resolver=_resolver)
+            "oneOf": [
+                _slim_schema(v, mode=mode, _warnings=_warnings, _field_path=_field_path, _root_schema=_root_schema)
                 for v in variants
             ],
         }
@@ -941,17 +906,50 @@ def _slim_compose_variants(schema, compose_key, variants, mode, _warnings, _fiel
     # config mode (or only one real variant): collapse to first non-null
     chosen = non_null_variants[0] if non_null_variants else variants[0]
     if _warnings is not None and len(non_null_variants) > 1:
-        label = _field_path or "<root>"
+        # Try to detect the discriminator key so the warning names it.
+        # Rule: one property key shared across all non-null variants whose value
+        # is a const or single-element enum.
+        discriminator = None
+        try:
+            candidate_keys = None
+            for v in non_null_variants:
+                v_props = v.get("properties", {})
+                keys = {
+                    k for k, s in v_props.items()
+                    if isinstance(s, dict) and (
+                        "const" in s
+                        or (isinstance(s.get("enum"), list) and len(s["enum"]) == 1)
+                    )
+                }
+                candidate_keys = keys if candidate_keys is None else candidate_keys & keys
+            if candidate_keys and len(candidate_keys) == 1:
+                discriminator = next(iter(candidate_keys))
+        except Exception:
+            pass
+
+        if discriminator:
+            chosen_val = (
+                chosen.get("properties", {}).get(discriminator, {}).get("const")
+                or (chosen.get("properties", {}).get(discriminator, {}).get("enum") or [None])[0]
+            )
+            label = f"'{discriminator}'" + (f" (selected: '{chosen_val}')" if chosen_val is not None else "")
+        else:
+            label = f"'{_field_path}'" if _field_path else "the root schema"
         _warnings.append(
-            f"Field '{label}' has {len(non_null_variants)} {compose_key} variants; "
+            f"Field {label} has {len(non_null_variants)} oneOf variants; "
             "only the first was used. Run --show-template schema to see all options."
         )
     merged = {**parent_keys}
-    merged.update(chosen)
-    return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _resolver=_resolver)
+    for k, v in chosen.items():
+        if k == "properties" and "properties" in merged:
+            # merge variant properties into parent properties instead of overwriting
+            merged["properties"] = {**merged["properties"], **v}
+        else:
+            merged[k] = v
+    return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _root_schema=_root_schema)
 
 
-def _slim_allof(schema, mode, _warnings, _field_path, _resolver):
+def _slim_allof(schema, mode, _warnings, _field_path, _root_schema):
     """Handle allOf for _slim_schema."""
     non_null_subs = [s for s in schema["allOf"] if isinstance(s, dict) and s.get("type") != "null"]
     parent_keys = {k: v for k, v in schema.items() if k != "allOf"}
@@ -960,7 +958,7 @@ def _slim_allof(schema, mode, _warnings, _field_path, _resolver):
         return {
             **parent_keys,
             "allOf": [
-                _slim_schema(s, mode=mode, _warnings=_warnings, _field_path=_field_path, _resolver=_resolver)
+                _slim_schema(s, mode=mode, _warnings=_warnings, _field_path=_field_path, _root_schema=_root_schema)
                 for s in schema["allOf"]
             ],
         }
@@ -973,7 +971,7 @@ def _slim_allof(schema, mode, _warnings, _field_path, _resolver):
                 merged.setdefault("properties", {}).update(v)
             elif k not in merged:
                 merged[k] = v
-    return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _resolver=_resolver)
+    return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _root_schema=_root_schema)
 
 
 def _slim_schema(
@@ -981,10 +979,10 @@ def _slim_schema(
     mode: str = EndpointTemplateMode.CONFIG.value,
     _warnings: Optional[List[str]] = None,
     _field_path: str = "",
-    _resolver=None,
+    _root_schema: Optional[dict] = None,
 ) -> dict:
     """
-    Converts a JSON schema into a user-friendly config template.
+    Converts a JSON Schema Draft-07 document into a user-friendly config template.
 
     modes:
       config  - Fields with a default are shown as the default value.
@@ -995,51 +993,72 @@ def _slim_schema(
                 and any constraints present (minimum, maximum, enum, pattern).
                 Useful for discovering the full schema before crafting a config.
 
-    Handles: properties, items (arrays), oneOf/anyOf (schema mode preserves all
-    variants including null; config mode collapses to first non-null and records
-    a warning), allOf (merged properties), $ref (internal JSON Pointer and named
-    anchor refs resolved via the referencing library; external URLs fetched with
-    5s timeout and skipped on failure), additionalProperties (schema-valued,
-    surfaced as '<additionalKey>' entry).
+    Supported constructs (aligns with the Fluent UI v9 form library):
+      - properties, nested objects, required
+      - items (array of strings, string enums, or objects)
+      - oneOf (discriminated unions; config mode collapses to first non-null variant
+        and records a warning; schema mode preserves all variants including null)
+      - allOf (merges properties in config mode; preserves structure in schema mode)
+      - $ref with ``#/definitions/...`` paths (Draft-07 style only); other ref
+        formats are silently ignored
+      - const (rendered as a read-only value)
+      - Validation keywords: minLength, maxLength, pattern, format, minimum,
+        maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, minItems,
+        maxItems, uniqueItems, minProperties, maxProperties
+
+    Unsupported (silently ignored to match form library behaviour):
+      - anyOf, if/then/else, not
+      - additionalProperties, patternProperties
+      - External $ref URLs, named anchors ($anchor / bare-fragment $id), $defs
 
     Args:
         schema: JSON schema dict to process.
         mode: 'config' or 'schema'.
-        _warnings: mutable list collecting field paths with collapsed variants (config mode).
+        _warnings: mutable list collecting field paths with collapsed oneOf variants
+            (config mode).
         _field_path: dot-separated path to the current field, used in warning messages.
-        _resolver: referencing.Resolver built from the root schema; created on first call.
+        _root_schema: root schema passed unchanged through recursion for $ref resolution;
+            set to ``schema`` on the first call.
     """
     _CONSTRAINT_KEYS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "enum", "pattern")
 
     if not isinstance(schema, dict):
         return schema
 
-    # Build resolver once on first call
-    if _resolver is None:
-        _resolver = _make_ref_resolver(schema)
+    # Capture root schema on first call for $ref resolution
+    if _root_schema is None:
+        _root_schema = schema
 
-    # Resolve $ref before anything else; merge sibling keys per JSON Schema spec
+    # Resolve $ref before anything else; merge sibling keys per JSON Schema spec.
+    # Only #/definitions/... paths are supported; others are silently dropped.
     if "$ref" in schema:
-        resolved = _resolve_ref(schema["$ref"], _resolver)
+        resolved = _resolve_ref(schema["$ref"], _root_schema)
         if resolved is not None:
             merged = {**resolved, **{k: v for k, v in schema.items() if k != "$ref"}}
-            return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _resolver=_resolver)
+            return _slim_schema(
+                merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _root_schema=_root_schema
+            )
         # Unresolvable ref — fall through with remaining sibling keys
         schema = {k: v for k, v in schema.items() if k != "$ref"}
         if not schema:
             return None
 
-    # Resolve oneOf/anyOf
-    for compose_key in ("oneOf", "anyOf"):
-        variants = schema.get(compose_key)
-        if variants:
-            return _slim_compose_variants(
-                schema, compose_key, variants, mode, _warnings, _field_path, _resolver
-            )
+    # Resolve oneOf (discriminated unions).
+    # anyOf is unsupported by the form library and is silently ignored.
+    variants = schema.get("oneOf")
+    if variants:
+        return _slim_oneof(schema, variants, mode, _warnings, _field_path, _root_schema)
 
     # Resolve allOf
     if "allOf" in schema:
-        return _slim_allof(schema, mode, _warnings, _field_path, _resolver)
+        return _slim_allof(schema, mode, _warnings, _field_path, _root_schema)
+
+    # const — read-only field locked to a fixed value
+    if "const" in schema:
+        const_val = schema["const"]
+        if mode == EndpointTemplateMode.SCHEMA.value:
+            return {"type": "const", "const": const_val}
+        return const_val
 
     props = schema.get("properties", {})
     raw_type = schema.get("type", "string")
@@ -1050,33 +1069,22 @@ def _slim_schema(
 
     if props:
         # Object with properties — recurse into each field
-        result = {
+        return {
             field: _slim_schema(
                 field_schema,
                 mode=mode,
                 _warnings=_warnings,
                 _field_path=f"{_field_path}.{field}" if _field_path else field,
-                _resolver=_resolver,
+                _root_schema=_root_schema,
             )
             for field, field_schema in props.items()
         }
-        # additionalProperties as a schema — surface as a sentinel entry
-        add_props = schema.get("additionalProperties")
-        if isinstance(add_props, dict):
-            result["<additionalKey>"] = _slim_schema(
-                add_props,
-                mode=mode,
-                _warnings=_warnings,
-                _field_path=f"{_field_path}.<additionalKey>" if _field_path else "<additionalKey>",
-                _resolver=_resolver,
-            )
-        return result
 
     # Array with an items sub-schema
     if raw_type == "array" and "items" in schema:
         slimmed_item = _slim_schema(
             schema["items"], mode=mode, _warnings=_warnings,
-            _field_path=f"{_field_path}[]", _resolver=_resolver,
+            _field_path=f"{_field_path}[]", _root_schema=_root_schema,
         )
         if mode == EndpointTemplateMode.SCHEMA.value:
             entry = {"type": "array", "default": default, "items": slimmed_item}
