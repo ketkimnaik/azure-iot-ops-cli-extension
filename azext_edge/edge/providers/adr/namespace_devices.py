@@ -1015,6 +1015,64 @@ def _slim_allof(schema, mode, _warnings, _field_path, _root_schema):
     return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _root_schema=_root_schema)
 
 
+# Constraint keywords forwarded into schema-mode metadata dicts.
+_SLIM_CONSTRAINT_KEYS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "enum", "pattern")
+
+
+def _slim_object_props(schema, props, mode, _warnings, _field_path, _root_schema):
+    """Handle object-with-properties branch of _slim_schema."""
+    required_in_schema = schema.get("required", [])
+    required_fields = set(required_in_schema) if mode == EndpointTemplateMode.CONFIG.value else set()
+    result = {}
+    null_required: List[str] = []
+    for field, field_schema in props.items():
+        slimmed = _slim_schema(
+            field_schema,
+            mode=mode,
+            _warnings=_warnings,
+            _field_path=f"{_field_path}.{field}" if _field_path else field,
+            _root_schema=_root_schema,
+        )
+        if mode == EndpointTemplateMode.CONFIG.value and slimmed is None and field in required_fields:
+            null_required.append(f"{_field_path}.{field}" if _field_path else field)
+        result[field] = slimmed
+    if null_required and _warnings is not None:
+        _warnings.append(
+            "The following required fields have no default value; "
+            "replace null with a real value before applying: "
+            + ", ".join(f"'{f}'" for f in null_required)
+        )
+    if mode == EndpointTemplateMode.SCHEMA.value and required_in_schema:
+        result["required"] = required_in_schema
+    return result
+
+
+def _slim_array_items(schema, default, mode, _warnings, _field_path, _root_schema):
+    """Handle array-with-items branch of _slim_schema."""
+    slimmed_item = _slim_schema(
+        schema["items"], mode=mode, _warnings=_warnings,
+        _field_path=f"{_field_path}[]", _root_schema=_root_schema,
+    )
+    if mode == EndpointTemplateMode.SCHEMA.value:
+        entry = {"type": "array", "default": default, "items": slimmed_item}
+        for k in _SLIM_CONSTRAINT_KEYS:
+            if k in schema:
+                entry[k] = schema[k]
+        return entry
+    return [slimmed_item] if slimmed_item is not None else default
+
+
+def _slim_scalar_leaf(schema, raw_type, default, mode):
+    """Handle scalar leaf in _slim_schema."""
+    if mode == EndpointTemplateMode.SCHEMA.value:
+        entry = {"type": raw_type, "default": default}
+        for k in _SLIM_CONSTRAINT_KEYS:
+            if k in schema:
+                entry[k] = schema[k]
+        return entry
+    return default
+
+
 def _slim_schema(
     schema: dict,
     mode: str = EndpointTemplateMode.CONFIG.value,
@@ -1061,8 +1119,6 @@ def _slim_schema(
         _root_schema: root schema passed unchanged through recursion for $ref resolution;
             set to ``schema`` on the first call.
     """
-    _CONSTRAINT_KEYS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "enum", "pattern")
-
     if not isinstance(schema, dict):
         return schema
 
@@ -1109,57 +1165,12 @@ def _slim_schema(
     default = schema.get("default")
 
     if props:
-        # Object with properties — recurse into each field.
-        # In config mode, emit a single warning listing all required fields with no default (null).
-        # In schema mode, include the "required" list so users can see which fields are mandatory.
-        required_in_schema = schema.get("required", [])
-        required_fields = set(required_in_schema) if mode == EndpointTemplateMode.CONFIG.value else set()
-        result = {}
-        null_required: List[str] = []
-        for field, field_schema in props.items():
-            slimmed = _slim_schema(
-                field_schema,
-                mode=mode,
-                _warnings=_warnings,
-                _field_path=f"{_field_path}.{field}" if _field_path else field,
-                _root_schema=_root_schema,
-            )
-            if mode == EndpointTemplateMode.CONFIG.value and slimmed is None and field in required_fields:
-                null_required.append(f"{_field_path}.{field}" if _field_path else field)
-            result[field] = slimmed
-        if null_required and _warnings is not None:
-            _warnings.append(
-                "The following required fields have no default value; "
-                "replace null with a real value before applying: "
-                + ", ".join(f"'{f}'" for f in null_required)
-            )
-        if mode == EndpointTemplateMode.SCHEMA.value and required_in_schema:
-            result["required"] = required_in_schema
-        return result
+        return _slim_object_props(schema, props, mode, _warnings, _field_path, _root_schema)
 
-    # Array with an items sub-schema
     if raw_type == "array" and "items" in schema:
-        slimmed_item = _slim_schema(
-            schema["items"], mode=mode, _warnings=_warnings,
-            _field_path=f"{_field_path}[]", _root_schema=_root_schema,
-        )
-        if mode == EndpointTemplateMode.SCHEMA.value:
-            entry = {"type": "array", "default": default, "items": slimmed_item}
-            for k in _CONSTRAINT_KEYS:
-                if k in schema:
-                    entry[k] = schema[k]
-            return entry
-        return [slimmed_item] if slimmed_item is not None else default
+        return _slim_array_items(schema, default, mode, _warnings, _field_path, _root_schema)
 
-    # Scalar leaf
-    if mode == EndpointTemplateMode.SCHEMA.value:
-        entry = {"type": raw_type, "default": default}
-        for k in _CONSTRAINT_KEYS:
-            if k in schema:
-                entry[k] = schema[k]
-        return entry
-
-    return default
+    return _slim_scalar_leaf(schema, raw_type, default, mode)
 
 
 # Connector types that do NOT support certificate-based authentication.
