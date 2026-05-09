@@ -885,16 +885,13 @@ def load_adr_arguments(self, _):
             help=(
                 "Show a starter configuration template for the connector type and exit without creating an endpoint. "
                 "config: fields shown with their default values (null if no default); "
-                "output is directly usable as --endpoint-config. "
-                "oneOf/anyOf fields with multiple variants collapse to the first non-null variant and emit a WARNING — "
-                "run with 'schema' mode to see all options. "
+                "output is directly usable as --endpoint-config input. "
+                "oneOf fields with multiple variants collapse to the first non-null variant and emit a warning — "
+                "run with schema mode to see all options. "
                 "allOf fields merge all non-null sub-schemas into one flat object. "
                 "schema: every field includes type, default, and constraints (min, max, enum, pattern); "
-                "oneOf/anyOf/allOf fields show ALL variants including null (indicating a nullable field). "
-                "Null sub-schemas are only filtered in config mode. "
-                "$ref fields are resolved: internal JSON Pointer (#/path) and named anchors (#Name) are "
-                "resolved against the root schema; external URLs are fetched (5s timeout) and skipped on failure. "
-                "additionalProperties schemas are surfaced as a '<additionalKey>' entry showing the value schema."
+                "oneOf/allOf fields show all variants so you can inspect the full schema. "
+                "Draft-07 $ref pointers (#/definitions/...) are resolved inline in both modes."
             ),
             arg_type=get_enum_type(EndpointTemplateMode),
         )
