@@ -945,6 +945,65 @@ class TestBuildTemplateProperties:
         image_config = managed_config["imageConfigurationSettings"]
         assert image_config["tagDigestSettings"]["tag"] == "1.5.0"
 
+    def test_image_digest_from_image_configuration_settings(
+        self, mocked_cmd, mocked_get_iotops_mgmt_client
+    ):
+        """create uses digest when imageConfigurationSettings.digest is present (no tag)."""
+        provider = ConnectorTemplates(mocked_cmd)
+        metadata = get_sample_metadata(version="1.0.0")
+        del metadata["imageConfigurationSettings"]["tag"]
+        metadata["imageConfigurationSettings"]["digest"] = "sha256:abc123"
+        metadata_ref = "mcr.microsoft.com/test/connector-metadata:1.0.0"
+
+        properties = provider._build_template_properties(
+            metadata=metadata,
+            connector_metadata_ref=metadata_ref,
+            replicas=None,
+            log_level=None,
+            image_pull_policy=None,
+            image_pull_secrets=None,
+            allocation_policy=None,
+            bucket_size=None,
+            secrets=None,
+            storage_volumes=None,
+            connector_config=None,
+            trust_settings_secret_ref=None,
+        )
+
+        managed_config = properties["runtimeConfiguration"]["managedConfigurationSettings"]
+        image_config = managed_config["imageConfigurationSettings"]
+        assert image_config["tagDigestSettings"]["tagDigestType"] == "Digest"
+        assert image_config["tagDigestSettings"]["digest"] == "sha256:abc123"
+
+    def test_image_tag_takes_priority_over_digest(
+        self, mocked_cmd, mocked_get_iotops_mgmt_client
+    ):
+        """tag takes priority over digest when both are present in imageConfigurationSettings."""
+        provider = ConnectorTemplates(mocked_cmd)
+        metadata = get_sample_metadata(version="1.0.0")
+        metadata["imageConfigurationSettings"]["digest"] = "sha256:abc123"
+        metadata_ref = "mcr.microsoft.com/test/connector-metadata:1.0.0"
+
+        properties = provider._build_template_properties(
+            metadata=metadata,
+            connector_metadata_ref=metadata_ref,
+            replicas=None,
+            log_level=None,
+            image_pull_policy=None,
+            image_pull_secrets=None,
+            allocation_policy=None,
+            bucket_size=None,
+            secrets=None,
+            storage_volumes=None,
+            connector_config=None,
+            trust_settings_secret_ref=None,
+        )
+
+        managed_config = properties["runtimeConfiguration"]["managedConfigurationSettings"]
+        image_config = managed_config["imageConfigurationSettings"]
+        assert image_config["tagDigestSettings"]["tagDigestType"] == "Tag"
+        assert image_config["tagDigestSettings"]["tag"] == "1.0.0"
+
 
 # =====================
 # Command Tests with Mocked Responses
