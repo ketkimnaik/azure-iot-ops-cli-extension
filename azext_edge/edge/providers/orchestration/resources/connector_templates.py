@@ -1043,7 +1043,7 @@ class ConnectorTemplates(Queryable):
 
         # Extract image settings from metadata
         registry, image_name = self._split_image_reference(connector_metadata_ref)
-        image_tag = metadata.get("version", "")
+        image_tag = metadata.get("imageConfigurationSettings", {}).get("tag", metadata.get("version", ""))
 
         # Build image configuration settings
         # API expects imageName WITHOUT registry reference
