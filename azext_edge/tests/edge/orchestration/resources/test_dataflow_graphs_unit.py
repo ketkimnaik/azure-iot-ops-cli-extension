@@ -13,7 +13,7 @@ import pytest
 import responses
 
 from azure.cli.core.azclierror import InvalidArgumentValueError, ValidationError
-from azure.core.exceptions import ResourceNotFoundError
+from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
 
 from azext_edge.edge.commands_dataflowgraph import (
     apply_dataflow_graph,
@@ -1341,13 +1341,22 @@ def test_dataflow_graph_apply_with_graph_node_all_required_config_provided(
     assert result == file_payload
 
 
+@pytest.mark.parametrize(
+    "fetch_side_effect",
+    [
+        ValidationError("registry unreachable"),
+        HttpResponseError(message="connection error"),
+    ],
+    ids=["ValidationError", "HttpResponseError"],
+)
 def test_dataflow_graph_apply_with_graph_node_oci_fetch_failure(
     mocked_cmd,
     mocked_responses: responses,
     mocked_get_file_config,
     mocker,
+    fetch_side_effect,
 ):
-    """Apply succeeds (skips config validation) when OCI artifact fetch fails."""
+    """Apply succeeds (skips config validation) when OCI artifact fetch raises ValidationError or HttpResponseError."""
 
     graph_name = generate_random_string()
     profile_name = generate_random_string()
@@ -1375,7 +1384,7 @@ def test_dataflow_graph_apply_with_graph_node_oci_fetch_failure(
 
     # Simulate OCI fetch failure — apply should proceed without error
     mock_oci = mocker.MagicMock()
-    mock_oci.fetch_first_layer.side_effect = ValidationError("registry unreachable")
+    mock_oci.fetch_first_layer.side_effect = fetch_side_effect
     mocker.patch(
         "azext_edge.edge.providers.orchestration.resources.dataflow_graphs.get_oci_client",
         return_value=mock_oci,

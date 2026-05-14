@@ -362,7 +362,7 @@ class DataFlowGraphs(Queryable):
                     f"Graph node '{node.get('name')}' has an invalid 'graphSettings.artifact' value '{artifact}'. "
                     "Expected format: '<artifact-name>:<version>'."
                 )
-            registry_host = registry_endpoint_obj.get("properties", {}).get("host", "")
+            registry_host = (registry_endpoint_obj or {}).get("properties", {}).get("host", "")
             if not isinstance(registry_host, str) or not registry_host.strip():
                 raise InvalidArgumentValueError(
                     f"Graph node '{node.get('name')}' artifact '{artifact}' references a misconfigured "
@@ -400,6 +400,10 @@ class DataFlowGraphs(Queryable):
         The YAML layer contains moduleConfigurations[*].parameters where each entry has a
         'required' field. Each required parameter must appear as a {"key": ..., "value": ...}
         entry in graphSettings.configuration.
+
+        This is a best-effort, client-side check. If the OCI artifact cannot be fetched (e.g.,
+        due to network issues, auth failure, or an invalid reference), a warning is logged and
+        validation is skipped — the apply proceeds and server-side validation will catch any issues.
         """
         artifact_info = get_artifact_info_cached(image_ref)
         if artifact_info is None:
@@ -444,9 +448,15 @@ class DataFlowGraphs(Queryable):
             }
             missing = required_params - provided_keys
             if missing:
+                artifact = graph_settings.get("artifact", "")
+                artifact_description = (
+                    f"artifact '{artifact}' (resolved image '{image_ref}')"
+                    if artifact and artifact != image_ref
+                    else f"image '{image_ref}'"
+                )
                 raise InvalidArgumentValueError(
-                    f"Graph node '{node.get('name')}' image '{image_ref}' requires configuration "
-                    f"parameter(s) {sorted(missing)} but they are not provided in "
+                    f"Graph node '{node.get('name')}' {artifact_description} requires "
+                    f"configuration parameter(s) {sorted(missing)} but they are not provided in "
                     "'graphSettings.configuration'. Each required parameter must be supplied as a "
                     '{"key": "<param-name>", "value": "<value>"} entry.'
                 )
