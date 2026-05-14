@@ -11,10 +11,9 @@ from typing import TYPE_CHECKING, Iterable, Optional
 from knack.log import get_logger
 from rich.console import Console
 
-logger = get_logger(__name__)
-
 from azure.cli.core.azclierror import InvalidArgumentValueError
-from azure.core.exceptions import ResourceNotFoundError
+from azure.cli.core.azclierror import ValidationError as AzValidationError
+from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
 
 from ....util.az_client import wait_for_terminal_state
 from ....util.common import should_continue_prompt
@@ -24,6 +23,7 @@ from ..common import DataflowEndpointType, KAFKA_ENDPOINT_TYPE, MQTT_ENDPOINT_TY
 from .instances import Instances
 from .reskit import get_file_config
 
+logger = get_logger(__name__)
 console = Console()
 
 # Endpoint types supported in data flow graphs (MQTT family + Kafka family + OpenTelemetry).
@@ -176,11 +176,12 @@ class DataFlowGraphs(Queryable):
                     artifact_info_cache[image_ref] = get_oci_client().fetch_first_layer(
                         image_ref=image_ref, cmd=self.cmd
                     )
-                except Exception as ex:
-                    logger.debug(
+                except (AzValidationError, HttpResponseError) as ex:
+                    logger.warning(
                         "Failed to fetch OCI artifact '%s' — skipping client-side config validation. %s",
                         image_ref,
                         ex,
+                        exc_info=True,
                     )
                     artifact_info_cache[image_ref] = None
             return artifact_info_cache[image_ref]
@@ -361,8 +362,15 @@ class DataFlowGraphs(Queryable):
                     f"Graph node '{node.get('name')}' has an invalid 'graphSettings.artifact' value '{artifact}'. "
                     "Expected format: '<artifact-name>:<version>'."
                 )
+            registry_host = registry_endpoint_obj.get("properties", {}).get("host", "")
+            if not isinstance(registry_host, str) or not registry_host.strip():
+                raise InvalidArgumentValueError(
+                    f"Graph node '{node.get('name')}' artifact '{artifact}' references a misconfigured "
+                    "registry endpoint: missing required 'properties.host'."
+                )
+            image_ref = f"{registry_host.strip()}/{artifact}"
             self._validate_graph_node_artifact_config(
-                node, graph_settings, registry_endpoint_obj, artifact, get_artifact_info_cached
+                node, graph_settings, image_ref, get_artifact_info_cached
             )
 
     @staticmethod
@@ -384,8 +392,7 @@ class DataFlowGraphs(Queryable):
         self,
         node: dict,
         graph_settings: dict,
-        registry_endpoint_obj: dict,
-        artifact: str,
+        image_ref: str,
         get_artifact_info_cached,
     ):
         """Fetch the OCI artifact YAML layer and validate that all required parameters are provided.
@@ -394,13 +401,6 @@ class DataFlowGraphs(Queryable):
         'required' field. Each required parameter must appear as a {"key": ..., "value": ...}
         entry in graphSettings.configuration.
         """
-        registry_host = registry_endpoint_obj.get("properties", {}).get("host", "")
-        if not isinstance(registry_host, str) or not registry_host.strip():
-            raise InvalidArgumentValueError(
-                f"Graph node '{node.get('name')}' artifact '{artifact}' references a misconfigured "
-                "registry endpoint: missing required 'properties.host'."
-            )
-        image_ref = f"{registry_host.strip()}/{artifact}"
         artifact_info = get_artifact_info_cached(image_ref)
         if artifact_info is None:
             return
@@ -435,6 +435,8 @@ class DataFlowGraphs(Queryable):
 
         if required_params:
             configuration = graph_settings.get("configuration") or []
+            if not isinstance(configuration, list):
+                configuration = []
             provided_keys = {
                 item.get("key")
                 for item in configuration
@@ -443,7 +445,7 @@ class DataFlowGraphs(Queryable):
             missing = required_params - provided_keys
             if missing:
                 raise InvalidArgumentValueError(
-                    f"Graph node '{node.get('name')}' artifact '{artifact}' requires configuration "
+                    f"Graph node '{node.get('name')}' image '{image_ref}' requires configuration "
                     f"parameter(s) {sorted(missing)} but they are not provided in "
                     "'graphSettings.configuration'. Each required parameter must be supplied as a "
                     '{"key": "<param-name>", "value": "<value>"} entry.'

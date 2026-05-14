@@ -4,6 +4,7 @@
 # Licensed under the MIT License. See License file in the project root for license information.
 # ----------------------------------------------------------------------------------------------
 
+import copy
 import json
 from typing import Optional
 from unittest.mock import Mock
@@ -11,7 +12,7 @@ from unittest.mock import Mock
 import pytest
 import responses
 
-from azure.cli.core.azclierror import InvalidArgumentValueError
+from azure.cli.core.azclierror import InvalidArgumentValueError, ValidationError
 from azure.core.exceptions import ResourceNotFoundError
 
 from azext_edge.edge.commands_dataflowgraph import (
@@ -954,7 +955,6 @@ def test_dataflow_graph_apply_graph_node_error(
     graph_settings_override: dict,
     expected_error_text: str,
 ):
-    import copy
 
     graph_name = generate_random_string()
     profile_name = generate_random_string()
@@ -1037,7 +1037,6 @@ def test_dataflow_graph_apply_registry_endpoint_not_found(
     mocked_responses: responses,
     mocked_get_file_config,
 ):
-    import copy
 
     graph_name = generate_random_string()
     profile_name = generate_random_string()
@@ -1245,7 +1244,6 @@ def test_dataflow_graph_apply_missing_required_config(
     configuration,
     expected_error_text: str,
 ):
-    import copy
 
     graph_name = generate_random_string()
     profile_name = generate_random_string()
@@ -1289,7 +1287,6 @@ def test_dataflow_graph_apply_with_graph_node_all_required_config_provided(
     mocker,
 ):
     """Graph node apply succeeds when all required configuration parameters are provided."""
-    import copy
 
     graph_name = generate_random_string()
     profile_name = generate_random_string()
@@ -1351,8 +1348,6 @@ def test_dataflow_graph_apply_with_graph_node_oci_fetch_failure(
     mocker,
 ):
     """Apply succeeds (skips config validation) when OCI artifact fetch fails."""
-    import copy
-    from azure.cli.core.azclierror import ValidationError
 
     graph_name = generate_random_string()
     profile_name = generate_random_string()
@@ -1418,7 +1413,6 @@ def test_dataflow_graph_apply_with_graph_node_no_required_params(
     mocker,
 ):
     """Graph node apply succeeds when the artifact has no required parameters (empty config is fine)."""
-    import copy
 
     graph_name = generate_random_string()
     profile_name = generate_random_string()
