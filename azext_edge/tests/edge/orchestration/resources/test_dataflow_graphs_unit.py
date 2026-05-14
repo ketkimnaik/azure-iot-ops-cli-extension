@@ -1215,6 +1215,26 @@ def _setup_graph_node_apply_mocks(mocked_responses, instance_name, resource_grou
             [{"key": "optionalParam", "value": "something"}],
             "requires configuration parameter(s) ['rules']",
         ),
+        # Key present but value is None — should not count as provided
+        (
+            [{"key": "rules", "value": None}],
+            "requires configuration parameter(s) ['rules']",
+        ),
+        # Key present but value is empty string — should not count as provided
+        (
+            [{"key": "rules", "value": ""}],
+            "requires configuration parameter(s) ['rules']",
+        ),
+        # Key present but value is whitespace only — should not count as provided
+        (
+            [{"key": "rules", "value": "   "}],
+            "requires configuration parameter(s) ['rules']",
+        ),
+        # Entry has no value field at all — should not count as provided
+        (
+            [{"key": "rules"}],
+            "requires configuration parameter(s) ['rules']",
+        ),
     ],
 )
 def test_dataflow_graph_apply_missing_required_config(

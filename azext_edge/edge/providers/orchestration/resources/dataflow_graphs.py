@@ -165,7 +165,16 @@ class DataFlowGraphs(Queryable):
                 )
             return registry_endpoint_cache[registry_endpoint_ref]
 
-        self._validate_graph_nodes(graph_nodes, get_registry_endpoint_cached)
+        artifact_info_cache: dict = {}
+
+        def get_artifact_info_cached(image_ref: str):
+            if image_ref not in artifact_info_cache:
+                artifact_info_cache[image_ref] = get_oci_client().fetch_first_layer(
+                    image_ref=image_ref, cmd=self.cmd
+                )
+            return artifact_info_cache[image_ref]
+
+        self._validate_graph_nodes(graph_nodes, get_registry_endpoint_cached, get_artifact_info_cached)
 
     def _validate_nodes(self, graph_config: dict):
         nodes = graph_config.get("nodes", [])
@@ -317,7 +326,7 @@ class DataFlowGraphs(Queryable):
                     f"{', '.join(sorted(_GRAPH_SUPPORTED_ENDPOINT_TYPES))}."
                 )
 
-    def _validate_graph_nodes(self, graph_nodes: list, get_registry_endpoint_cached):
+    def _validate_graph_nodes(self, graph_nodes: list, get_registry_endpoint_cached, get_artifact_info_cached):
         for node in graph_nodes:
             graph_settings = node.get("graphSettings", {})
             if not isinstance(graph_settings, dict):
@@ -341,7 +350,9 @@ class DataFlowGraphs(Queryable):
                     f"Graph node '{node.get('name')}' has an invalid 'graphSettings.artifact' value '{artifact}'. "
                     "Expected format: '<artifact-name>:<version>'."
                 )
-            self._validate_graph_node_artifact_config(node, graph_settings, registry_endpoint_obj, artifact)
+            self._validate_graph_node_artifact_config(
+                node, graph_settings, registry_endpoint_obj, artifact, get_artifact_info_cached
+            )
 
     def _validate_graph_node_artifact_config(
         self,
@@ -349,6 +360,7 @@ class DataFlowGraphs(Queryable):
         graph_settings: dict,
         registry_endpoint_obj: dict,
         artifact: str,
+        get_artifact_info_cached,
     ):
         """Fetch the OCI artifact YAML layer and validate that all required parameters are provided.
 
@@ -358,9 +370,18 @@ class DataFlowGraphs(Queryable):
         """
         registry_host = registry_endpoint_obj.get("properties", {}).get("host", "")
         image_ref = f"{registry_host}/{artifact}"
-        artifact_info = get_oci_client().fetch_first_layer(image_ref=image_ref, cmd=self.cmd)
+        artifact_info = get_artifact_info_cached(image_ref)
 
-        yaml_data = yaml.safe_load(artifact_info.content.decode("utf-8"))
+        try:
+            yaml_data = yaml.safe_load(artifact_info.content.decode("utf-8"))
+        except yaml.YAMLError as ex:
+            raise InvalidArgumentValueError(
+                f"Graph node '{node.get('name')}' artifact '{artifact}' does not contain valid YAML."
+            ) from ex
+        if not isinstance(yaml_data, dict):
+            raise InvalidArgumentValueError(
+                f"Graph node '{node.get('name')}' artifact '{artifact}' must contain a top-level YAML object."
+            )
 
         required_params: set = set()
         for module_config in yaml_data.get("moduleConfigurations", []):
@@ -372,7 +393,16 @@ class DataFlowGraphs(Queryable):
 
         if required_params:
             configuration = graph_settings.get("configuration") or []
-            provided_keys = {item.get("key") for item in configuration if isinstance(item, dict)}
+            provided_keys = {
+                item.get("key")
+                for item in configuration
+                if isinstance(item, dict)
+                and isinstance(item.get("key"), str)
+                and item.get("key")
+                and "value" in item
+                and item.get("value") is not None
+                and (not isinstance(item.get("value"), str) or item.get("value").strip())
+            }
             missing = required_params - provided_keys
             if missing:
                 raise InvalidArgumentValueError(
