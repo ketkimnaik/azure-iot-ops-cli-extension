@@ -4,6 +4,8 @@
 # Licensed under the MIT License. See License file in the project root for license information.
 # ----------------------------------------------------------------------------------------------
 
+import yaml
+
 from typing import TYPE_CHECKING, Iterable, Optional
 
 from rich.console import Console
@@ -13,6 +15,7 @@ from azure.core.exceptions import ResourceNotFoundError
 
 from ....util.az_client import wait_for_terminal_state
 from ....util.common import should_continue_prompt
+from ....util.oci_client import get_oci_client
 from ....util.queryable import Queryable
 from ..common import DataflowEndpointType, KAFKA_ENDPOINT_TYPE, MQTT_ENDPOINT_TYPE
 from .instances import Instances
@@ -124,7 +127,7 @@ class DataFlowGraphs(Queryable):
         instance_name: str,
         resource_group_name: str,
     ):
-        nodes, declared_names = self._validate_nodes(graph_config)
+        nodes, name_to_type = self._validate_nodes(graph_config)
 
         source_nodes = [n for n in nodes if n.get("nodeType") == "Source"]
         destination_nodes = [n for n in nodes if n.get("nodeType") == "Destination"]
@@ -139,7 +142,7 @@ class DataFlowGraphs(Queryable):
                 "The dataflow graph config must contain at least one node with nodeType 'Destination'."
             )
 
-        self._validate_node_connections(graph_config, declared_names)
+        self._validate_node_connections(graph_config, name_to_type)
 
         endpoint_cache: dict = {}
 
@@ -171,7 +174,7 @@ class DataFlowGraphs(Queryable):
                 "'nodes' is required and must contain at least one node in the dataflow graph config."
             )
 
-        declared_names = set()
+        name_to_type: dict = {}
         for i, node in enumerate(nodes):
             if not isinstance(node, dict):
                 raise InvalidArgumentValueError(
@@ -193,16 +196,16 @@ class DataFlowGraphs(Queryable):
                     f"Node '{node_name}' has invalid nodeType '{node_type}'. "
                     f"Valid nodeType values are: {', '.join(sorted(_VALID_NODE_TYPES))}."
                 )
-            if node_name in declared_names:
+            if node_name in name_to_type:
                 raise InvalidArgumentValueError(
                     f"Duplicate node name '{node_name}' found at index {i}. "
                     "Each node in the dataflow graph config must have a unique 'name'."
                 )
-            declared_names.add(node_name)
+            name_to_type[node_name] = node_type
 
-        return nodes, declared_names
+        return nodes, name_to_type
 
-    def _validate_node_connections(self, graph_config: dict, declared_names: set):
+    def _validate_node_connections(self, graph_config: dict, name_to_type: dict):
         node_connections = graph_config.get("nodeConnections", [])
         if not isinstance(node_connections, list) or not node_connections:
             raise InvalidArgumentValueError(
@@ -229,15 +232,25 @@ class DataFlowGraphs(Queryable):
                 raise InvalidArgumentValueError(
                     f"nodeConnection at index {i} is a self-loop: 'from' and 'to' both reference node '{from_name}'."
                 )
-            if from_name not in declared_names:
+            if from_name not in name_to_type:
                 raise InvalidArgumentValueError(
                     f"nodeConnection at index {i} references unknown 'from' node '{from_name}'. "
-                    f"Declared node names: {', '.join(sorted(declared_names))}."
+                    f"Declared node names: {', '.join(sorted(name_to_type))}."
                 )
-            if to_name not in declared_names:
+            if to_name not in name_to_type:
                 raise InvalidArgumentValueError(
                     f"nodeConnection at index {i} references unknown 'to' node '{to_name}'. "
-                    f"Declared node names: {', '.join(sorted(declared_names))}."
+                    f"Declared node names: {', '.join(sorted(name_to_type))}."
+                )
+            if name_to_type[from_name] == "Destination":
+                raise InvalidArgumentValueError(
+                    f"nodeConnection at index {i} uses Destination node '{from_name}' as a 'from' (source). "
+                    "Destination nodes are sinks and cannot be the source of a connection."
+                )
+            if name_to_type[to_name] == "Source":
+                raise InvalidArgumentValueError(
+                    f"nodeConnection at index {i} uses Source node '{to_name}' as a 'to' (destination). "
+                    "Source nodes are producers and cannot be the destination of a connection."
                 )
 
     def _validate_source_nodes(self, source_nodes: list, get_endpoint_cached):
@@ -317,7 +330,7 @@ class DataFlowGraphs(Queryable):
                 raise InvalidArgumentValueError(
                     f"Graph node '{node.get('name')}' is missing 'graphSettings.registryEndpointRef'."
                 )
-            get_registry_endpoint_cached(registry_endpoint_ref)
+            registry_endpoint_obj = get_registry_endpoint_cached(registry_endpoint_ref)
             artifact = graph_settings.get("artifact", "")
             if not artifact:
                 raise InvalidArgumentValueError(
@@ -327,6 +340,46 @@ class DataFlowGraphs(Queryable):
                 raise InvalidArgumentValueError(
                     f"Graph node '{node.get('name')}' has an invalid 'graphSettings.artifact' value '{artifact}'. "
                     "Expected format: '<artifact-name>:<version>'."
+                )
+            self._validate_graph_node_artifact_config(node, graph_settings, registry_endpoint_obj, artifact)
+
+    def _validate_graph_node_artifact_config(
+        self,
+        node: dict,
+        graph_settings: dict,
+        registry_endpoint_obj: dict,
+        artifact: str,
+    ):
+        """Fetch the OCI artifact YAML layer and validate that all required parameters are provided.
+
+        The YAML layer contains moduleConfigurations[*].parameters where each entry has a
+        'required' field. Each required parameter must appear as a {"key": ..., "value": ...}
+        entry in graphSettings.configuration.
+        """
+        registry_host = registry_endpoint_obj.get("properties", {}).get("host", "")
+        image_ref = f"{registry_host}/{artifact}"
+        artifact_info = get_oci_client().fetch_first_layer(image_ref=image_ref, cmd=self.cmd)
+
+        yaml_data = yaml.safe_load(artifact_info.content.decode("utf-8"))
+
+        required_params: set = set()
+        for module_config in yaml_data.get("moduleConfigurations", []):
+            parameters = module_config.get("parameters", {})
+            if isinstance(parameters, dict):
+                for param_name, param_info in parameters.items():
+                    if isinstance(param_info, dict) and param_info.get("required", False):
+                        required_params.add(param_name)
+
+        if required_params:
+            configuration = graph_settings.get("configuration") or []
+            provided_keys = {item.get("key") for item in configuration if isinstance(item, dict)}
+            missing = required_params - provided_keys
+            if missing:
+                raise InvalidArgumentValueError(
+                    f"Graph node '{node.get('name')}' artifact '{artifact}' requires configuration "
+                    f"parameter(s) {sorted(missing)} but they are not provided in "
+                    "'graphSettings.configuration'. Each required parameter must be supplied as a "
+                    '{"key": "<param-name>", "value": "<value>"} entry.'
                 )
 
     def _get_endpoint(
