@@ -1279,7 +1279,7 @@ def test_dataflow_graph_apply_missing_required_config(
 
     assert expected_error_text in exc.value.args[0]
     assert "myartifact:1.0" in exc.value.args[0]
-    assert "graph-node" in exc.value.args[0]
+    assert "Graph node" in exc.value.args[0]
 
 
 def test_dataflow_graph_apply_with_graph_node_all_required_config_provided(
@@ -1318,6 +1318,73 @@ def test_dataflow_graph_apply_with_graph_node_all_required_config_provided(
     )
     _setup_graph_node_apply_mocks(mocked_responses, instance_name, resource_group_name, "myregistry")
     _mock_oci_client(mocker, _MOCK_ARTIFACT_YAML_WITH_REQUIRED_PARAMS)
+
+    mocked_responses.add(
+        method=responses.PUT,
+        url=get_dataflow_graph_endpoint(
+            profile_name=profile_name,
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            graph_name=graph_name,
+        ),
+        json=file_payload,
+        status=200,
+    )
+
+    result = apply_dataflow_graph(
+        cmd=mocked_cmd,
+        dataflow_graph_name=graph_name,
+        profile_name=profile_name,
+        instance_name=instance_name,
+        resource_group_name=resource_group_name,
+        config_file="config.json",
+        wait_sec=0.1,
+    )
+
+    assert result == file_payload
+
+
+def test_dataflow_graph_apply_with_graph_node_oci_fetch_failure(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_get_file_config,
+    mocker,
+):
+    """Apply succeeds (skips config validation) when OCI artifact fetch fails."""
+    import copy
+    from azure.cli.core.azclierror import ValidationError
+
+    graph_name = generate_random_string()
+    profile_name = generate_random_string()
+    instance_name = "myinstance"
+    resource_group_name = "myresourcegroup"
+
+    graph_properties = copy.deepcopy(_GRAPH_NODE_BASE_PROPERTIES)
+    # No configuration — but fetch will fail so validation is skipped entirely
+    file_payload = {"properties": graph_properties}
+    mocked_get_file_config.return_value = json.dumps(file_payload)
+
+    mock_instance_record = get_mock_instance_record(
+        name=instance_name, resource_group_name=resource_group_name
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_instance_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+        ),
+        json=mock_instance_record,
+        status=200,
+    )
+    _setup_graph_node_apply_mocks(mocked_responses, instance_name, resource_group_name, "myregistry")
+
+    # Simulate OCI fetch failure — apply should proceed without error
+    mock_oci = mocker.MagicMock()
+    mock_oci.fetch_first_layer.side_effect = ValidationError("registry unreachable")
+    mocker.patch(
+        "azext_edge.edge.providers.orchestration.resources.dataflow_graphs.get_oci_client",
+        return_value=mock_oci,
+    )
 
     mocked_responses.add(
         method=responses.PUT,

@@ -8,7 +8,10 @@ import yaml
 
 from typing import TYPE_CHECKING, Iterable, Optional
 
+from knack.log import get_logger
 from rich.console import Console
+
+logger = get_logger(__name__)
 
 from azure.cli.core.azclierror import InvalidArgumentValueError
 from azure.core.exceptions import ResourceNotFoundError
@@ -169,9 +172,17 @@ class DataFlowGraphs(Queryable):
 
         def get_artifact_info_cached(image_ref: str):
             if image_ref not in artifact_info_cache:
-                artifact_info_cache[image_ref] = get_oci_client().fetch_first_layer(
-                    image_ref=image_ref, cmd=self.cmd
-                )
+                try:
+                    artifact_info_cache[image_ref] = get_oci_client().fetch_first_layer(
+                        image_ref=image_ref, cmd=self.cmd
+                    )
+                except Exception as ex:
+                    logger.debug(
+                        "Failed to fetch OCI artifact '%s' — skipping client-side config validation. %s",
+                        image_ref,
+                        ex,
+                    )
+                    artifact_info_cache[image_ref] = None
             return artifact_info_cache[image_ref]
 
         self._validate_graph_nodes(graph_nodes, get_registry_endpoint_cached, get_artifact_info_cached)
@@ -354,6 +365,21 @@ class DataFlowGraphs(Queryable):
                 node, graph_settings, registry_endpoint_obj, artifact, get_artifact_info_cached
             )
 
+    @staticmethod
+    def _is_config_entry_provided(item: dict) -> bool:
+        """Return True only when a configuration entry has a valid non-empty key and value."""
+        if not isinstance(item, dict):
+            return False
+        key = item.get("key")
+        if not isinstance(key, str) or not key:
+            return False
+        if "value" not in item or item.get("value") is None:
+            return False
+        value = item.get("value")
+        if isinstance(value, str) and not value.strip():
+            return False
+        return True
+
     def _validate_graph_node_artifact_config(
         self,
         node: dict,
@@ -369,39 +395,50 @@ class DataFlowGraphs(Queryable):
         entry in graphSettings.configuration.
         """
         registry_host = registry_endpoint_obj.get("properties", {}).get("host", "")
-        image_ref = f"{registry_host}/{artifact}"
+        if not isinstance(registry_host, str) or not registry_host.strip():
+            raise InvalidArgumentValueError(
+                f"Graph node '{node.get('name')}' artifact '{artifact}' references a misconfigured "
+                "registry endpoint: missing required 'properties.host'."
+            )
+        image_ref = f"{registry_host.strip()}/{artifact}"
         artifact_info = get_artifact_info_cached(image_ref)
+        if artifact_info is None:
+            return
 
         try:
             yaml_data = yaml.safe_load(artifact_info.content.decode("utf-8"))
         except yaml.YAMLError as ex:
-            raise InvalidArgumentValueError(
-                f"Graph node '{node.get('name')}' artifact '{artifact}' does not contain valid YAML."
-            ) from ex
-        if not isinstance(yaml_data, dict):
-            raise InvalidArgumentValueError(
-                f"Graph node '{node.get('name')}' artifact '{artifact}' must contain a top-level YAML object."
+            logger.debug(
+                "OCI artifact '%s' does not contain valid YAML — skipping config validation. %s",
+                image_ref,
+                ex,
             )
+            return
+        if not isinstance(yaml_data, dict):
+            logger.debug(
+                "OCI artifact '%s' has unexpected YAML structure — skipping config validation.",
+                image_ref,
+            )
+            return
 
         required_params: set = set()
-        for module_config in yaml_data.get("moduleConfigurations", []):
-            parameters = module_config.get("parameters", {})
-            if isinstance(parameters, dict):
-                for param_name, param_info in parameters.items():
-                    if isinstance(param_info, dict) and param_info.get("required", False):
-                        required_params.add(param_name)
+        module_configurations = yaml_data.get("moduleConfigurations") or []
+        if isinstance(module_configurations, list):
+            for module_config in module_configurations:
+                if not isinstance(module_config, dict):
+                    continue
+                parameters = module_config.get("parameters", {})
+                if isinstance(parameters, dict):
+                    for param_name, param_info in parameters.items():
+                        if isinstance(param_info, dict) and param_info.get("required", False):
+                            required_params.add(param_name)
 
         if required_params:
             configuration = graph_settings.get("configuration") or []
             provided_keys = {
                 item.get("key")
                 for item in configuration
-                if isinstance(item, dict)
-                and isinstance(item.get("key"), str)
-                and item.get("key")
-                and "value" in item
-                and item.get("value") is not None
-                and (not isinstance(item.get("value"), str) or item.get("value").strip())
+                if self._is_config_entry_provided(item)
             }
             missing = required_params - provided_keys
             if missing:
