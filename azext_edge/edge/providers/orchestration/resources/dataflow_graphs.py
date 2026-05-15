@@ -347,7 +347,7 @@ class DataFlowGraphs(Queryable):
                     f"expected an object, got {type(graph_settings).__name__}."
                 )
             registry_endpoint_ref = graph_settings.get("registryEndpointRef", "")
-            if not registry_endpoint_ref:
+            if not isinstance(registry_endpoint_ref, str) or not registry_endpoint_ref.strip():
                 raise InvalidArgumentValueError(
                     f"Graph node '{node.get('name')}' is missing 'graphSettings.registryEndpointRef'."
                 )
@@ -368,7 +368,7 @@ class DataFlowGraphs(Queryable):
                     f"Graph node '{node.get('name')}' artifact '{artifact}' references a misconfigured "
                     "registry endpoint: missing required 'properties.host'."
                 )
-            image_ref = f"{registry_host.strip()}/{artifact}"
+            image_ref = f"{registry_host.strip().rstrip('/')}/{artifact}"
             self._validate_graph_node_artifact_config(
                 node, graph_settings, image_ref, get_artifact_info_cached
             )
@@ -379,7 +379,7 @@ class DataFlowGraphs(Queryable):
         if not isinstance(item, dict):
             return False
         key = item.get("key")
-        if not isinstance(key, str) or not key:
+        if not isinstance(key, str) or not key.strip():
             return False
         if "value" not in item or item.get("value") is None:
             return False
@@ -411,7 +411,7 @@ class DataFlowGraphs(Queryable):
 
         try:
             yaml_data = yaml.safe_load(artifact_info.content.decode("utf-8"))
-        except yaml.YAMLError as ex:
+        except (yaml.YAMLError, UnicodeDecodeError) as ex:
             logger.debug(
                 "OCI artifact '%s' does not contain valid YAML — skipping config validation. %s",
                 image_ref,
@@ -434,7 +434,7 @@ class DataFlowGraphs(Queryable):
                 parameters = module_config.get("parameters", {})
                 if isinstance(parameters, dict):
                     for param_name, param_info in parameters.items():
-                        if isinstance(param_info, dict) and param_info.get("required", False):
+                        if isinstance(param_info, dict) and param_info.get("required") is True:
                             required_params.add(param_name)
 
         if required_params:
