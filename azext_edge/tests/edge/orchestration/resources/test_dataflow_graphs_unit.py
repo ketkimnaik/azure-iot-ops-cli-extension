@@ -1379,7 +1379,7 @@ def test_dataflow_graph_apply_with_graph_node_oci_fetch_failure(
     mocker,
     fetch_side_effect,
 ):
-    """Apply succeeds (skips config validation) when OCI artifact fetch raises ValidationError or HttpResponseError."""
+    """Apply succeeds (skips config validation) when OCI artifact fetch raises any exception."""
 
     graph_name = generate_random_string()
     profile_name = generate_random_string()

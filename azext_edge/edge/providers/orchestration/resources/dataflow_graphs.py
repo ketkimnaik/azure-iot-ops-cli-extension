@@ -180,7 +180,6 @@ class DataFlowGraphs(Queryable):
                         "Failed to fetch OCI artifact '%s' — skipping client-side config validation. %s",
                         image_ref,
                         ex,
-                        exc_info=True,
                     )
                     artifact_info_cache[image_ref] = None
             return artifact_info_cache[image_ref]
