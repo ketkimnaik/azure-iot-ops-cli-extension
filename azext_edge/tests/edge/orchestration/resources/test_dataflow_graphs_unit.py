@@ -1493,3 +1493,336 @@ def test_dataflow_graph_apply_with_graph_node_no_required_params(
     )
 
     assert result == file_payload
+
+
+@pytest.mark.parametrize(
+    "registry_endpoint_ref_value",
+    [
+        "   ",
+        "\t",
+        " \n ",
+    ],
+    ids=["spaces", "tab", "newlines"],
+)
+def test_dataflow_graph_apply_graph_node_whitespace_registry_endpoint_ref(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_get_file_config,
+    registry_endpoint_ref_value: str,
+):
+    """Graph node apply raises an error when registryEndpointRef is whitespace-only."""
+
+    graph_name = generate_random_string()
+    profile_name = generate_random_string()
+    instance_name = "myinstance"
+    resource_group_name = "myresourcegroup"
+
+    graph_properties = copy.deepcopy(_GRAPH_NODE_BASE_PROPERTIES)
+    for node in graph_properties["nodes"]:
+        if node["nodeType"] == "Graph":
+            node["graphSettings"]["registryEndpointRef"] = registry_endpoint_ref_value
+
+    file_payload = {"properties": graph_properties}
+    mocked_get_file_config.return_value = json.dumps(file_payload)
+
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_dataflow_endpoint_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+            dataflow_endpoint_name="myendpoint1",
+        ),
+        json=get_mock_dataflow_endpoint_record(
+            dataflow_endpoint_name="myendpoint1",
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            dataflow_endpoint_type="AIOLocalMqtt",
+            host="aio-broker",
+        ),
+        status=200,
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_dataflow_endpoint_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+            dataflow_endpoint_name="myendpoint2",
+        ),
+        json=get_mock_dataflow_endpoint_record(
+            dataflow_endpoint_name="myendpoint2",
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            dataflow_endpoint_type="CustomMqtt",
+        ),
+        status=200,
+    )
+
+    with pytest.raises(InvalidArgumentValueError) as exc:
+        apply_dataflow_graph(
+            cmd=mocked_cmd,
+            dataflow_graph_name=graph_name,
+            profile_name=profile_name,
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            config_file="config.json",
+            wait_sec=0.1,
+        )
+
+    assert "is missing 'graphSettings.registryEndpointRef'" in exc.value.args[0]
+
+
+def test_dataflow_graph_apply_graph_node_registry_host_trailing_slash(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_get_file_config,
+    mocker,
+):
+    """Graph node image_ref is built correctly when registry host has a trailing slash."""
+
+    graph_name = generate_random_string()
+    profile_name = generate_random_string()
+    instance_name = "myinstance"
+    resource_group_name = "myresourcegroup"
+
+    graph_properties = copy.deepcopy(_GRAPH_NODE_BASE_PROPERTIES)
+    file_payload = {"properties": graph_properties}
+    mocked_get_file_config.return_value = json.dumps(file_payload)
+
+    mock_instance_record = get_mock_instance_record(
+        name=instance_name, resource_group_name=resource_group_name
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_instance_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+        ),
+        json=mock_instance_record,
+        status=200,
+    )
+
+    # Registry host has a trailing slash — image_ref must not contain double slash
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_dataflow_endpoint_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+            dataflow_endpoint_name="myendpoint1",
+        ),
+        json=get_mock_dataflow_endpoint_record(
+            dataflow_endpoint_name="myendpoint1",
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            dataflow_endpoint_type="AIOLocalMqtt",
+            host="aio-broker",
+        ),
+        status=200,
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_dataflow_endpoint_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+            dataflow_endpoint_name="myendpoint2",
+        ),
+        json=get_mock_dataflow_endpoint_record(
+            dataflow_endpoint_name="myendpoint2",
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            dataflow_endpoint_type="CustomMqtt",
+        ),
+        status=200,
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_registry_endpoint_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+            registry_endpoint_name="myregistry",
+        ),
+        json=get_mock_registry_endpoint_record(
+            registry_endpoint_name="myregistry",
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            host="myregistry.azurecr.io/",  # trailing slash
+        ),
+        status=200,
+    )
+    _mock_oci_client(mocker, _MOCK_ARTIFACT_YAML_NO_REQUIRED_PARAMS)
+
+    mocked_responses.add(
+        method=responses.PUT,
+        url=get_dataflow_graph_endpoint(
+            profile_name=profile_name,
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            graph_name=graph_name,
+        ),
+        json=file_payload,
+        status=200,
+    )
+
+    result = apply_dataflow_graph(
+        cmd=mocked_cmd,
+        dataflow_graph_name=graph_name,
+        profile_name=profile_name,
+        instance_name=instance_name,
+        resource_group_name=resource_group_name,
+        config_file="config.json",
+        wait_sec=0.1,
+    )
+
+    assert result == file_payload
+    # The apply succeeded — the trailing slash was stripped correctly (no double slash in result)
+    assert "//" not in str(result)
+
+
+def test_dataflow_graph_apply_graph_node_non_utf8_artifact(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_get_file_config,
+    mocker,
+):
+    """Graph node apply skips config validation when artifact content is not valid UTF-8."""
+
+    graph_name = generate_random_string()
+    profile_name = generate_random_string()
+    instance_name = "myinstance"
+    resource_group_name = "myresourcegroup"
+
+    graph_properties = copy.deepcopy(_GRAPH_NODE_BASE_PROPERTIES)
+    file_payload = {"properties": graph_properties}
+    mocked_get_file_config.return_value = json.dumps(file_payload)
+
+    mock_instance_record = get_mock_instance_record(
+        name=instance_name, resource_group_name=resource_group_name
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_instance_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+        ),
+        json=mock_instance_record,
+        status=200,
+    )
+    _setup_graph_node_apply_mocks(mocked_responses, instance_name, resource_group_name, "myregistry")
+
+    # Artifact content is binary / non-UTF-8 — decode("utf-8") would raise UnicodeDecodeError
+    mock_artifact_info = Mock()
+    mock_artifact_info.content = b"\xff\xfe invalid utf-8 \x80\x81"
+    mock_oci = Mock()
+    mock_oci.fetch_first_layer.return_value = mock_artifact_info
+    mocker.patch(
+        "azext_edge.edge.providers.orchestration.resources.dataflow_graphs.get_oci_client",
+        return_value=mock_oci,
+    )
+
+    mocked_responses.add(
+        method=responses.PUT,
+        url=get_dataflow_graph_endpoint(
+            profile_name=profile_name,
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            graph_name=graph_name,
+        ),
+        json=file_payload,
+        status=200,
+    )
+
+    # Should not raise — UnicodeDecodeError is caught and validation is skipped
+    result = apply_dataflow_graph(
+        cmd=mocked_cmd,
+        dataflow_graph_name=graph_name,
+        profile_name=profile_name,
+        instance_name=instance_name,
+        resource_group_name=resource_group_name,
+        config_file="config.json",
+        wait_sec=0.1,
+    )
+
+    assert result == file_payload
+
+
+@pytest.mark.parametrize(
+    "configuration, expected_provided",
+    [
+        # Whitespace-only key — should not count as provided
+        ([{"key": "   ", "value": "something"}], False),
+        # Valid key with valid value — should count as provided
+        ([{"key": "rules", "value": "something"}], True),
+    ],
+    ids=["whitespace_key", "valid_entry"],
+)
+def test_dataflow_graph_apply_config_entry_whitespace_key(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_get_file_config,
+    mocker,
+    configuration: list,
+    expected_provided: bool,
+):
+    """_is_config_entry_provided treats whitespace-only keys as not provided."""
+
+    graph_name = generate_random_string()
+    profile_name = generate_random_string()
+    instance_name = "myinstance"
+    resource_group_name = "myresourcegroup"
+
+    graph_properties = copy.deepcopy(_GRAPH_NODE_BASE_PROPERTIES)
+    for node in graph_properties["nodes"]:
+        if node["nodeType"] == "Graph":
+            node["graphSettings"]["configuration"] = configuration
+
+    file_payload = {"properties": graph_properties}
+    mocked_get_file_config.return_value = json.dumps(file_payload)
+
+    _setup_graph_node_apply_mocks(mocked_responses, instance_name, resource_group_name, "myregistry")
+    _mock_oci_client(mocker, _MOCK_ARTIFACT_YAML_WITH_REQUIRED_PARAMS)
+
+    if expected_provided:
+        mock_instance_record = get_mock_instance_record(
+            name=instance_name, resource_group_name=resource_group_name
+        )
+        mocked_responses.add(
+            method=responses.GET,
+            url=get_instance_endpoint(
+                resource_group_name=resource_group_name,
+                instance_name=instance_name,
+            ),
+            json=mock_instance_record,
+            status=200,
+        )
+        mocked_responses.add(
+            method=responses.PUT,
+            url=get_dataflow_graph_endpoint(
+                profile_name=profile_name,
+                instance_name=instance_name,
+                resource_group_name=resource_group_name,
+                graph_name=graph_name,
+            ),
+            json=file_payload,
+            status=200,
+        )
+        result = apply_dataflow_graph(
+            cmd=mocked_cmd,
+            dataflow_graph_name=graph_name,
+            profile_name=profile_name,
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            config_file="config.json",
+            wait_sec=0.1,
+        )
+        assert result == file_payload
+    else:
+        with pytest.raises(InvalidArgumentValueError) as exc:
+            apply_dataflow_graph(
+                cmd=mocked_cmd,
+                dataflow_graph_name=graph_name,
+                profile_name=profile_name,
+                instance_name=instance_name,
+                resource_group_name=resource_group_name,
+                config_file="config.json",
+                wait_sec=0.1,
+            )
+        assert "requires configuration parameter(s)" in exc.value.args[0]
