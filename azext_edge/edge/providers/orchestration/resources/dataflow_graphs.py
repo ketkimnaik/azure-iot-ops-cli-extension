@@ -12,8 +12,7 @@ from knack.log import get_logger
 from rich.console import Console
 
 from azure.cli.core.azclierror import InvalidArgumentValueError
-from azure.cli.core.azclierror import ValidationError as AzValidationError
-from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
+from azure.core.exceptions import ResourceNotFoundError
 
 from ....util.az_client import wait_for_terminal_state
 from ....util.common import should_continue_prompt
@@ -176,7 +175,7 @@ class DataFlowGraphs(Queryable):
                     artifact_info_cache[image_ref] = get_oci_client().fetch_first_layer(
                         image_ref=image_ref, cmd=self.cmd
                     )
-                except (AzValidationError, HttpResponseError) as ex:
+                except Exception as ex:  # best-effort: skip validation on any fetch failure
                     logger.warning(
                         "Failed to fetch OCI artifact '%s' — skipping client-side config validation. %s",
                         image_ref,
@@ -411,7 +410,7 @@ class DataFlowGraphs(Queryable):
 
         try:
             yaml_data = yaml.safe_load(artifact_info.content.decode("utf-8"))
-        except (yaml.YAMLError, UnicodeDecodeError) as ex:
+        except (yaml.YAMLError, UnicodeDecodeError, AttributeError, TypeError) as ex:
             logger.debug(
                 "OCI artifact '%s' does not contain valid YAML — skipping config validation. %s",
                 image_ref,
@@ -454,9 +453,10 @@ class DataFlowGraphs(Queryable):
                     if artifact and artifact != image_ref
                     else f"image '{image_ref}'"
                 )
+                missing_params = ", ".join(f"'{p}'" for p in sorted(missing))
                 raise InvalidArgumentValueError(
                     f"Graph node '{node.get('name')}' {artifact_description} requires "
-                    f"configuration parameter(s) {sorted(missing)} but they are not provided in "
+                    f"configuration parameter(s) {missing_params} but they are not provided in "
                     "'graphSettings.configuration'. Each required parameter must be supplied as a "
                     '{"key": "<param-name>", "value": "<value>"} entry.'
                 )

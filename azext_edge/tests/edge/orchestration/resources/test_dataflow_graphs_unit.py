@@ -1223,37 +1223,37 @@ def _setup_graph_node_apply_mocks(mocked_responses, instance_name, resource_grou
         # No configuration field at all — required param 'rules' is missing
         (
             None,
-            "requires configuration parameter(s) ['rules']",
+            "requires configuration parameter(s) 'rules'",
         ),
         # Empty configuration list — required param 'rules' is missing
         (
             [],
-            "requires configuration parameter(s) ['rules']",
+            "requires configuration parameter(s) 'rules'",
         ),
         # Wrong key provided — required param 'rules' is still missing
         (
             [{"key": "optionalParam", "value": "something"}],
-            "requires configuration parameter(s) ['rules']",
+            "requires configuration parameter(s) 'rules'",
         ),
         # Key present but value is None — should not count as provided
         (
             [{"key": "rules", "value": None}],
-            "requires configuration parameter(s) ['rules']",
+            "requires configuration parameter(s) 'rules'",
         ),
         # Key present but value is empty string — should not count as provided
         (
             [{"key": "rules", "value": ""}],
-            "requires configuration parameter(s) ['rules']",
+            "requires configuration parameter(s) 'rules'",
         ),
         # Key present but value is whitespace only — should not count as provided
         (
             [{"key": "rules", "value": "   "}],
-            "requires configuration parameter(s) ['rules']",
+            "requires configuration parameter(s) 'rules'",
         ),
         # Entry has no value field at all — should not count as provided
         (
             [{"key": "rules"}],
-            "requires configuration parameter(s) ['rules']",
+            "requires configuration parameter(s) 'rules'",
         ),
     ],
 )
@@ -1367,8 +1367,10 @@ def test_dataflow_graph_apply_with_graph_node_all_required_config_provided(
     [
         ValidationError("registry unreachable"),
         HttpResponseError(message="connection error"),
+        ConnectionError("network timeout"),
+        Exception("unexpected error"),
     ],
-    ids=["ValidationError", "HttpResponseError"],
+    ids=["ValidationError", "HttpResponseError", "ConnectionError", "Exception"],
 )
 def test_dataflow_graph_apply_with_graph_node_oci_fetch_failure(
     mocked_cmd,
@@ -1731,6 +1733,78 @@ def test_dataflow_graph_apply_graph_node_non_utf8_artifact(
     )
 
     # Should not raise — UnicodeDecodeError is caught and validation is skipped
+    result = apply_dataflow_graph(
+        cmd=mocked_cmd,
+        dataflow_graph_name=graph_name,
+        profile_name=profile_name,
+        instance_name=instance_name,
+        resource_group_name=resource_group_name,
+        config_file="config.json",
+        wait_sec=0.1,
+    )
+
+    assert result == file_payload
+
+
+@pytest.mark.parametrize(
+    "content_value",
+    [None, 12345, ["not", "bytes"]],
+    ids=["none", "int", "list"],
+)
+def test_dataflow_graph_apply_graph_node_invalid_artifact_content_type(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_get_file_config,
+    mocker,
+    content_value,
+):
+    """Apply skips config validation when artifact content is None or a non-bytes type (AttributeError/TypeError)."""
+
+    graph_name = generate_random_string()
+    profile_name = generate_random_string()
+    instance_name = "myinstance"
+    resource_group_name = "myresourcegroup"
+
+    graph_properties = copy.deepcopy(_GRAPH_NODE_BASE_PROPERTIES)
+    file_payload = {"properties": graph_properties}
+    mocked_get_file_config.return_value = json.dumps(file_payload)
+
+    mock_instance_record = get_mock_instance_record(
+        name=instance_name, resource_group_name=resource_group_name
+    )
+    mocked_responses.add(
+        method=responses.GET,
+        url=get_instance_endpoint(
+            resource_group_name=resource_group_name,
+            instance_name=instance_name,
+        ),
+        json=mock_instance_record,
+        status=200,
+    )
+    _setup_graph_node_apply_mocks(mocked_responses, instance_name, resource_group_name, "myregistry")
+
+    mock_artifact_info = Mock()
+    mock_artifact_info.content = content_value
+    mock_oci = Mock()
+    mock_oci.fetch_first_layer.return_value = mock_artifact_info
+    mocker.patch(
+        "azext_edge.edge.providers.orchestration.resources.dataflow_graphs.get_oci_client",
+        return_value=mock_oci,
+    )
+
+    mocked_responses.add(
+        method=responses.PUT,
+        url=get_dataflow_graph_endpoint(
+            profile_name=profile_name,
+            instance_name=instance_name,
+            resource_group_name=resource_group_name,
+            graph_name=graph_name,
+        ),
+        json=file_payload,
+        status=200,
+    )
+
+    # Should not raise — AttributeError/TypeError is caught and validation is skipped
     result = apply_dataflow_graph(
         cmd=mocked_cmd,
         dataflow_graph_name=graph_name,
