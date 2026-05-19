@@ -721,7 +721,18 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
     assert ep["endpointType"] == DeviceEndpointType.OPCUA.value
     assert ep["address"] == opcua_address
 
-    # --- OPC UA: with --endpoint-config (JSON file) and --replace ---
+    # --- OPC UA: --no-replace raises an error when endpoint already exists ---
+    run(
+        f"az iot ops ns device endpoint inbound apply "
+        f"--connector-type Microsoft.OpcUa "
+        f"--device {device_name} --name {endpoint_opcua_min} "
+        f"--endpoint-address {opcua_address} "
+        f"--instance {instance_name} -g {resource_group} "
+        f"--no-replace",
+        expect_failure=True,
+    )
+
+    # --- OPC UA: with --endpoint-config (JSON file) ---
     opcua_config = {
         "applicationName": "IntTestApp",
         "keepAliveMilliseconds": 15000,
@@ -737,7 +748,7 @@ def test_generalized_inbound_endpoint_lifecycle(require_namespace_init, tracked_
             f"--device {device_name} --name {endpoint_opcua_min} "
             f"--endpoint-address {opcua_address} "
             f"--instance {instance_name} -g {resource_group} "
-            f"--endpoint-config {config_path} --replace"
+            f"--endpoint-config {config_path}"
         )
     finally:
         os.unlink(config_path)
