@@ -5,16 +5,20 @@
 # ----------------------------------------------------------------------------------------------
 
 import json
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional
+import os
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
-from azure.cli.core.azclierror import InvalidArgumentValueError
+from azure.cli.core.azclierror import (
+    InvalidArgumentValueError,
+    ResourceNotFoundError,
+)
 from knack.log import get_logger
 from rich.console import Console
 
 from ...common import ListableEnum
+from .common import EndpointTemplateMode
 from ...util.az_client import (
     get_registry_mgmt_client,
-    get_resource_client,
     wait_for_terminal_state,
 )
 from ...util.common import parse_kvp_nargs, should_continue_prompt
@@ -27,12 +31,14 @@ if TYPE_CHECKING:
         NamespaceDevicesOperations,
         NamespacesOperations,
     )
-    from ...vendor.clients.resourcesmgmt.operations import ResourcesOperations
 
 
 console = Console()
 logger = get_logger(__name__)
 NAMESPACE_DEVICE_RESOURCE_TYPE = "Microsoft.DeviceRegistry/namespaces/devices"
+# Draft-07 is the only dialect supported for CLI-side config validation.
+# Schemas with other dialects are still accepted — validation is skipped with a warning.
+_ENDPOINT_SCHEMA_DRAFT_URI = "http://json-schema.org/draft-07/schema#"
 
 
 class DeviceEndpointType(ListableEnum):
@@ -73,12 +79,8 @@ class NamespaceDevices(Queryable):
         self.deviceregistry_mgmt_client = get_registry_mgmt_client(
             **self._get_client_kwargs()
         )
-        self.resource_mgmt_client = get_resource_client(
-            **self._get_client_kwargs()
-        )
         self.ops: "NamespaceDevicesOperations" = self.deviceregistry_mgmt_client.namespace_devices
         self.namespace_ops: "NamespacesOperations" = self.deviceregistry_mgmt_client.namespaces
-        self.resource_ops: "ResourcesOperations" = self.resource_mgmt_client.resources
 
     def create(
         self,
@@ -398,6 +400,366 @@ class NamespaceDevices(Queryable):
             )
             return result["properties"].get("endpoints", {}).get("inbound", {})
 
+    def _get_opcua_info(
+        self,
+        instance_name: str,
+        instance_resource_group: str,
+    ) -> dict:
+        """
+        Returns OPC UA metadata loaded from the local bundled file after verifying
+        the feature is not explicitly disabled on the instance.
+
+        OPC UA does not use Akri connector templates — its metadata is bundled locally.
+        Version and schema are derived from schemas/opcua_connector_metadata.json.
+
+        Raises:
+            ValidationError: If OPC UA mode is explicitly set to 'Disabled' on the instance.
+        """
+        from azure.cli.core.azclierror import ValidationError
+        from ..orchestration.resources.instances import Instances
+
+        instance = Instances(cmd=self.cmd).show(
+            name=instance_name,
+            resource_group_name=instance_resource_group,
+        )
+        opcua_mode = (
+            instance.get("properties", {})
+            .get("features", {})
+            .get("opcua", {})
+            .get("mode")
+        )
+        if opcua_mode == "Disabled":
+            raise ValidationError(
+                f"OPC UA connector is disabled for instance '{instance_name}'. "
+                "Enable it before adding an OPC UA inbound endpoint:\n"
+                f"  az iot ops update -n {instance_name} -g {instance_resource_group} "
+                "--feature opcua.mode=Stable"
+            )
+
+        return _load_opcua_metadata_file()
+
+    def _handle_show_template(
+        self,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+        template_mode: str,
+        endpoint_config: Optional[str],
+    ) -> dict:
+        """Return a config/schema template for --show-template and exit early.
+
+        OPC UA uses bundled metadata; all other types fetch the connector template from ACR.
+        ValidationError (OPC UA explicitly Disabled) intentionally propagates; ARM 404s fall
+        back to the bundled metadata so offline / test callers still get a useful response.
+        """
+        if endpoint_config:
+            raise InvalidArgumentValueError(
+                "--show-template and --endpoint-config cannot be used together. "
+                "--show-template displays the template and exits without creating an endpoint."
+            )
+        is_opcua = connector_type.lower() == DeviceEndpointType.OPCUA.value.lower()
+        if is_opcua:
+            from azure.core.exceptions import ResourceNotFoundError as _AzureNotFoundError
+
+            opcua_metadata = None
+            if instance_name and instance_resource_group:
+                try:
+                    opcua_metadata = self._get_opcua_info(instance_name, instance_resource_group)
+                except _AzureNotFoundError:
+                    pass  # instance / resource-group not found – use bundled metadata
+            if opcua_metadata is None:
+                opcua_metadata = _load_opcua_metadata_file()
+            schema = {}
+            for ep in opcua_metadata.get("inboundEndpoints", []):
+                if ep.get("endpointType", "").lower() == DeviceEndpointType.OPCUA.value.lower():
+                    schema = ep.get("additionalConfigurationSchema", {})
+                    break
+            slim_warnings: List[str] = []
+            slimmed = _slim_schema(schema, mode=template_mode, _warnings=slim_warnings)
+            for w in _consolidate_warnings(slim_warnings):
+                logger.warning(w)
+            if template_mode == EndpointTemplateMode.SCHEMA.value and isinstance(slimmed, dict):
+                slimmed.pop("$id", None)
+            return {"connectorType": connector_type, "endpointConfig": slimmed}
+
+        connector_templates = ConnectorTemplates(cmd=self.cmd)
+        raw = connector_templates.get_endpoint_schema(
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            connector_type=connector_type,
+        )
+        if isinstance(raw, dict) and "endpointConfig" in raw:
+            slim_warnings = []
+            raw["endpointConfig"] = _slim_schema(raw["endpointConfig"], mode=template_mode, _warnings=slim_warnings)
+            for w in _consolidate_warnings(slim_warnings):
+                logger.warning(w)
+            if template_mode == EndpointTemplateMode.SCHEMA.value and isinstance(raw["endpointConfig"], dict):
+                raw["endpointConfig"].pop("$id", None)
+        return raw
+
+    def _resolve_connector_version(
+        self,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+        endpoint_version: Optional[str],
+        skip_connector_check: bool,
+        is_opcua: bool,
+    ) -> Optional[str]:
+        """Verify connector availability and auto-resolve the endpoint version.
+
+        OPC UA: verifies the feature is enabled; version is left as None (ADR manages it).
+        Custom/3P: looks up the connector template and resolves version from it when not supplied.
+        Returns unchanged endpoint_version (possibly None) when skip_connector_check is True.
+        """
+        if skip_connector_check:
+            return endpoint_version
+
+        if is_opcua:
+            self._get_opcua_info(instance_name, instance_resource_group)
+            return endpoint_version  # None — let ADR manage the OPC UA endpoint version
+
+        connector_templates = ConnectorTemplates(cmd=self.cmd)
+        template = connector_templates.get_connector_template_for_type(
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            connector_type=connector_type,
+        )
+        if template is None:
+            raise ResourceNotFoundError(
+                f"No connector template found for connector type '{connector_type}' "
+                f"in instance '{instance_name}'.\n"
+                "Create one with: az iot ops connector template create ..."
+            )
+        if endpoint_version is None:
+            endpoint_version = connector_templates.get_endpoint_version_for_type(
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                endpoint_type=connector_type,
+            )
+        return endpoint_version
+
+    def _load_and_validate_endpoint_config(
+        self,
+        endpoint_config: str,
+        connector_type: str,
+        is_opcua: bool,
+        skip_connector_check: bool,
+        instance_name: str,
+        instance_resource_group: str,
+    ) -> str:
+        """Load endpoint config from a file path or inline JSON and validate it against schema.
+
+        Validation is only performed when skip_connector_check is False and the connector's
+        additionalConfigurationSchema uses JSON Schema Draft-07.  Other dialects are accepted
+        but validation is skipped with a warning.  Returns the serialized JSON string.
+        """
+        from .helpers import process_additional_configuration
+
+        additional_configuration = process_additional_configuration(
+            additional_configuration=endpoint_config,
+            config_type="endpoint",
+        )
+
+        # Auto-unwrap if the user passed --show-template output directly.
+        # That output is a dict with 'connectorType' and 'endpointConfig' keys;
+        # --endpoint-config expects only the inner endpointConfig value.
+        _parsed = json.loads(additional_configuration)
+        if isinstance(_parsed, dict) and "endpointConfig" in _parsed and "connectorType" in _parsed:
+            additional_configuration = json.dumps(_parsed["endpointConfig"])
+
+        if skip_connector_check:
+            return additional_configuration
+
+        if is_opcua:
+            from .specs import NAMESPACE_DEVICE_OPCUA_ENDPOINT_SCHEMA as _endpoint_schema
+        else:
+            connector_templates = ConnectorTemplates(cmd=self.cmd)
+            _endpoint_schema = connector_templates.get_endpoint_schema(
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                connector_type=connector_type,
+            ).get("endpointConfig", {})
+            if not _endpoint_schema:
+                from azure.cli.core.azclierror import ValidationError
+
+                raise ValidationError(
+                    f"Schema retrieval failed for connector type '{connector_type}'. "
+                    "Endpoint config validation cannot proceed. "
+                    "Rerun with --skip-connector-check to bypass validation."
+                )
+
+        if _endpoint_schema:
+            from ...util.schema_validation import check_json_schema, validate_data_against_schema
+
+            skip_reason = check_json_schema(_endpoint_schema)
+            if skip_reason:
+                logger.warning("Skipping endpoint config validation: %s", skip_reason)
+            elif _endpoint_schema.get("$schema", "") not in ("", _ENDPOINT_SCHEMA_DRAFT_URI):
+                logger.warning(
+                    "Skipping endpoint config validation: schema dialect '%s' is not supported; "
+                    "only '%s' is accepted.",
+                    _endpoint_schema["$schema"],
+                    _ENDPOINT_SCHEMA_DRAFT_URI,
+                )
+            else:
+                # Strip null values before validation — null means "not provided" for optional fields.
+                # The --show-template config output uses null as a placeholder for fields with no default.
+                config_data = _strip_nulls(json.loads(additional_configuration))
+                validate_data_against_schema(
+                    _endpoint_schema,
+                    config_data,
+                    name="endpoint",
+                )
+
+        return additional_configuration
+
+    def apply_inbound_endpoint_by_connector_type(
+        self,
+        instance_name: str,
+        instance_resource_group: str,
+        connector_type: str,
+        device_name: Optional[str] = None,
+        endpoint_name: Optional[str] = None,
+        endpoint_address: Optional[str] = None,
+        endpoint_config: Optional[str] = None,
+        show_template: Optional[str] = None,
+        skip_connector_check: bool = False,
+        endpoint_version: Optional[str] = None,
+        certificate_reference: Optional[str] = None,
+        key_reference: Optional[str] = None,
+        intermediate_certificate_reference: Optional[str] = None,
+        password_reference: Optional[str] = None,
+        username_reference: Optional[str] = None,
+        trust_list: Optional[str] = None,
+        no_replace: Optional[bool] = False,
+        **kwargs
+    ):
+        """Generalized command for adding an inbound device endpoint using a connector type.
+
+        Supports template discovery (--show-template) and inline JSON or file-based endpoint
+        configuration (--endpoint-config) driven by the connector template metadata.
+
+        OPC UA (Microsoft.OpcUa) is handled separately: it does not use Akri connector
+        templates. Its metadata (including version and schema) is bundled locally.
+        """
+        from .helpers import process_authentication
+
+        is_opcua = connector_type.lower() == DeviceEndpointType.OPCUA.value.lower()
+
+        if show_template:
+            return self._handle_show_template(
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                template_mode=show_template.lower(),
+                endpoint_config=endpoint_config,
+            )
+
+        # Provider-level required arg guards (CLI enforces these too, but provider
+        # may be called directly in tests or other code paths).
+        from azure.cli.core.azclierror import RequiredArgumentMissingError
+        if not device_name:
+            raise RequiredArgumentMissingError("--device is required.")
+        if not endpoint_name:
+            raise RequiredArgumentMissingError("--name is required.")
+        if not endpoint_address:
+            raise RequiredArgumentMissingError("--endpoint-address is required.")
+
+        # Validate auth args against 1P connector type capabilities.
+        # Custom connector types are skipped — the user is responsible for knowing what their connector supports.
+        _validate_auth_args_for_connector_type(
+            connector_type=connector_type,
+            certificate_reference=certificate_reference,
+            key_reference=key_reference,
+            intermediate_certificate_reference=intermediate_certificate_reference,
+            trust_list=trust_list,
+        )
+
+        if skip_connector_check and endpoint_config:
+            raise InvalidArgumentValueError(
+                "--skip-connector-check cannot be used when --endpoint-config is provided.\n"
+                "Create or verify a connector template first: az iot ops connector template create ..."
+            )
+
+        endpoint_version = self._resolve_connector_version(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            endpoint_version=endpoint_version,
+            skip_connector_check=skip_connector_check,
+            is_opcua=is_opcua,
+        )
+
+        additional_configuration = None
+        if endpoint_config:
+            additional_configuration = self._load_and_validate_endpoint_config(
+                endpoint_config=endpoint_config,
+                connector_type=connector_type,
+                is_opcua=is_opcua,
+                skip_connector_check=skip_connector_check,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+            )
+
+        endpoint_body = {
+            "address": endpoint_address,
+            "endpointType": connector_type,
+            "version": endpoint_version,
+            "authentication": process_authentication(
+                certificate_reference=certificate_reference,
+                key_reference=key_reference,
+                intermediate_certificate_reference=intermediate_certificate_reference,
+                password_reference=password_reference,
+                username_reference=username_reference,
+            ),
+        }
+
+        if additional_configuration is not None:
+            endpoint_body["additionalConfiguration"] = additional_configuration
+
+        if trust_list:
+            endpoint_body["trustSettings"] = {"trustList": trust_list}
+
+        device = self.show(
+            device_name=device_name,
+            instance_name=instance_name,
+            resource_group=instance_resource_group,
+        )
+        namespace = parse_resource_id(device["id"])
+        original_endpoints = _get_endpoints(device)
+
+        if endpoint_name in original_endpoints and no_replace:
+            raise InvalidArgumentValueError(
+                f"Inbound endpoint '{endpoint_name}' already exists. "
+                "Use the default apply behavior (omit --no-replace) to allow updates."
+            )
+
+        original_endpoints[endpoint_name] = endpoint_body
+
+        update_payload = {
+            "properties": {
+                "endpoints": {
+                    "inbound": original_endpoints
+                }
+            }
+        }
+
+        with console.status(f"Updating inbound endpoints for {device_name}..."):
+            poller = self.ops.begin_update(
+                resource_group_name=namespace["resource_group"],
+                namespace_name=namespace["name"],
+                device_name=device_name,
+                properties=update_payload,
+            )
+            wait_for_terminal_state(poller, **kwargs)
+            result = self.show(
+                device_name=device_name,
+                namespace_name=namespace["name"],
+                resource_group=namespace["resource_group"],
+            )
+            return result["properties"].get("endpoints", {}).get("inbound", {})
+
     def list_endpoints(
         self,
         device_name: str,
@@ -484,6 +846,21 @@ class NamespaceDevices(Queryable):
             return result["properties"].get("endpoints", {}).get("inbound", {})
 
 
+def _load_opcua_metadata_file() -> dict:
+    """Load and return the bundled OPC UA connector metadata JSON file."""
+    from azure.cli.core.azclierror import ValidationError
+
+    schema_file = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "schemas",
+        "opcua_connector_metadata.json",
+    )
+    if not os.path.exists(schema_file):
+        raise ValidationError(f"Bundled OPC UA metadata file not found: {schema_file}")
+    with open(schema_file, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 # TODO: unit test
 def _get_endpoints(device: dict, inbound: bool = True) -> dict:
     """
@@ -498,6 +875,340 @@ def _get_endpoints(device: dict, inbound: bool = True) -> dict:
 
     device_endpoints = device_props.get("endpoints", {})
     return device_endpoints.get("inbound", {}) if inbound else device_endpoints
+
+
+def _consolidate_warnings(warnings: List[str]) -> List[str]:
+    """Merge all per-field 'required fields' warnings into a single combined warning."""
+    _REQ_PREFIX = (
+        "The following required fields have no default value; "
+        "replace null with a real value before applying: "
+    )
+    req_fields: List[str] = []
+    other: List[str] = []
+    for w in warnings:
+        if w.startswith(_REQ_PREFIX):
+            req_fields.extend(w[len(_REQ_PREFIX):].split(", "))
+        else:
+            other.append(w)
+    if req_fields:
+        other.append(_REQ_PREFIX + ", ".join(req_fields))
+    return other
+
+
+def _strip_nulls(obj: Any) -> Any:
+    """Recursively remove None/null values from a config dict before schema validation.
+
+    Optional fields left as null in --show-template config output mean 'not provided'
+    and should be omitted rather than validated as null.
+    """
+    if isinstance(obj, dict):
+        return {k: _strip_nulls(v) for k, v in obj.items() if v is not None}
+    if isinstance(obj, list):
+        return [_strip_nulls(v) for v in obj if v is not None]
+    return obj
+
+
+def _resolve_ref(ref: str, root_schema: dict) -> Optional[dict]:
+    """
+    Resolve a $ref string against the root schema's ``definitions`` block.
+
+    Only Draft-07-style ``#/definitions/...`` paths are supported.  Any other
+    ref format (external URLs, named anchors, ``$defs`` pointers, etc.) is
+    silently ignored and returns ``None``, matching the behaviour of the
+    Fluent UI form library this schema feeds into.
+    """
+    if not isinstance(ref, str) or not ref.startswith("#/definitions/"):
+        return None
+    # "#/definitions/foo/bar" → ["definitions", "foo", "bar"]
+    parts = ref[2:].split("/")
+    node: Any = root_schema
+    for part in parts:
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node if isinstance(node, dict) else None
+
+
+def _slim_oneof(schema, variants, mode, _warnings, _field_path, _root_schema):
+    """Handle oneOf discriminated union variants for _slim_schema."""
+    non_null_variants = [v for v in variants if not (isinstance(v, dict) and v.get("type") == "null")]
+    parent_keys = {k: v for k, v in schema.items() if k != "oneOf"}
+
+    if mode == EndpointTemplateMode.SCHEMA.value and len(variants) > 1:
+        # schema mode: preserve ALL variants including null so the user sees the full picture
+        return {
+            **parent_keys,
+            "oneOf": [
+                _slim_schema(v, mode=mode, _warnings=_warnings, _field_path=_field_path, _root_schema=_root_schema)
+                for v in variants
+            ],
+        }
+
+    # config mode (or only one real variant): collapse to first non-null
+    chosen = non_null_variants[0] if non_null_variants else variants[0]
+    if _warnings is not None and len(non_null_variants) > 1:
+        # Try to detect the discriminator key so the warning names it.
+        # Rule: one property key shared across all non-null variants whose value
+        # is a const or single-element enum.
+        discriminator = None
+        try:
+            candidate_keys = None
+            for v in non_null_variants:
+                v_props = v.get("properties", {})
+                keys = {
+                    k for k, s in v_props.items()
+                    if isinstance(s, dict) and (
+                        "const" in s
+                        or (isinstance(s.get("enum"), list) and len(s["enum"]) == 1)
+                    )
+                }
+                candidate_keys = keys if candidate_keys is None else candidate_keys & keys
+            if candidate_keys and len(candidate_keys) == 1:
+                discriminator = next(iter(candidate_keys))
+        except Exception:
+            pass
+
+        if discriminator:
+            chosen_val = (
+                chosen.get("properties", {}).get(discriminator, {}).get("const")
+                or (chosen.get("properties", {}).get(discriminator, {}).get("enum") or [None])[0]
+            )
+            label = f"'{discriminator}'" + (f" (selected: '{chosen_val}')" if chosen_val is not None else "")
+        else:
+            label = f"'{_field_path}'" if _field_path else "the root schema"
+        _warnings.append(
+            f"Field {label} has {len(non_null_variants)} oneOf variants; "
+            "only the first was used. Run --show-template schema to see all options."
+        )
+    merged = {**parent_keys}
+    for k, v in chosen.items():
+        if k == "properties" and "properties" in merged:
+            # merge variant properties into parent properties instead of overwriting
+            merged["properties"] = {**merged["properties"], **v}
+        else:
+            merged[k] = v
+    return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _root_schema=_root_schema)
+
+
+def _slim_allof(schema, mode, _warnings, _field_path, _root_schema):
+    """Handle allOf for _slim_schema."""
+    non_null_subs = [s for s in schema["allOf"] if isinstance(s, dict) and s.get("type") != "null"]
+    parent_keys = {k: v for k, v in schema.items() if k != "allOf"}
+
+    if mode == EndpointTemplateMode.SCHEMA.value:
+        return {
+            **parent_keys,
+            "allOf": [
+                _slim_schema(s, mode=mode, _warnings=_warnings, _field_path=_field_path, _root_schema=_root_schema)
+                for s in schema["allOf"]
+            ],
+        }
+
+    # config mode: merge all sub-schema properties into one object
+    merged = {**parent_keys}
+    for sub in non_null_subs:
+        for k, v in sub.items():
+            if k == "properties":
+                merged.setdefault("properties", {}).update(v)
+            elif k not in merged:
+                merged[k] = v
+    return _slim_schema(merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _root_schema=_root_schema)
+
+
+# Constraint keywords forwarded into schema-mode metadata dicts.
+_SLIM_CONSTRAINT_KEYS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "enum", "pattern")
+
+
+def _slim_object_props(schema, props, mode, _warnings, _field_path, _root_schema):
+    """Handle object-with-properties branch of _slim_schema."""
+    required_in_schema = schema.get("required", [])
+    required_fields = set(required_in_schema) if mode == EndpointTemplateMode.CONFIG.value else set()
+    result = {}
+    null_required: List[str] = []
+    for field, field_schema in props.items():
+        slimmed = _slim_schema(
+            field_schema,
+            mode=mode,
+            _warnings=_warnings,
+            _field_path=f"{_field_path}.{field}" if _field_path else field,
+            _root_schema=_root_schema,
+        )
+        if mode == EndpointTemplateMode.CONFIG.value and slimmed is None and field in required_fields:
+            null_required.append(f"{_field_path}.{field}" if _field_path else field)
+        result[field] = slimmed
+    if null_required and _warnings is not None:
+        _warnings.append(
+            "The following required fields have no default value; "
+            "replace null with a real value before applying: "
+            + ", ".join(f"'{f}'" for f in null_required)
+        )
+    if mode == EndpointTemplateMode.SCHEMA.value and required_in_schema:
+        result["required"] = required_in_schema
+    return result
+
+
+def _slim_array_items(schema, default, mode, _warnings, _field_path, _root_schema):
+    """Handle array-with-items branch of _slim_schema."""
+    slimmed_item = _slim_schema(
+        schema["items"], mode=mode, _warnings=_warnings,
+        _field_path=f"{_field_path}[]", _root_schema=_root_schema,
+    )
+    if mode == EndpointTemplateMode.SCHEMA.value:
+        entry = {"type": "array", "default": default, "items": slimmed_item}
+        for k in _SLIM_CONSTRAINT_KEYS:
+            if k in schema:
+                entry[k] = schema[k]
+        return entry
+    return [slimmed_item] if slimmed_item is not None else default
+
+
+def _slim_scalar_leaf(schema, raw_type, default, mode):
+    """Handle scalar leaf in _slim_schema."""
+    if mode == EndpointTemplateMode.SCHEMA.value:
+        entry = {"type": raw_type, "default": default}
+        for k in _SLIM_CONSTRAINT_KEYS:
+            if k in schema:
+                entry[k] = schema[k]
+        return entry
+    return default
+
+
+def _slim_schema(
+    schema: dict,
+    mode: str = EndpointTemplateMode.CONFIG.value,
+    _warnings: Optional[List[str]] = None,
+    _field_path: str = "",
+    _root_schema: Optional[dict] = None,
+) -> dict:
+    """
+    Converts a JSON Schema Draft-07 document into a user-friendly config template.
+
+    modes:
+      config  - Fields with a default are shown as the default value.
+                Fields without a default are shown as null.
+                Output is directly submittable as --endpoint-config.
+
+      schema  - Every field includes a metadata dict with keys: type, default,
+                and any constraints present (minimum, maximum, enum, pattern).
+                Useful for discovering the full schema before crafting a config.
+
+    Supported constructs (aligns with the Fluent UI v9 form library):
+      - properties, nested objects, required
+      - items (array of strings, string enums, or objects)
+      - oneOf (discriminated unions; config mode collapses to first non-null variant
+        and records a warning; schema mode preserves all variants including null)
+      - allOf (merges properties in config mode; preserves structure in schema mode)
+      - $ref with ``#/definitions/...`` paths (Draft-07 style only); other ref
+        formats are silently ignored
+      - const (rendered as a read-only value)
+      - Validation keywords: minLength, maxLength, pattern, format, minimum,
+        maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, minItems,
+        maxItems, uniqueItems, minProperties, maxProperties
+
+    Unsupported (silently ignored to match form library behaviour):
+      - anyOf, if/then/else, not
+      - additionalProperties, patternProperties
+      - External $ref URLs, named anchors ($anchor / bare-fragment $id), $defs
+
+    Args:
+        schema: JSON schema dict to process.
+        mode: 'config' or 'schema'.
+        _warnings: mutable list collecting field paths with collapsed oneOf variants
+            (config mode).
+        _field_path: dot-separated path to the current field, used in warning messages.
+        _root_schema: root schema passed unchanged through recursion for $ref resolution;
+            set to ``schema`` on the first call.
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    # Capture root schema on first call for $ref resolution
+    if _root_schema is None:
+        _root_schema = schema
+
+    # Resolve $ref before anything else; merge sibling keys per JSON Schema spec.
+    # Only #/definitions/... paths are supported; others are silently dropped.
+    if "$ref" in schema:
+        resolved = _resolve_ref(schema["$ref"], _root_schema)
+        if resolved is not None:
+            merged = {**resolved, **{k: v for k, v in schema.items() if k != "$ref"}}
+            return _slim_schema(
+                merged, mode=mode, _warnings=_warnings, _field_path=_field_path, _root_schema=_root_schema
+            )
+        # Unresolvable ref — fall through with remaining sibling keys
+        schema = {k: v for k, v in schema.items() if k != "$ref"}
+        if not schema:
+            return None
+
+    # Resolve oneOf (discriminated unions).
+    # anyOf is unsupported by the form library and is silently ignored.
+    variants = schema.get("oneOf")
+    if variants:
+        return _slim_oneof(schema, variants, mode, _warnings, _field_path, _root_schema)
+
+    # Resolve allOf
+    if "allOf" in schema:
+        return _slim_allof(schema, mode, _warnings, _field_path, _root_schema)
+
+    # const — read-only field locked to a fixed value
+    if "const" in schema:
+        const_val = schema["const"]
+        if mode == EndpointTemplateMode.SCHEMA.value:
+            return {"type": "const", "const": const_val}
+        return const_val
+
+    props = schema.get("properties", {})
+    raw_type = schema.get("type", "string")
+    if isinstance(raw_type, list):
+        non_null = [t for t in raw_type if t != "null"]
+        raw_type = non_null[0] if non_null else "string"
+    default = schema.get("default")
+
+    if props:
+        return _slim_object_props(schema, props, mode, _warnings, _field_path, _root_schema)
+
+    if raw_type == "array" and "items" in schema:
+        return _slim_array_items(schema, default, mode, _warnings, _field_path, _root_schema)
+
+    return _slim_scalar_leaf(schema, raw_type, default, mode)
+
+
+# Connector types that do NOT support certificate-based authentication.
+_NO_CERT_AUTH_TYPES = {
+    DeviceEndpointType.MEDIA.value.lower(),
+    DeviceEndpointType.ONVIF.value.lower(),
+}
+
+
+def _validate_auth_args_for_connector_type(
+    connector_type: str,
+    certificate_reference: Optional[str] = None,
+    key_reference: Optional[str] = None,
+    intermediate_certificate_reference: Optional[str] = None,
+    trust_list: Optional[str] = None,
+) -> None:
+    """
+    Raises an error if cert-based auth args are used with a connector type that doesn't support them.
+    Only Media and Onvif lack cert support. Custom/unknown types are skipped.
+    """
+    if connector_type.lower() not in _NO_CERT_AUTH_TYPES:
+        return
+
+    cert_args_used = [
+        arg for arg, val in [
+            ("--cert-ref", certificate_reference),
+            ("--key-ref", key_reference),
+            ("--icr", intermediate_certificate_reference),
+            ("--trust-list", trust_list),
+        ] if val
+    ]
+
+    if cert_args_used:
+        raise InvalidArgumentValueError(
+            f"Certificate-based authentication ({', '.join(cert_args_used)}) is not supported "
+            f"for connector type '{connector_type}'.\n"
+            f"Only username/password authentication is supported for this connector type."
+        )
 
 
 def _process_onvif_configuration(

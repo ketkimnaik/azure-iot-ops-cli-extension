@@ -462,6 +462,49 @@ def add_inbound_mqtt_device_endpoint(
     )
 
 
+def apply_inbound_device_endpoint(
+    cmd,
+    connector_type: str,
+    instance_name: str,
+    instance_resource_group: str,
+    device_name: Optional[str] = None,
+    endpoint_name: Optional[str] = None,
+    endpoint_address: Optional[str] = None,
+    endpoint_config: Optional[str] = None,
+    show_template: Optional[str] = None,
+    skip_connector_check: Optional[bool] = False,
+    endpoint_version: Optional[str] = None,
+    certificate_reference: Optional[str] = None,
+    key_reference: Optional[str] = None,
+    intermediate_certificate_reference: Optional[str] = None,
+    password_reference: Optional[str] = None,
+    username_reference: Optional[str] = None,
+    trust_list: Optional[str] = None,
+    no_replace: Optional[bool] = False,
+    **kwargs
+):
+    return NamespaceDevices(cmd).apply_inbound_endpoint_by_connector_type(
+        device_name=device_name,
+        instance_name=instance_name,
+        instance_resource_group=instance_resource_group,
+        connector_type=connector_type,
+        endpoint_name=endpoint_name,
+        endpoint_address=endpoint_address,
+        endpoint_config=endpoint_config,
+        show_template=show_template,
+        skip_connector_check=skip_connector_check,
+        endpoint_version=endpoint_version,
+        certificate_reference=certificate_reference,
+        key_reference=key_reference,
+        intermediate_certificate_reference=intermediate_certificate_reference,
+        password_reference=password_reference,
+        username_reference=username_reference,
+        trust_list=trust_list,
+        no_replace=no_replace,
+        **kwargs
+    )
+
+
 def list_inbound_device_endpoints(
     cmd,
     device_name: str,
