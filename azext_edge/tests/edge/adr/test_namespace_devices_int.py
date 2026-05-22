@@ -632,12 +632,14 @@ def assert_namespace_device_opcua_props(
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("template_mode", ["config", "schema"])
-def test_generalized_inbound_endpoint_show_template_opcua(template_mode):
+def test_generalized_inbound_endpoint_show_template_opcua(template_mode, require_namespace_init):
     """--show-template for OPC UA reads from the bundled file (no ARM call needed)."""
+    instance_name = require_namespace_init["instanceName"]
+    resource_group = require_namespace_init["resourceGroup"]
     result = run(
         "az iot ops ns device endpoint inbound apply "
         f"--show-template {template_mode} --connector-type Microsoft.OpcUa "
-        "-g dummy -i dummy"
+        f"-g {resource_group} -i {instance_name}"
     )
     assert result["connectorType"] == "Microsoft.OpcUa"
     config = result["endpointConfig"]

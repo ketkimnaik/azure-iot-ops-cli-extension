@@ -1049,6 +1049,77 @@ def load_iotops_adr_help():
     """
 
     helps[
+        "iot ops ns asset create"
+    ] = """
+        type: command
+        short-summary: Create a namespaced asset in an IoT Operations instance.
+
+        examples:
+        - name: Create a namespaced asset for a given connector type
+          text: >
+            az iot ops ns asset create --name myasset --instance myInstance -g myInstanceResourceGroup
+            --connector-type Microsoft.OpcUa --device mydevice --endpoint myEndpoint
+
+        - name: Create a namespaced asset with a connector-specific configuration using a file
+          text: >
+            az iot ops ns asset create --name myasset --instance myInstance -g myInstanceResourceGroup
+            --connector-type Microsoft.OpcUa --device mydevice --endpoint myEndpoint
+            --asset-config path/to/config.yaml
+
+        - name: Create a namespaced asset with a connector-specific configuration using inline JSON
+          text: >
+            az iot ops ns asset create --name myasset --instance myInstance -g myInstanceResourceGroup
+            --connector-type Microsoft.OpcUa --device mydevice --endpoint myEndpoint
+            --asset-config '{"defaultDatasetsConfiguration":{"publishingInterval":1000,"samplingInterval":500,"queueSize":5}}'
+
+        - name: Create a namespaced asset with connector configuration and metadata in a single operation
+          text: >
+            az iot ops ns asset create --name myasset --instance myInstance -g myInstanceResourceGroup
+            --connector-type Microsoft.OpcUa --device mydevice --endpoint myEndpoint
+            --asset-config path/to/config.yaml --description "Factory floor sensor" --display-name "My Asset v1"
+            --manufacturer "Contoso" --model "SensorX1" --serial-number "SN-001"
+
+        - name: Show the configuration template for a connector type without creating an asset
+          text: >
+            az iot ops ns asset create --connector-type Microsoft.OpcUa --show-template config
+            --instance myInstance -g myInstanceResourceGroup
+    """
+
+    helps[
+        "iot ops ns asset update"
+    ] = """
+        type: command
+        short-summary: Update a namespaced asset in an IoT Operations instance.
+
+        examples:
+        - name: Update an asset's basic properties
+          text: >
+            az iot ops ns asset update --name myasset --instance myInstance -g myInstanceResourceGroup
+            --description "Updated description" --display-name "My Asset v2"
+
+        - name: Update an asset's connector-specific configuration using a file
+          text: >
+            az iot ops ns asset update --name myasset --instance myInstance -g myInstanceResourceGroup
+            --asset-config path/to/config.yaml
+
+        - name: Update an asset's connector-specific configuration using inline JSON
+          text: >
+            az iot ops ns asset update --name myasset --instance myInstance -g myInstanceResourceGroup
+            --asset-config '{"defaultDatasetsConfiguration":{"publishingInterval":2000,"samplingInterval":1000}}'
+
+        - name: Update an asset's connector configuration along with metadata in a single operation
+          text: >
+            az iot ops ns asset update --name myasset --instance myInstance -g myInstanceResourceGroup
+            --asset-config path/to/config.yaml --description "Updated factory sensor" --display-name "My Asset v2"
+            --manufacturer "Contoso" --model "SensorX1" --serial-number "SN-001"
+
+        - name: Show the configuration template for the asset's connector type without updating
+          text: >
+            az iot ops ns asset update --name myasset --instance myInstance -g myInstanceResourceGroup
+            --show-template config
+    """
+
+    helps[
         "iot ops ns asset custom"
     ] = """
         type: group
