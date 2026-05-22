@@ -617,6 +617,12 @@ class NamespaceAssets(Queryable):
         the existing asset so --connector-type is not needed. Uses PATCH semantics;
         fields not provided are left unchanged.
         """
+        if skip_connector_check and asset_config:
+            raise InvalidArgumentValueError(
+                "--skip-connector-check cannot be used when --asset-config is provided.\n"
+                "Create or verify a connector template first: az iot ops connector template create ..."
+            )
+
         # Fetch the existing asset to derive connector type and namespace
         existing_asset = self.show(
             asset_name=asset_name,
@@ -667,12 +673,6 @@ class NamespaceAssets(Queryable):
         # namespace_from_asset already contains the resource_group and name derived from the asset
         # ARM id — no need for a separate get_namespace_for_instance HTTP call.
         namespace = namespace_from_asset
-
-        if skip_connector_check and asset_config:
-            raise InvalidArgumentValueError(
-                "--skip-connector-check cannot be used when --asset-config is provided.\n"
-                "Create or verify a connector template first: az iot ops connector template create ..."
-            )
 
         # Parse and validate asset_config if provided
         additional_config_props = {}
@@ -743,7 +743,9 @@ class NamespaceAssets(Queryable):
         Or the full --show-template output with 'connectorType' and 'assetConfig' keys,
         which is auto-unwrapped.
 
-        Returns a dict of ARM property key → serialized JSON string for each config present.
+        Returns a dict of ARM property key → payload-ready value for each config present.
+        Configuration properties are returned as serialized JSON strings, while destination
+        properties (e.g. defaultDatasetsDestinations) are returned as native Python lists.
         """
         from .namespace_devices import DeviceEndpointType as _DEType
         from .helpers import load_opcua_metadata_file as _load_opcua_metadata_file, strip_nulls as _strip_nulls
@@ -3235,7 +3237,7 @@ def _build_destination_template(
     _DEST_FIELDS = {
         "Mqtt": {
             "topic": {"type": "string", "description": "MQTT topic to publish to"},
-            "qos": {"type": "integer", "enum": [0, 1], "description": "MQTT QoS level"},
+            "qos": {"type": "string", "enum": ["Qos0", "Qos1"], "description": "MQTT QoS level"},
             "ttl": {"type": "integer", "minimum": 0, "description": "Time to live in seconds"},
             "retain": {"type": "string", "enum": ["Keep", "Never"], "description": "Retain flag"},
         },

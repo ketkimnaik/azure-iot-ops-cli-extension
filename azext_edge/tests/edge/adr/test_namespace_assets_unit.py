@@ -1051,11 +1051,17 @@ def test_create_namespace_asset_generalized(
     namespace_name = namespace_resource["name"]
     namespace_resource_group = namespace_resource["resource_group"]
 
-    # Resolve what endpoint_type the device record should have for this connector_type
+    # Resolve what endpoint_type the device record should have for this connector_type.
+    # `add_device_get_call()` builds a mocked service value by prepending `Microsoft.`,
+    # so pass the helper the unprefixed built-in type name (for example `OpcUa`,
+    # not `Microsoft.OpcUa`) to avoid producing `Microsoft.Microsoft.<type>`.
     from azext_edge.edge.providers.adr.namespace_devices import DeviceEndpointType as _DEType
     normalized = _DEType.get_type_from_keyword(connector_type, return_custom_keyword=False)
-    # Custom / unknown types pass as-is; use "custom" for device endpoint compatibility
-    endpoint_type_for_device = normalized if normalized in _DEType.list() else "custom"
+    if normalized in _DEType.list():
+        endpoint_type_for_device = normalized.removeprefix("Microsoft.")
+    else:
+        # Custom / unknown types use the helper-compatible fallback.
+        endpoint_type_for_device = "custom"
 
     add_device_get_call(
         mocked_responses=mocked_responses,
@@ -1294,17 +1300,20 @@ def test_create_namespace_asset_generalized_missing_required_args(
         create_namespace_asset(cmd=mocked_cmd, **base_kwargs)
 
 
-def test_create_namespace_asset_generalized_skip_connector_check_with_config_errors(mocked_cmd):
+def test_create_namespace_asset_generalized_skip_connector_check_with_config(
+    mocked_cmd,
+    mocked_get_namespace_for_instance,
+):
     """--skip-connector-check and --asset-config together must raise InvalidArgumentValueError."""
-    with pytest.raises(InvalidArgumentValueError, match="--skip-connector-check cannot be used when --asset-config"):
+    with pytest.raises(InvalidArgumentValueError, match="--skip-connector-check cannot be used when --asset-config is provided"):
         create_namespace_asset(
             cmd=mocked_cmd,
             connector_type="Microsoft.OpcUa",
-            instance_name="my-instance",
-            instance_resource_group="my-rg",
-            asset_name="my-asset",
-            device_name="my-device",
-            device_endpoint_name="ep1",
+            instance_name=generate_random_string(),
+            instance_resource_group=generate_random_string(),
+            asset_name=generate_random_string(),
+            device_name=generate_random_string(),
+            device_endpoint_name=generate_random_string(),
             asset_config='{"defaultDatasetsConfiguration": {}}',
             skip_connector_check=True,
         )
@@ -1596,49 +1605,15 @@ def test_update_namespace_asset_generalized_with_asset_config(
     assert patch_body["properties"]["defaultEventsConfiguration"] == config_props["defaultEventsConfiguration"]
 
 
-def test_update_namespace_asset_generalized_skip_connector_check_with_config_errors(
+def test_update_namespace_asset_generalized_skip_connector_check_with_config(
     mocked_cmd,
-    mocked_responses: responses,
     mocked_get_namespace_for_instance,
 ):
     """--skip-connector-check and --asset-config together must raise InvalidArgumentValueError."""
-    asset_name = generate_random_string()
-    namespace_resource = mocked_get_namespace_for_instance.return_value
-    namespace_name = namespace_resource["name"]
-    namespace_resource_group = namespace_resource["resource_group"]
-
-    original_asset = get_namespace_asset_record(
-        asset_name=asset_name,
-        namespace_name=namespace_name,
-        resource_group_name=namespace_resource_group,
-    )
-    asset_device_name = original_asset["properties"]["deviceRef"]["deviceName"]
-    asset_endpoint_name = original_asset["properties"]["deviceRef"]["endpointName"]
-
-    mocked_responses.add(
-        method=responses.GET,
-        url=get_namespace_asset_mgmt_uri(
-            asset_name=asset_name,
-            namespace_name=namespace_name,
-            resource_group_name=namespace_resource_group,
-        ),
-        json=original_asset,
-        status=200,
-        content_type="application/json",
-    )
-    add_device_get_call(
-        mocked_responses=mocked_responses,
-        device_name=asset_device_name,
-        namespace_name=namespace_name,
-        resource_group_name=namespace_resource_group,
-        endpoint_name=asset_endpoint_name,
-        endpoint_type="opcua",
-    )
-
-    with pytest.raises(InvalidArgumentValueError, match="--skip-connector-check cannot be used when --asset-config"):
+    with pytest.raises(InvalidArgumentValueError, match="--skip-connector-check cannot be used when --asset-config is provided"):
         update_namespace_asset(
             cmd=mocked_cmd,
-            asset_name=asset_name,
+            asset_name=generate_random_string(),
             instance_name="my-instance",
             instance_resource_group="my-rg",
             asset_config='{"defaultDatasetsConfiguration": {}}',
