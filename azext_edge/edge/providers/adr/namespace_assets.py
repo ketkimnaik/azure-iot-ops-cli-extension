@@ -450,7 +450,6 @@ class NamespaceAssets(Queryable):
         device_endpoint_name: Optional[str] = None,
         asset_config: Optional[str] = None,
         show_template: Optional[str] = None,
-        skip_connector_check: bool = False,
         # common asset props
         asset_type_refs: Optional[List[str]] = None,
         attributes: Optional[List[str]] = None,
@@ -501,12 +500,6 @@ class NamespaceAssets(Queryable):
             raise RequiredArgumentMissingError("--device is required.")
         if not device_endpoint_name:
             raise RequiredArgumentMissingError("--endpoint is required.")
-
-        if skip_connector_check and asset_config:
-            raise InvalidArgumentValueError(
-                "--skip-connector-check cannot be used when --asset-config is provided.\n"
-                "Create or verify a connector template first: az iot ops connector template create ..."
-            )
 
         # Get device to validate endpoint type and resolve location/extendedLocation
         device, namespace = self._check_device_props(
@@ -592,7 +585,6 @@ class NamespaceAssets(Queryable):
         instance_resource_group: str,
         asset_config: Optional[str] = None,
         show_template: Optional[str] = None,
-        skip_connector_check: bool = False,
         # common asset props
         asset_type_refs: Optional[List[str]] = None,
         attributes: Optional[List[str]] = None,
@@ -617,12 +609,6 @@ class NamespaceAssets(Queryable):
         the existing asset so --connector-type is not needed. Uses PATCH semantics;
         fields not provided are left unchanged.
         """
-        if skip_connector_check and asset_config:
-            raise InvalidArgumentValueError(
-                "--skip-connector-check cannot be used when --asset-config is provided.\n"
-                "Create or verify a connector template first: az iot ops connector template create ..."
-            )
-
         # Fetch the existing asset to derive connector type and namespace
         existing_asset = self.show(
             asset_name=asset_name,

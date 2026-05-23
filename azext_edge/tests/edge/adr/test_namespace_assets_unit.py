@@ -1292,31 +1292,11 @@ def test_create_namespace_asset_generalized_missing_required_args(
         "asset_name": generate_random_string(),
         "device_name": generate_random_string(),
         "device_endpoint_name": generate_random_string(),
-        "skip_connector_check": True,
     }
     base_kwargs.update(kwargs_override)
 
     with pytest.raises(RequiredArgumentMissingError):
         create_namespace_asset(cmd=mocked_cmd, **base_kwargs)
-
-
-def test_create_namespace_asset_generalized_skip_connector_check_with_config(
-    mocked_cmd,
-    mocked_get_namespace_for_instance,
-):
-    """--skip-connector-check and --asset-config together must raise InvalidArgumentValueError."""
-    with pytest.raises(InvalidArgumentValueError, match="--skip-connector-check cannot be used when --asset-config is provided"):
-        create_namespace_asset(
-            cmd=mocked_cmd,
-            connector_type="Microsoft.OpcUa",
-            instance_name=generate_random_string(),
-            instance_resource_group=generate_random_string(),
-            asset_name=generate_random_string(),
-            device_name=generate_random_string(),
-            device_endpoint_name=generate_random_string(),
-            asset_config='{"defaultDatasetsConfiguration": {}}',
-            skip_connector_check=True,
-        )
 
 
 def test_create_namespace_asset_generalized_show_template_with_config_errors(
@@ -1603,22 +1583,6 @@ def test_update_namespace_asset_generalized_with_asset_config(
 
     patch_body = json.loads(mocked_responses.calls[2].request.body)
     assert patch_body["properties"]["defaultEventsConfiguration"] == config_props["defaultEventsConfiguration"]
-
-
-def test_update_namespace_asset_generalized_skip_connector_check_with_config(
-    mocked_cmd,
-    mocked_get_namespace_for_instance,
-):
-    """--skip-connector-check and --asset-config together must raise InvalidArgumentValueError."""
-    with pytest.raises(InvalidArgumentValueError, match="--skip-connector-check cannot be used when --asset-config is provided"):
-        update_namespace_asset(
-            cmd=mocked_cmd,
-            asset_name=generate_random_string(),
-            instance_name="my-instance",
-            instance_resource_group="my-rg",
-            asset_config='{"defaultDatasetsConfiguration": {}}',
-            skip_connector_check=True,
-        )
 
 
 def test_update_namespace_asset_generalized_show_template_with_config_errors(

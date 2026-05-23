@@ -2083,13 +2083,6 @@ def load_iotops_arguments(self, _):
             "oneOf/allOf fields show all variants so you can inspect the full schema. "
             "Draft-07 $ref pointers (#/definitions/...) are resolved inline in both modes.",
         )
-        context.argument(
-            "skip_connector_check",
-            options_list=["--skip-connector-check", "--scc"],
-            arg_type=get_three_state_flag(),
-            help="Skip validation that a connector template exists for the connector type. "
-            "Cannot be combined with --asset-config.",
-        )
 
     with self.argument_context("iot ops ns asset update") as context:
         context.argument(
@@ -2119,13 +2112,6 @@ def load_iotops_arguments(self, _):
             "schema: every field includes type, default, and constraints (min, max, enum, pattern); "
             "oneOf/allOf fields show all variants so you can inspect the full schema. "
             "Draft-07 $ref pointers (#/definitions/...) are resolved inline in both modes.",
-        )
-        context.argument(
-            "skip_connector_check",
-            options_list=["--skip-connector-check", "--scc"],
-            arg_type=get_three_state_flag(),
-            help="Skip validation that a connector template exists for the connector type. "
-            "Cannot be combined with --asset-config.",
         )
 
     with self.argument_context("iot ops clone") as context:
