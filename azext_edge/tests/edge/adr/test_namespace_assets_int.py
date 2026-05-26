@@ -688,12 +688,10 @@ def test_generalized_asset_error_cases(require_namespace_init_module):
     instance_name = require_namespace_init_module["instanceName"]
     resource_group = require_namespace_init_module["resourceGroup"]
 
-    # --show-template + --name are mutually exclusive
+    # --connector-type is required for asset create
     run(
         "az iot ops ns asset create "
-        "--connector-type Microsoft.OpcUa "
         "--show-template config "
-        f"--name dummy "
         f"-g {resource_group} -i {instance_name}",
         expect_failure=True,
     )
