@@ -771,6 +771,12 @@ class NamespaceAssets(Queryable):
                     "Cannot validate asset config."
                 )
             connector_metadata_ref = template.get("properties", {}).get("connectorMetadataRef")
+            if not connector_metadata_ref:
+                from azure.cli.core.azclierror import ValidationError
+                raise ValidationError(
+                    f"Connector template for type '{connector_type}' is missing 'connectorMetadataRef'. "
+                    "Cannot validate asset config."
+                )
             from ...util.oci_client import get_oci_client
             oci_client = get_oci_client()
             artifact = oci_client.fetch_first_layer(

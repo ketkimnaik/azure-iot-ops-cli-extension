@@ -2042,7 +2042,7 @@ def load_iotops_arguments(self, _):
             options_list=["--connector-type", "--ct"],
             help="Connector type for the asset (e.g. 'Microsoft.OpcUa', 'Microsoft.Http'). "
             "For all types except Microsoft.OpcUa, the matching connector template must exist "
-            "in the instance unless --skip-connector-check is used.",
+            "in the instance when --asset-config is provided.",
         )
         context.argument(
             "asset_name",
