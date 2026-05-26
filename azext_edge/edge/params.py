@@ -2063,9 +2063,10 @@ def load_iotops_arguments(self, _):
             "asset_config",
             options_list=["--asset-config", "--ac"],
             help="Inline JSON string or path to a JSON/YAML file (.json, .yaml, .yml) containing "
-            "connector-specific default asset configurations. Accepted keys vary by connector type "
-            "(e.g. defaultDatasetsConfiguration, defaultEventsConfiguration, "
-            "defaultStreamsConfiguration). Use --show-template to discover the supported keys and "
+            "connector-specific default asset configurations and destinations. Accepted keys vary "
+            "by connector type (e.g. defaultDatasetsConfiguration, defaultEventsConfiguration, "
+            "defaultStreamsConfiguration, defaultDatasetsDestinations, defaultEventsDestinations, "
+            "defaultStreamsDestinations). Use --show-template to discover the supported keys and "
             "their schema for the target connector type. Cannot be combined with --show-template.",
         )
         context.argument(
@@ -2094,8 +2095,10 @@ def load_iotops_arguments(self, _):
             "asset_config",
             options_list=["--asset-config", "--ac"],
             help="Inline JSON string or path to a JSON/YAML file (.json, .yaml, .yml) containing "
-            "connector-specific default asset configurations to update. Accepted keys vary by "
-            "connector type. Use --show-template to discover the supported keys and their schema "
+            "connector-specific default asset configurations and destination settings to update. "
+            "Accepted keys vary by connector type and can include destination keys such as "
+            "defaultDatasetsDestinations, defaultEventsDestinations, defaultStreamsDestinations. "
+            "Use --show-template to discover the supported keys and their schema "
             "for the asset's connector type. Cannot be combined with --show-template.",
         )
         context.argument(

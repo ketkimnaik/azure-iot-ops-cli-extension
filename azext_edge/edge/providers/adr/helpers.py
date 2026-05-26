@@ -699,9 +699,8 @@ def _slim_schema(
       - $ref with ``#/definitions/...`` paths (Draft-07 style only); other ref
         formats are silently ignored
       - const (rendered as a read-only value)
-      - Validation keywords: minLength, maxLength, pattern, format, minimum,
-        maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, minItems,
-        maxItems, uniqueItems, minProperties, maxProperties
+      - Validation keywords: minimum, maximum, exclusiveMinimum,
+        exclusiveMaximum, enum, pattern
 
     Unsupported (silently ignored to match form library behaviour):
       - anyOf, if/then/else, not

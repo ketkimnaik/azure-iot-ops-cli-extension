@@ -683,15 +683,18 @@ def test_generalized_asset_show_template_opcua(template_mode, require_namespace_
         assert field in events_config, f"Missing events config field: {field}"
 
 
-def test_generalized_asset_error_cases():
+def test_generalized_asset_error_cases(require_namespace_init_module):
     """Verify CLI-level error conditions for generalized asset create/update."""
-    # --skip-connector-check + --asset-config are mutually exclusive
+    instance_name = require_namespace_init_module["instanceName"]
+    resource_group = require_namespace_init_module["resourceGroup"]
+
+    # --show-template + --name are mutually exclusive
     run(
         "az iot ops ns asset create "
         "--connector-type Microsoft.OpcUa "
-        "--name dummy --device dummy --endpoint dummy "
-        "-g dummy -i dummy "
-        "--skip-connector-check --asset-config '{}'",
+        "--show-template config "
+        f"--name dummy "
+        f"-g {resource_group} -i {instance_name}",
         expect_failure=True,
     )
 
@@ -700,8 +703,8 @@ def test_generalized_asset_error_cases():
         "az iot ops ns asset create "
         "--connector-type Microsoft.OpcUa "
         "--show-template config "
-        "--asset-config '{}' "
-        "-g dummy -i dummy",
+        f"--asset-config '{{}}' "
+        f"-g {resource_group} -i {instance_name}",
         expect_failure=True,
     )
 
@@ -710,7 +713,7 @@ def test_generalized_asset_error_cases():
         "az iot ops ns asset create "
         "--connector-type Microsoft.OpcUa "
         "--device dummy --endpoint dummy "
-        "-g dummy -i dummy",
+        f"-g {resource_group} -i {instance_name}",
         expect_failure=True,
     )
 

@@ -3253,6 +3253,13 @@ def _build_destination_template(
             default_cfg = {}
             if isinstance(default_destination, dict) and default_destination.get("destination") == dest_type:
                 default_cfg = {k: v for k, v in default_destination.items() if k != "destination"}
+                # Translate metadata-format values to CLI/ARM payload shape:
+                # connector metadata uses qos as integer (0/1) and retain as lowercase ("keep"/"never"),
+                # but the payload shape requires "Qos0"/"Qos1" and "Keep"/"Never".
+                if "qos" in default_cfg and isinstance(default_cfg["qos"], int):
+                    default_cfg = {**default_cfg, "qos": f"Qos{default_cfg['qos']}"}
+                if "retain" in default_cfg and isinstance(default_cfg["retain"], str):
+                    default_cfg = {**default_cfg, "retain": default_cfg["retain"].capitalize()}
             entry = {
                 "target": dest_type,
                 "configuration": {field: default_cfg.get(field) for field in fields},
