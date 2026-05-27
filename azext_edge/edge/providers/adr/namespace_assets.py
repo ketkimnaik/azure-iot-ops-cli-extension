@@ -330,6 +330,516 @@ class NamespaceAssets(Queryable):
             )
             return wait_for_terminal_state(poller, **kwargs)
 
+    def _handle_asset_show_template(
+        self,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+        template_mode: str,
+        asset_config: Optional[str],
+    ) -> dict:
+        """Return a config/schema template for --show-template and exit early.
+
+        Discovers which asset sub-resource types (datasets, eventGroups, streams) the connector
+        supports from its metadata and returns a slimmed template for each supported config.
+
+        OPC UA uses bundled metadata; all other types fetch from OCI via the connector template.
+        """
+        from .namespace_devices import DeviceEndpointType as _DEType
+        from .helpers import load_opcua_metadata_file as _load_opcua_metadata_file, _slim_schema, _consolidate_warnings
+        from .common import EndpointTemplateMode
+
+        if asset_config:
+            raise InvalidArgumentValueError(
+                "--show-template and --asset-config cannot be used together. "
+                "--show-template displays the template and exits without creating an asset."
+            )
+
+        is_opcua = connector_type.lower() == _DEType.OPCUA.value.lower()
+
+        if is_opcua:
+            from azure.core.exceptions import ResourceNotFoundError as _AzureNotFoundError
+            from .helpers import get_opcua_info as _get_opcua_info
+            metadata = None
+            if instance_name and instance_resource_group:
+                try:
+                    metadata = _get_opcua_info(self.cmd, instance_name, instance_resource_group)
+                except _AzureNotFoundError:
+                    pass  # instance / resource-group not found – use bundled metadata
+            if metadata is None:
+                metadata = _load_opcua_metadata_file()
+        else:
+            from ..orchestration.resources.connector_templates import ConnectorTemplates
+            connector_templates = ConnectorTemplates(cmd=self.cmd)
+            template = connector_templates.get_connector_template_for_type(
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                connector_type=connector_type,
+            )
+            if template is None:
+                from azure.cli.core.azclierror import ResourceNotFoundError
+                raise ResourceNotFoundError(
+                    f"No connector template found for connector type '{connector_type}' "
+                    f"in instance '{instance_name}'.\n"
+                    "Create one with: az iot ops connector template create ..."
+                )
+            connector_metadata_ref = template.get("properties", {}).get("connectorMetadataRef")
+            if not connector_metadata_ref:
+                from azure.cli.core.azclierror import ValidationError
+                raise ValidationError(
+                    f"Connector template for '{connector_type}' is missing connectorMetadataRef."
+                )
+            from ...util.oci_client import get_oci_client
+            oci_client = get_oci_client()
+            artifact = oci_client.fetch_first_layer(
+                image_ref=connector_metadata_ref,
+                cmd=self.cmd,
+            )
+            metadata = json.loads(artifact.content.decode("utf-8"))
+
+        endpoint = _get_metadata_endpoint(metadata, connector_type)
+
+        asset_config_template = {}
+        all_warnings: List[str] = []
+        for section_key, schema_key, config_prop, dest_path, dest_prop in _ASSET_SCHEMA_SECTIONS:
+            section = endpoint.get(section_key, {})
+            schema = section.get(schema_key)
+            if not schema:
+                continue
+            sub_props = _collect_sub_item_schemas(section)
+            if sub_props:
+                schema = {
+                    **schema,
+                    "properties": {**schema.get("properties", {}), **sub_props},
+                }
+            warnings: List[str] = []
+            slimmed = _slim_schema(schema, mode=template_mode, _warnings=warnings)
+            all_warnings.extend(warnings)
+            if template_mode == EndpointTemplateMode.SCHEMA.value and isinstance(slimmed, dict):
+                slimmed.pop("$id", None)
+            asset_config_template[config_prop] = slimmed
+
+            # Add destination template alongside the config (managementGroups has no destinations)
+            if dest_path is not None:
+                dest_block = endpoint
+                for key in dest_path:
+                    if not isinstance(dest_block, dict):
+                        dest_block = {}
+                        break
+                    dest_block = dest_block.get(key, {})
+                supported = dest_block.get("supportedDestinations", []) if isinstance(dest_block, dict) else []
+                if supported:
+                    asset_config_template[dest_prop] = _build_destination_template(
+                        supported_destinations=supported,
+                        default_destination=dest_block.get("defaultDestination"),
+                        mode=template_mode,
+                    )
+
+        for w in _consolidate_warnings(all_warnings):
+            logger.warning(w)
+
+        return {"connectorType": connector_type, "assetConfig": asset_config_template}
+
+    def create_asset_by_connector_type(
+        self,
+        instance_name: str,
+        instance_resource_group: str,
+        connector_type: str,
+        asset_name: Optional[str] = None,
+        device_name: Optional[str] = None,
+        device_endpoint_name: Optional[str] = None,
+        asset_config: Optional[str] = None,
+        show_template: Optional[str] = None,
+        # common asset props
+        asset_type_refs: Optional[List[str]] = None,
+        attributes: Optional[List[str]] = None,
+        description: Optional[str] = None,
+        disabled: Optional[bool] = None,
+        display_name: Optional[str] = None,
+        documentation_uri: Optional[str] = None,
+        external_asset_id: Optional[str] = None,
+        hardware_revision: Optional[str] = None,
+        manufacturer: Optional[str] = None,
+        manufacturer_uri: Optional[str] = None,
+        model: Optional[str] = None,
+        product_code: Optional[str] = None,
+        serial_number: Optional[str] = None,
+        software_revision: Optional[str] = None,
+        tags: Optional[Dict[str, str]] = None,
+        **kwargs
+    ) -> dict:
+        """Generalized create command for a new asset using connector type.
+
+        Supports template discovery (--show-template) and JSON or file-based asset
+        configuration (--asset-config) driven by the connector template metadata.
+        Fails if the asset already exists.
+
+        OPC UA (Microsoft.OpcUa) uses bundled metadata; all other types fetch from OCI
+        via the connector template's connectorMetadataRef.
+        """
+        # Normalize short keywords (e.g. "opcua" → "Microsoft.OpcUa", "rest" → "Microsoft.Http").
+        # Unknown types pass through unchanged (treated as custom/3P).
+        connector_type = DeviceEndpointType.get_type_from_keyword(
+            connector_type, return_custom_keyword=False
+        )
+
+        if show_template:
+            return self._handle_asset_show_template(
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                template_mode=show_template.lower(),
+                asset_config=asset_config,
+            )
+
+        # Required arg guards
+        from azure.cli.core.azclierror import RequiredArgumentMissingError
+        if not asset_name:
+            raise RequiredArgumentMissingError("--name is required.")
+        if not device_name:
+            raise RequiredArgumentMissingError("--device is required.")
+        if not device_endpoint_name:
+            raise RequiredArgumentMissingError("--endpoint is required.")
+
+        # Get device to validate endpoint type and resolve location/extendedLocation
+        device, namespace = self._check_device_props(
+            instance_resource_group=instance_resource_group,
+            instance_name=instance_name,
+            asset_type=connector_type,
+            device_name=device_name,
+            device_endpoint_name=device_endpoint_name,
+        )
+
+        # Fail if asset already exists — create does not upsert
+        from azure.core.exceptions import ResourceNotFoundError as _AzureNotFoundError
+        try:
+            self.ops.get(
+                resource_group_name=namespace["resource_group"],
+                namespace_name=namespace["name"],
+                asset_name=asset_name,
+            )
+            raise InvalidArgumentValueError(
+                f"Asset '{asset_name}' already exists. Use 'az iot ops ns asset update' to update it."
+            )
+        except InvalidArgumentValueError:
+            raise
+        except _AzureNotFoundError:
+            pass
+
+        # Parse and validate asset_config if provided
+        additional_config_props = {}
+        if asset_config:
+            additional_config_props = self._load_and_validate_asset_config(
+                asset_config=asset_config,
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+            )
+
+        properties = {
+            "deviceRef": {
+                "deviceName": device_name,
+                "endpointName": device_endpoint_name,
+            }
+        }
+        properties.update(additional_config_props)
+
+        _update_asset_props(
+            properties=properties,
+            asset_type_refs=asset_type_refs,
+            attributes=attributes,
+            description=description,
+            disabled=disabled,
+            display_name=display_name,
+            documentation_uri=documentation_uri,
+            external_asset_id=external_asset_id,
+            hardware_revision=hardware_revision,
+            manufacturer=manufacturer,
+            manufacturer_uri=manufacturer_uri,
+            model=model,
+            product_code=product_code,
+            serial_number=serial_number,
+            software_revision=software_revision,
+        )
+
+        asset_body = {
+            "extendedLocation": device["extendedLocation"],
+            "location": device["location"],
+            "properties": properties,
+            "tags": tags,
+        }
+
+        with console.status(f"Creating asset {asset_name}..."):
+            poller = self.ops.begin_create_or_replace(
+                resource_group_name=namespace["resource_group"],
+                namespace_name=namespace["name"],
+                asset_name=asset_name,
+                resource=asset_body,
+            )
+            return wait_for_terminal_state(poller, **kwargs)
+
+    def update_asset_by_connector_type(
+        self,
+        asset_name: str,
+        instance_name: str,
+        instance_resource_group: str,
+        asset_config: Optional[str] = None,
+        show_template: Optional[str] = None,
+        # common asset props
+        asset_type_refs: Optional[List[str]] = None,
+        attributes: Optional[List[str]] = None,
+        description: Optional[str] = None,
+        disabled: Optional[bool] = None,
+        display_name: Optional[str] = None,
+        documentation_uri: Optional[str] = None,
+        external_asset_id: Optional[str] = None,
+        hardware_revision: Optional[str] = None,
+        manufacturer: Optional[str] = None,
+        manufacturer_uri: Optional[str] = None,
+        model: Optional[str] = None,
+        product_code: Optional[str] = None,
+        serial_number: Optional[str] = None,
+        software_revision: Optional[str] = None,
+        tags: Optional[Dict[str, str]] = None,
+        **kwargs
+    ) -> dict:
+        """Generalized update command for an existing asset.
+
+        Supports template discovery (--show-template) — connector type is derived from
+        the existing asset so --connector-type is not needed. Uses PATCH semantics;
+        fields not provided are left unchanged.
+        """
+        # Fetch the existing asset to derive connector type and namespace
+        existing_asset = self.show(
+            asset_name=asset_name,
+            instance_name=instance_name,
+            resource_group=instance_resource_group,
+        )
+
+        # Derive connector type from the device endpoint — ARM does not persist connectorType
+        # as a property on the asset resource.  The device's inbound endpoint endpointType is
+        # the authoritative source and is always available via the asset's deviceRef.
+        device_ref = existing_asset.get("properties", {}).get("deviceRef", {})
+        device_name_ref = device_ref.get("deviceName", "")
+        endpoint_name_ref = device_ref.get("endpointName", "")
+        namespace_from_asset = parse_resource_id(existing_asset["id"])
+        device = self.device_ops.get(
+            resource_group_name=namespace_from_asset["resource_group"],
+            namespace_name=namespace_from_asset["name"],
+            device_name=device_name_ref,
+        )
+        endpoint = (
+            device.get("properties", {})
+            .get("endpoints", {})
+            .get("inbound", {})
+            .get(endpoint_name_ref, {})
+        )
+        connector_type = endpoint.get("endpointType", "")
+        if not connector_type:
+            raise InvalidArgumentValueError(
+                f"Cannot determine connector type for asset '{asset_name}'. "
+                f"Device '{device_name_ref}' endpoint '{endpoint_name_ref}' is missing 'endpointType'. "
+                "Verify the device endpoint was created correctly."
+            )
+
+        if show_template:
+            if asset_config:
+                raise InvalidArgumentValueError(
+                    "--show-template and --asset-config cannot be used together. "
+                    "--show-template displays the template and exits without updating the asset."
+                )
+            return self._handle_asset_show_template(
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                template_mode=show_template.lower(),
+                asset_config=None,
+            )
+
+        # namespace_from_asset already contains the resource_group and name derived from the asset
+        # ARM id — no need for a separate get_namespace_for_instance HTTP call.
+        namespace = namespace_from_asset
+
+        # Parse and validate asset_config if provided
+        additional_config_props = {}
+        if asset_config:
+            additional_config_props = self._load_and_validate_asset_config(
+                asset_config=asset_config,
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+            )
+
+        update_payload = {}
+        if tags:
+            update_payload["tags"] = tags
+
+        properties = {}
+        properties.update(additional_config_props)
+
+        _update_asset_props(
+            properties=properties,
+            asset_type_refs=asset_type_refs,
+            attributes=attributes,
+            description=description,
+            disabled=disabled,
+            display_name=display_name,
+            documentation_uri=documentation_uri,
+            external_asset_id=external_asset_id,
+            hardware_revision=hardware_revision,
+            manufacturer=manufacturer,
+            manufacturer_uri=manufacturer_uri,
+            model=model,
+            product_code=product_code,
+            serial_number=serial_number,
+            software_revision=software_revision,
+        )
+
+        if properties:
+            update_payload["properties"] = properties
+
+        with console.status(f"Updating asset {asset_name}..."):
+            poller = self.ops.begin_update(
+                resource_group_name=namespace["resource_group"],
+                namespace_name=namespace["name"],
+                asset_name=asset_name,
+                properties=update_payload,
+            )
+            wait_for_terminal_state(poller, **kwargs)
+            return self.show(
+                asset_name=asset_name,
+                namespace_name=namespace["name"],
+                resource_group=namespace["resource_group"],
+            )
+
+    def _load_and_validate_asset_config(
+        self,
+        asset_config: str,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+    ) -> dict:
+        """Load asset config from a file path or inline JSON and validate each sub-config.
+
+        The input is expected to be the 'assetConfig' dict (output of --show-template), e.g.:
+          {
+            "defaultDatasetsConfiguration": {...},
+            "defaultEventsConfiguration": {...}
+          }
+        Or the full --show-template output with 'connectorType' and 'assetConfig' keys,
+        which is auto-unwrapped.
+
+        Returns a dict of ARM property key → payload-ready value for each config present.
+        Configuration properties are returned as serialized JSON strings, while destination
+        properties (e.g. defaultDatasetsDestinations) are returned as native Python lists.
+        """
+        from .namespace_devices import DeviceEndpointType as _DEType
+        from .helpers import load_opcua_metadata_file as _load_opcua_metadata_file, strip_nulls as _strip_nulls
+
+        raw = process_additional_configuration(
+            additional_configuration=asset_config,
+            config_type="asset",
+        )
+        parsed = json.loads(raw)
+
+        # Auto-unwrap --show-template output
+        if isinstance(parsed, dict) and "assetConfig" in parsed and "connectorType" in parsed:
+            parsed = parsed["assetConfig"]
+
+        if not isinstance(parsed, dict):
+            raise InvalidArgumentValueError(
+                "--asset-config must be a JSON object with defaultDatasetsConfiguration, "
+                "defaultEventsConfiguration, and/or defaultStreamsConfiguration keys."
+            )
+
+        # Load metadata for schema validation
+        is_opcua = connector_type.lower() == _DEType.OPCUA.value.lower()
+        if is_opcua:
+            metadata = _load_opcua_metadata_file()
+        else:
+            from ..orchestration.resources.connector_templates import ConnectorTemplates
+            connector_templates = ConnectorTemplates(cmd=self.cmd)
+            template = connector_templates.get_connector_template_for_type(
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                connector_type=connector_type,
+            )
+            if not template:
+                from azure.cli.core.azclierror import ValidationError
+                raise ValidationError(
+                    f"No connector template found for connector type '{connector_type}'. "
+                    "Cannot validate asset config."
+                )
+            connector_metadata_ref = template.get("properties", {}).get("connectorMetadataRef")
+            if not connector_metadata_ref:
+                from azure.cli.core.azclierror import ValidationError
+                raise ValidationError(
+                    f"Connector template for type '{connector_type}' is missing 'connectorMetadataRef'. "
+                    "Cannot validate asset config."
+                )
+            from ...util.oci_client import get_oci_client
+            oci_client = get_oci_client()
+            artifact = oci_client.fetch_first_layer(
+                image_ref=connector_metadata_ref,
+                cmd=self.cmd,
+            )
+            metadata = json.loads(artifact.content.decode("utf-8"))
+
+        endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
+
+        result = {}
+        for section_key, schema_key, config_prop, dest_path, dest_prop in _ASSET_SCHEMA_SECTIONS:
+            # Handle config
+            if config_prop in parsed and parsed[config_prop] is not None:
+                config_data = _strip_nulls(parsed[config_prop])
+                section = (endpoint or {}).get(section_key, {}) if endpoint else {}
+                schema = section.get(schema_key) if section else None
+                if schema and endpoint:
+                    sub_props = _collect_sub_item_schemas(section)
+                    if sub_props:
+                        schema = {
+                            **schema,
+                            "properties": {**schema.get("properties", {}), **sub_props},
+                        }
+                if schema:
+                    from ...util.schema_validation import check_json_schema, validate_data_against_schema
+                    skip_reason = check_json_schema(schema)
+                    if skip_reason:
+                        logger.warning("Skipping %s validation: %s", config_prop, skip_reason)
+                    else:
+                        validate_data_against_schema(schema, config_data, name=config_prop)
+                result[config_prop] = json.dumps(config_data)
+
+            # Handle destinations (managementGroups has no destinations)
+            if dest_prop is not None and dest_prop in parsed and parsed[dest_prop] is not None:
+                dest_data = _strip_nulls(parsed[dest_prop])
+                # Filter out destination entries where all configuration fields were null
+                # (template placeholders that the user didn't fill in).  An entry with an
+                # empty configuration dict would fail ARM's required-field validation.
+                if isinstance(dest_data, list):
+                    dest_data = [
+                        item for item in dest_data
+                        if not isinstance(item, dict) or item.get("configuration")
+                    ]
+                if not dest_data:
+                    continue
+                # Validate target is in supported list from metadata
+                dest_block = endpoint or {}
+                for key in (dest_path or []):
+                    dest_block = dest_block.get(key, {}) if isinstance(dest_block, dict) else {}
+                supported = dest_block.get("supportedDestinations", []) if isinstance(dest_block, dict) else []
+                if supported and isinstance(dest_data, list):
+                    for dest_item in dest_data:
+                        target = dest_item.get("target") if isinstance(dest_item, dict) else None
+                        if target and target not in supported:
+                            raise InvalidArgumentValueError(
+                                f"Destination target '{target}' is not supported for {dest_prop}. "
+                                f"Supported: {supported}."
+                            )
+                result[dest_prop] = dest_data
+
+        return result
+
     def delete(
         self,
         asset_name: str,
@@ -2620,6 +3130,142 @@ class NamespaceAssets(Queryable):
             )
 
         return (asset if asset_name else device, namespace)
+
+
+# Mapping from connector metadata section names to ARM property names and destination paths.
+# Each tuple is:
+#   (section_key, schema_key, config_prop, dest_path, dest_prop)
+# - section_key:  key in the inboundEndpoint metadata dict (e.g. "datasets")
+# - schema_key:   key within that section that holds the top-level JSON Schema
+# - config_prop:  ARM property name for the configuration (e.g. "defaultDatasetsConfiguration")
+# - dest_path:    tuple of keys to traverse into the metadata section to reach the destinations dict
+#                 or None if the section has no destinations
+# - dest_prop:    ARM property name for the destinations, or None if not applicable
+#
+# Sections and schema key names are FIXED by the connector metadata JSON Schema
+# (additionalProperties: false).  The four supported sections are:
+#   datasets       → datasetConfigurationSchema   (sub-item: dataPoints.dataPointConfigurationSchema)
+#   eventGroups    → eventGroupConfigurationSchema (sub-item: events.eventConfigurationSchema)
+#   streams        → streamConfigurationSchema
+#   managementGroups → managementGroupConfigurationSchema (sub-item: managementGroupActions.actionConfigurationSchema)
+#
+# ARM property names are also fixed and do NOT follow a mechanical pattern from section names
+# (e.g. "eventGroups" → "defaultEventsConfiguration", not "defaultEventGroupsConfiguration").
+_ASSET_SCHEMA_SECTIONS = [
+    (
+        "datasets",
+        "datasetConfigurationSchema",
+        "defaultDatasetsConfiguration",
+        ("datasets", "destinations"),
+        "defaultDatasetsDestinations",
+    ),
+    (
+        "eventGroups",
+        "eventGroupConfigurationSchema",
+        "defaultEventsConfiguration",
+        ("eventGroups", "events", "destinations"),
+        "defaultEventsDestinations",
+    ),
+    (
+        "streams",
+        "streamConfigurationSchema",
+        "defaultStreamsConfiguration",
+        ("streams", "destinations"),
+        "defaultStreamsDestinations",
+    ),
+    (
+        "managementGroups",
+        "managementGroupConfigurationSchema",
+        "defaultManagementGroupsConfiguration",
+        None,  # managementGroups has no destinations in the metadata schema
+        None,
+    ),
+]
+
+
+def _get_metadata_endpoint(metadata: dict, connector_type: str) -> dict:
+    """Return the inboundEndpoints entry matching connector_type, or raise ValidationError."""
+    from azure.cli.core.azclierror import ValidationError
+
+    for ep in metadata.get("inboundEndpoints", []):
+        if ep.get("endpointType", "").lower() == connector_type.lower():
+            return ep
+    raise ValidationError(
+        f"Connector metadata does not contain an inbound endpoint entry for '{connector_type}'."
+    )
+
+
+def _collect_sub_item_schemas(section: dict) -> dict:
+    """Scan a metadata section for sub-item *ConfigurationSchema entries and return merged properties.
+
+    For example, eventGroups contains both eventGroupConfigurationSchema (group-level) and
+    events.eventConfigurationSchema (event-level). Both sets of fields are valid in the
+    defaultEventsConfiguration ARM property, so both should be merged into the template/validation
+    schema. This function discovers those sub-item schemas dynamically rather than hardcoding which
+    sections have sub-item schemas.
+    """
+    merged_props: dict = {}
+    for value in section.values():
+        if not isinstance(value, dict):
+            continue
+        for sub_key, sub_value in value.items():
+            if sub_key.endswith("ConfigurationSchema") and isinstance(sub_value, dict):
+                for prop_name, prop_value in sub_value.get("properties", {}).items():
+                    if prop_name not in merged_props:
+                        merged_props[prop_name] = prop_value
+    return merged_props
+
+
+def _build_destination_template(
+    supported_destinations: List[str],
+    default_destination: Optional[dict] = None,
+    mode: str = "config",
+) -> list:
+    """Build a destination template list for --show-template output.
+
+    config mode: one entry per supported destination type with null placeholders.
+    schema mode: one entry per supported destination showing required fields and types.
+    """
+    _DEST_FIELDS = {
+        "Mqtt": {
+            "topic": {"type": "string", "description": "MQTT topic to publish to"},
+            "qos": {"type": "string", "enum": ["Qos0", "Qos1"], "description": "MQTT QoS level"},
+            "ttl": {"type": "integer", "minimum": 0, "description": "Time to live in seconds"},
+            "retain": {"type": "string", "enum": ["Keep", "Never"], "description": "Retain flag"},
+        },
+        "BrokerStateStore": {
+            "key": {"type": "string", "description": "State store key"},
+        },
+        "Storage": {
+            "path": {"type": "string", "description": "Storage path"},
+        },
+    }
+
+    result = []
+    for dest_type in supported_destinations:
+        fields = _DEST_FIELDS.get(dest_type, {})
+        if mode == "schema":
+            entry = {"target": dest_type, "configuration": {}}
+            for field_name, field_meta in fields.items():
+                entry["configuration"][field_name] = field_meta
+        else:
+            # config mode: use defaultDestination values if provided, else null
+            default_cfg = {}
+            if isinstance(default_destination, dict) and default_destination.get("destination") == dest_type:
+                default_cfg = {k: v for k, v in default_destination.items() if k != "destination"}
+                # Translate metadata-format values to CLI/ARM payload shape:
+                # connector metadata uses qos as integer (0/1) and retain as lowercase ("keep"/"never"),
+                # but the payload shape requires "Qos0"/"Qos1" and "Keep"/"Never".
+                if "qos" in default_cfg and isinstance(default_cfg["qos"], int):
+                    default_cfg = {**default_cfg, "qos": f"Qos{default_cfg['qos']}"}
+                if "retain" in default_cfg and isinstance(default_cfg["retain"], str):
+                    default_cfg = {**default_cfg, "retain": default_cfg["retain"].capitalize()}
+            entry = {
+                "target": dest_type,
+                "configuration": {field: default_cfg.get(field) for field in fields},
+            }
+        result.append(entry)
+    return result
 
 
 def _build_destination(

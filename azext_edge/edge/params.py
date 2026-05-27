@@ -49,6 +49,7 @@ from .providers.orchestration.common import (
     TlsKeyAlgo,
     TlsKeyRotation,
 )
+from .providers.adr.common import EndpointTemplateMode
 
 
 def load_iotops_arguments(self, _):
@@ -2033,6 +2034,87 @@ def load_iotops_arguments(self, _):
             options_list=["--private-key-secret-name", "--prks"],
             help="Private key secret name in the Key Vault. If not provided, the "
             "certificate file name will be used to generate the secret name.",
+        )
+
+    with self.argument_context("iot ops ns asset create") as context:
+        context.argument(
+            "connector_type",
+            options_list=["--connector-type", "--ct"],
+            help="Connector type for the asset (e.g. 'Microsoft.OpcUa', 'Microsoft.Http'). "
+            "For all types except Microsoft.OpcUa, the matching connector template must exist "
+            "in the instance when --asset-config is provided.",
+        )
+        context.argument(
+            "asset_name",
+            options_list=["--name", "-n"],
+            help="Name of the asset. Required unless --show-template is used.",
+        )
+        context.argument(
+            "device_name",
+            options_list=["--device", "-d"],
+            help="Device name. Required unless --show-template is used.",
+        )
+        context.argument(
+            "device_endpoint_name",
+            options_list=["--endpoint", "--ep"],
+            help="Device inbound endpoint name. Required unless --show-template is used.",
+        )
+        context.argument(
+            "asset_config",
+            options_list=["--asset-config", "--ac"],
+            help="Inline JSON string or path to a JSON/YAML file (.json, .yaml, .yml) containing "
+            "connector-specific default asset configurations and destinations. Accepted keys vary "
+            "by connector type (e.g. defaultDatasetsConfiguration, defaultEventsConfiguration, "
+            "defaultStreamsConfiguration, defaultDatasetsDestinations, defaultEventsDestinations, "
+            "defaultStreamsDestinations). Use --show-template to discover the supported keys and "
+            "their schema for the target connector type. Cannot be combined with --show-template.",
+        )
+        context.argument(
+            "show_template",
+            options_list=["--show-template"],
+            arg_type=get_enum_type(EndpointTemplateMode),
+            help="Show a starter configuration template for the connector type and exit without "
+            "creating an asset. "
+            "config: fields shown with their default values (null if no default); output is "
+            "directly usable as --asset-config input. "
+            "oneOf fields with multiple variants collapse to the first non-null variant and emit a warning — "
+            "run with schema mode to see all options. "
+            "allOf fields merge all non-null sub-schemas into one flat object. "
+            "schema: every field includes type, default, and constraints (min, max, enum, pattern); "
+            "oneOf/allOf fields show all variants so you can inspect the full schema. "
+            "Draft-07 $ref pointers (#/definitions/...) are resolved inline in both modes.",
+        )
+
+    with self.argument_context("iot ops ns asset update") as context:
+        context.argument(
+            "asset_name",
+            options_list=["--name", "-n"],
+            help="Name of the asset.",
+        )
+        context.argument(
+            "asset_config",
+            options_list=["--asset-config", "--ac"],
+            help="Inline JSON string or path to a JSON/YAML file (.json, .yaml, .yml) containing "
+            "connector-specific default asset configurations and destination settings to update. "
+            "Accepted keys vary by connector type and can include destination keys such as "
+            "defaultDatasetsDestinations, defaultEventsDestinations, defaultStreamsDestinations. "
+            "Use --show-template to discover the supported keys and their schema "
+            "for the asset's connector type. Cannot be combined with --show-template.",
+        )
+        context.argument(
+            "show_template",
+            options_list=["--show-template"],
+            arg_type=get_enum_type(EndpointTemplateMode),
+            help="Show a starter configuration template for the asset's connector type and exit "
+            "without updating the asset. The connector type is read from the existing asset. "
+            "config: fields shown with their default values (null if no default); output is "
+            "directly usable as --asset-config input. "
+            "oneOf fields with multiple variants collapse to the first non-null variant and emit a warning — "
+            "run with schema mode to see all options. "
+            "allOf fields merge all non-null sub-schemas into one flat object. "
+            "schema: every field includes type, default, and constraints (min, max, enum, pattern); "
+            "oneOf/allOf fields show all variants so you can inspect the full schema. "
+            "Draft-07 $ref pointers (#/definitions/...) are resolved inline in both modes.",
         )
 
     with self.argument_context("iot ops clone") as context:

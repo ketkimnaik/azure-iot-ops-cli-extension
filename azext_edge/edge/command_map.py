@@ -315,6 +315,8 @@ def load_iotops_commands(self, _):
         "iot ops ns asset",
         command_type=namespace_resource_ops,
     ) as cmd_group:
+        cmd_group.command("create", "create_namespace_asset")
+        cmd_group.command("update", "update_namespace_asset")
         cmd_group.command("delete", "delete_namespace_asset")
         cmd_group.command("query", "query_namespace_assets")
         cmd_group.show_command("show", "show_namespace_asset")

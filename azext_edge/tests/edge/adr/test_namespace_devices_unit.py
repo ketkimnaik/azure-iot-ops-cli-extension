@@ -36,6 +36,7 @@ from azext_edge.edge.commands_namespaces import (
     apply_inbound_device_endpoint,
 )
 from azext_edge.edge.providers.adr.common import ADRAuthModes
+from azext_edge.edge.providers.adr.helpers import _slim_schema, strip_nulls as _strip_nulls
 from azext_edge.edge.providers.adr.namespace_devices import DeviceEndpointType
 from azext_edge.edge.providers.adr.specs import SecurityMode, SecurityPolicy
 from azext_edge.edge.util.common import parse_kvp_nargs
@@ -2507,7 +2508,7 @@ def test_apply_inbound_device_endpoint_show_template(
 
     if is_opcua:
         mocker.patch(
-            "azext_edge.edge.providers.adr.namespace_devices.NamespaceDevices._get_opcua_info",
+            "azext_edge.edge.providers.adr.helpers.get_opcua_info",
             return_value={
                 "version": "1.2.82",
                 "inboundEndpoints": [
@@ -2627,11 +2628,16 @@ def test_apply_inbound_device_endpoint_no_template_errors(
         )
 
 
-@pytest.mark.parametrize("with_config_file", [False, True])
-@pytest.mark.parametrize("skip_connector_check", [False, True])
-@pytest.mark.parametrize("endpoints_present, replace", [
-    (False, False),
-    (True, True),
+@pytest.mark.parametrize("with_config_file, skip_connector_check, endpoints_present, replace", [
+    # (with_config_file, skip_connector_check, endpoints_present, replace)
+    # with_config_file=True + skip_connector_check=True is mutually exclusive and is covered by
+    # test_apply_inbound_device_endpoint_skip_connector_check_with_config_file_errors
+    (False, False, False, False),
+    (False, False, True, True),
+    (False, True, False, False),
+    (False, True, True, True),
+    (True, False, False, False),
+    (True, False, True, True),
 ])
 def test_apply_inbound_device_endpoint_success(
     mocked_cmd,
@@ -2647,12 +2653,6 @@ def test_apply_inbound_device_endpoint_success(
     Happy-path tests for apply_inbound_device_endpoint.
     Covers: with/without config file, skip/no-skip connector check, replace semantics.
     """
-    # --endpoint-config and --skip-connector-check are mutually exclusive; skip the invalid combination.
-    if with_config_file and skip_connector_check:
-        pytest.skip(
-            "mutually exclusive combination — covered by "
-            "test_apply_inbound_device_endpoint_skip_connector_check_with_config_file_errors"
-        )
 
     connector_type = "Microsoft.OpcUa"
     version_from_template = "1.3.0"
@@ -2660,7 +2660,7 @@ def test_apply_inbound_device_endpoint_success(
     # OPC UA does not use Akri connector templates — mock _get_opcua_info instead.
     # For skip_connector_check=True neither path is taken, so the mock is a no-op there.
     mocker.patch(
-        "azext_edge.edge.providers.adr.namespace_devices.NamespaceDevices._get_opcua_info",
+        "azext_edge.edge.providers.adr.helpers.get_opcua_info",
         return_value={"version": version_from_template, "inboundEndpoints": []},
     )
     # ConnectorTemplates should NOT be called for OPC UA; patch it to catch any accidental call.
@@ -2803,7 +2803,7 @@ def test_apply_inbound_device_endpoint_duplicate_no_replace_errors(
     connector_type = "Microsoft.OpcUa"
     # OPC UA uses bundled metadata, not connector templates.
     mocker.patch(
-        "azext_edge.edge.providers.adr.namespace_devices.NamespaceDevices._get_opcua_info",
+        "azext_edge.edge.providers.adr.helpers.get_opcua_info",
         return_value={"version": "1.2.82", "inboundEndpoints": []},
     )
     mock_ct = mocker.patch(
@@ -2857,8 +2857,6 @@ def test_apply_inbound_device_endpoint_duplicate_no_replace_errors(
 # ---------------------------------------------------------------------------
 # _slim_schema unit tests
 # ---------------------------------------------------------------------------
-
-from azext_edge.edge.providers.adr.namespace_devices import _slim_schema  # noqa: E402
 
 
 def test_slim_schema_config_mode_flat():
@@ -3319,6 +3317,71 @@ def test_slim_schema_ref_with_sibling_overrides():
 
 
 # ---------------------------------------------------------------------------
+# _strip_nulls unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_strip_nulls_removes_null_values_from_dict():
+    """Null values in a dict are removed."""
+    assert _strip_nulls({"a": 1, "b": None, "c": "x"}) == {"a": 1, "c": "x"}
+
+
+def test_strip_nulls_removes_null_items_from_list():
+    """Null items in a list are removed."""
+    assert _strip_nulls([1, None, "x", None]) == [1, "x"]
+
+
+def test_strip_nulls_filters_empty_dicts_from_list():
+    """Array items that become empty dicts after stripping are dropped.
+
+    This covers the --show-template round-trip case: an all-null placeholder
+    like {"browsePath": null, "fieldId": null} should produce an empty array
+    rather than [{}], which would fail 'required' schema validation.
+    """
+    assert _strip_nulls([{"browsePath": None, "fieldId": None}]) == []
+
+
+def test_strip_nulls_keeps_partially_filled_array_items():
+    """Array items with at least one non-null field are kept."""
+    result = _strip_nulls([{"browsePath": "ns=1;i=42", "fieldId": None}])
+    assert result == [{"browsePath": "ns=1;i=42"}]
+
+
+def test_strip_nulls_mixed_list_drops_all_null_items():
+    """Mixed list: fully-null items dropped, partially-filled items kept."""
+    result = _strip_nulls([
+        {"browsePath": None, "fieldId": None},
+        {"browsePath": "ns=1;i=1"},
+        {"browsePath": None, "fieldId": None},
+    ])
+    assert result == [{"browsePath": "ns=1;i=1"}]
+
+
+def test_strip_nulls_nested_recursion():
+    """Null removal recurses into nested dicts and lists."""
+    obj = {
+        "eventFilter": {
+            "selectClauses": [
+                {"browsePath": None, "fieldId": None, "typeDefinitionId": None}
+            ]
+        },
+        "publishingInterval": 1000,
+    }
+    result = _strip_nulls(obj)
+    assert result == {
+        "eventFilter": {"selectClauses": []},
+        "publishingInterval": 1000,
+    }
+
+
+def test_strip_nulls_scalars_pass_through():
+    """Non-container values pass through unchanged."""
+    assert _strip_nulls(42) == 42
+    assert _strip_nulls("hello") == "hello"
+    assert _strip_nulls(True) is True
+
+
+# ---------------------------------------------------------------------------
 # check_json_schema dialect guard (used by mgmt actions and namespace_devices)
 # ---------------------------------------------------------------------------
 
@@ -3556,7 +3619,7 @@ def test_apply_inbound_device_endpoint_opcua_config_fails_schema_validation(
 ):
     """Invalid OPC UA endpoint config raises InvalidArgumentValueError via bundled schema."""
     mocker.patch(
-        "azext_edge.edge.providers.adr.namespace_devices.NamespaceDevices._get_opcua_info",
+        "azext_edge.edge.providers.adr.helpers.get_opcua_info",
         return_value={"version": "1.2.82", "inboundEndpoints": []},
     )
     # keepAliveMilliseconds must be an integer — passing a string violates the schema.

@@ -632,12 +632,14 @@ def assert_namespace_device_opcua_props(
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("template_mode", ["config", "schema"])
-def test_generalized_inbound_endpoint_show_template_opcua(template_mode):
+def test_generalized_inbound_endpoint_show_template_opcua(template_mode, require_namespace_init):
     """--show-template for OPC UA reads from the bundled file (no ARM call needed)."""
+    instance_name = require_namespace_init["instanceName"]
+    resource_group = require_namespace_init["resourceGroup"]
     result = run(
         "az iot ops ns device endpoint inbound apply "
         f"--show-template {template_mode} --connector-type Microsoft.OpcUa "
-        "-g dummy -i dummy"
+        f"-g {resource_group} -i {instance_name}"
     )
     assert result["connectorType"] == "Microsoft.OpcUa"
     config = result["endpointConfig"]
@@ -675,13 +677,16 @@ def test_generalized_inbound_endpoint_show_template_opcua(template_mode):
         assert field in config["defaults"], f"Missing defaults field: {field}"
 
 
-def test_generalized_inbound_endpoint_error_cases():
+def test_generalized_inbound_endpoint_error_cases(require_namespace_init):
     """Verify CLI-level and provider-level error conditions."""
+    instance_name = require_namespace_init["instanceName"]
+    resource_group = require_namespace_init["resourceGroup"]
+
     # --skip-connector-check + --endpoint-config are mutually exclusive
     run(
         "az iot ops ns device endpoint inbound apply "
         "--connector-type Microsoft.Mqtt "
-        "-n dummy -d dummy --endpoint-address dummy -g dummy -i dummy "
+        f"-n dummy -d dummy --endpoint-address dummy -g {resource_group} -i {instance_name} "
         "--skip-connector-check --endpoint-config '{\"key\": \"value\"}'",
         expect_failure=True,
     )
