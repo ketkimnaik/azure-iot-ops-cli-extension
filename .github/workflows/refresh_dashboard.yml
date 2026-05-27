@@ -9,18 +9,9 @@ jobs:
   notify-dashboard:
     runs-on: ubuntu-latest
     steps:
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.DASHBOARD_APP_ID }}
-          private-key: ${{ secrets.DASHBOARD_APP_PRIVATE_KEY }}
-          owner: Azure
-          repositories: azure-iot-cli-extension
-
       - name: Trigger dashboard refresh
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.DASHBOARD_PAT }}
         run: |
           gh api \
             --method POST \
