@@ -736,10 +736,65 @@ def load_iotops_adr_help():
     """
 
     helps[
+        "iot ops ns device endpoint inbound apply"
+    ] = """
+        type: command
+        short-summary: Apply an inbound endpoint to a device using a generalized connector-type approach.
+        long-summary: |
+          The generalized apply command is schema-driven. For non-OPC UA connector types it looks up
+          an existing connector template for the specified --connector-type, auto-resolves the
+          endpoint version, and optionally validates --endpoint-config against the connector schema.
+
+          Schema validation of --endpoint-config is only performed when the connector's
+          additionalConfigurationSchema uses JSON Schema Draft-07
+          (http://json-schema.org/draft-07/schema#). If the schema uses a different dialect,
+          validation is skipped with a warning and the endpoint is still created.
+
+          OPC UA (Microsoft.OpcUa) is a special case: it does not use Akri connector templates.
+          Its schema and version are derived from bundled metadata. The instance must have OPC UA
+          enabled (feature.opcua.mode != Disabled).
+
+          Use --show-template to discover valid configuration fields before creating an endpoint.
+
+        examples:
+        - name: Discover default endpoint configuration template for an OPC UA connector
+          text: >
+            az iot ops ns device endpoint inbound apply --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-template config
+
+        - name: Discover full schema template (with types and constraints) for an OPC UA connector
+          text: >
+            az iot ops ns device endpoint inbound apply --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --show-template schema
+
+        - name: Apply a generalized OPC UA inbound endpoint using a JSON config file
+          text: >
+            az iot ops ns device endpoint inbound apply --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config ./opcua-endpoint-config.json
+
+        - name: Apply a generalized OPC UA inbound endpoint using a YAML config file
+          text: >
+            az iot ops ns device endpoint inbound apply --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config ./opcua-endpoint-config.yaml
+
+        - name: Apply a generalized OPC UA inbound endpoint using inline JSON with nested objects
+          text: >
+            az iot ops ns device endpoint inbound apply --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --endpoint-config '{"applicationName":"line1-opcua-client","keepAliveMilliseconds":10000,"session":{"timeoutMilliseconds":60000,"reconnectPeriod":5000},"security":{"securityPolicy":"Basic256Sha256","securityMode":"SignAndEncrypt","autoAcceptUntrustedServerCertificates":true}}'
+
+        - name: Apply a generalized ONVIF inbound endpoint using a config file with authentication
+          text: >
+            az iot ops ns device endpoint inbound apply --device mydevice --name myONVIFEndpoint --endpoint-address "http://192.168.1.100:8000/onvif/device_service" --connector-type Microsoft.Onvif --instance myInstance -g myInstanceResourceGroup --endpoint-config ./onvif-config.json --user-ref auth-secret/username --pass-ref auth-secret/password
+
+        - name: Apply an inbound endpoint skipping connector template check (no schema validation, no version auto-resolution)
+          text: >
+            az iot ops ns device endpoint inbound apply --device mydevice --name myEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --skip-connector-check
+
+        - name: Apply an inbound endpoint but error if it already exists (prevent overwrite)
+          text: >
+            az iot ops ns device endpoint inbound apply --device mydevice --name myOPCUAEndpoint --endpoint-address "opc.tcp://192.168.1.100:4840" --connector-type Microsoft.OpcUa --instance myInstance -g myInstanceResourceGroup --no-replace
+    """
+
+    helps[
         "iot ops ns device endpoint inbound add"
     ] = """
         type: group
-        short-summary: Add inbound endpoints to devices in Device Registry namespaces.
+        short-summary: Add a type-specific inbound endpoint to a device in a Device Registry namespace.
     """
 
     helps[
@@ -991,6 +1046,77 @@ def load_iotops_adr_help():
         - name: Show details of an asset
           text: >
             az iot ops ns asset show --name myasset --instance myInstance -g myInstanceResourceGroup
+    """
+
+    helps[
+        "iot ops ns asset create"
+    ] = """
+        type: command
+        short-summary: Create a namespaced asset in an IoT Operations instance.
+
+        examples:
+        - name: Create a namespaced asset for a given connector type
+          text: >
+            az iot ops ns asset create --name myasset --instance myInstance -g myInstanceResourceGroup
+            --connector-type Microsoft.OpcUa --device mydevice --endpoint myEndpoint
+
+        - name: Create a namespaced asset with a connector-specific configuration using a file
+          text: >
+            az iot ops ns asset create --name myasset --instance myInstance -g myInstanceResourceGroup
+            --connector-type Microsoft.OpcUa --device mydevice --endpoint myEndpoint
+            --asset-config path/to/config.yaml
+
+        - name: Create a namespaced asset with a connector-specific configuration using inline JSON
+          text: >
+            az iot ops ns asset create --name myasset --instance myInstance -g myInstanceResourceGroup
+            --connector-type Microsoft.OpcUa --device mydevice --endpoint myEndpoint
+            --asset-config '{"defaultDatasetsConfiguration":{"publishingInterval":1000,"samplingInterval":500,"queueSize":5}}'
+
+        - name: Create a namespaced asset with connector configuration and metadata in a single operation
+          text: >
+            az iot ops ns asset create --name myasset --instance myInstance -g myInstanceResourceGroup
+            --connector-type Microsoft.OpcUa --device mydevice --endpoint myEndpoint
+            --asset-config path/to/config.yaml --description "Factory floor sensor" --display-name "My Asset v1"
+            --manufacturer "Contoso" --model "SensorX1" --serial-number "SN-001"
+
+        - name: Show the configuration template for a connector type without creating an asset
+          text: >
+            az iot ops ns asset create --connector-type Microsoft.OpcUa --show-template config
+            --instance myInstance -g myInstanceResourceGroup
+    """
+
+    helps[
+        "iot ops ns asset update"
+    ] = """
+        type: command
+        short-summary: Update a namespaced asset in an IoT Operations instance.
+
+        examples:
+        - name: Update an asset's basic properties
+          text: >
+            az iot ops ns asset update --name myasset --instance myInstance -g myInstanceResourceGroup
+            --description "Updated description" --display-name "My Asset v2"
+
+        - name: Update an asset's connector-specific configuration using a file
+          text: >
+            az iot ops ns asset update --name myasset --instance myInstance -g myInstanceResourceGroup
+            --asset-config path/to/config.yaml
+
+        - name: Update an asset's connector-specific configuration using inline JSON
+          text: >
+            az iot ops ns asset update --name myasset --instance myInstance -g myInstanceResourceGroup
+            --asset-config '{"defaultDatasetsConfiguration":{"publishingInterval":2000,"samplingInterval":1000}}'
+
+        - name: Update an asset's connector configuration along with metadata in a single operation
+          text: >
+            az iot ops ns asset update --name myasset --instance myInstance -g myInstanceResourceGroup
+            --asset-config path/to/config.yaml --description "Updated factory sensor" --display-name "My Asset v2"
+            --manufacturer "Contoso" --model "SensorX1" --serial-number "SN-001"
+
+        - name: Show the configuration template for the asset's connector type without updating
+          text: >
+            az iot ops ns asset update --name myasset --instance myInstance -g myInstanceResourceGroup
+            --show-template config
     """
 
     helps[
