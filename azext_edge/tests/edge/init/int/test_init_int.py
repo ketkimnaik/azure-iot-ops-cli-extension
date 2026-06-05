@@ -13,7 +13,12 @@ from knack.log import get_logger
 
 from azext_edge.edge.common import DEFAULT_BROKER, DEFAULT_BROKER_LISTENER
 from azext_edge.edge.util.common import assemble_nargs_to_dict
-from azext_edge.edge.providers.orchestration.common import EXTENSION_TYPE_CM, EXTENSION_TYPE_SSC
+from azext_edge.edge.providers.orchestration.common import (
+    AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID,
+    EXTENSION_TYPE_CM,
+    EXTENSION_TYPE_OPS,
+    EXTENSION_TYPE_SSC,
+)
 
 from ....generators import generate_random_string
 from ....helpers import process_additional_args, run, strip_quotes
@@ -230,9 +235,11 @@ def assert_aio_instance(
         extension_result = run(f"az rest --method GET --url {extension_result['nextLink']}")
         extensions.extend(extension_result["value"])
     iot_ops_ext = None
+    iot_ops_ext_principal_id = None
     for ext in extensions:
-        if ext["properties"]["extensionType"] == "microsoft.iotoperations":
+        if ext["properties"]["extensionType"] == EXTENSION_TYPE_OPS:
             iot_ops_ext = ext
+            iot_ops_ext_principal_id = ext.get("identity", {}).get("principalId")
 
     if ops_config:
         ops_config = assemble_nargs_to_dict(ops_config.split())
@@ -259,6 +266,19 @@ def assert_aio_instance(
     assert instance_props.get("description") == description
     assert instance_props["schemaRegistryRef"] == {"resourceId": schema_registry_id}
     assert instance_props["adrNamespaceRef"] == {"resourceId": adr_namespace_id}
+
+    # Verify the schema registry role assignment uses Azure Device Registry Administrator, not Contributor
+    if iot_ops_ext_principal_id:
+        sr_role_assignments = run(
+            f"az role assignment list --scope {schema_registry_id} "
+            f"--assignee {iot_ops_ext_principal_id} "
+            "--query \"[].roleDefinitionId\" -o tsv"
+        )
+        assigned_role_ids = [ra.split("/")[-1] for ra in sr_role_assignments.strip().splitlines()]
+        assert AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID in assigned_role_ids, (
+            f"Expected Azure Device Registry Administrator ({AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID}) "
+            f"on schema registry {schema_registry_id}, but found role IDs: {assigned_role_ids}"
+        )
 
     tree = run(f"az iot ops show -n {instance_name} -g {resource_group} --tree")
     assert expected_custom_location in tree

@@ -35,7 +35,7 @@ from ...util.az_client import (
 )
 from ...util.common import insert_newlines
 from .common import (
-    CONTRIBUTOR_ROLE_ID,
+    AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID,
     DEFAULT_HEALTH_CHECKS_INTERVAL,
     DEFAULT_HEALTH_CHECKS_MAX,
     EXTENSION_MONIKER_CM,
@@ -278,7 +278,7 @@ class WorkManager:
                 principal_id=ops_ext_principal_id,
                 role_def_id=ROLE_DEF_FORMAT_STR.format(
                     subscription_id=schema_registry_id_parts.subscription_id,
-                    role_id=CONTRIBUTOR_ROLE_ID,
+                    role_id=AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID,
                 ),
                 principal_type=PrincipalType.SERVICE_PRINCIPAL.value,
                 headers=self._headers,

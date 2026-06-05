@@ -42,7 +42,7 @@ from azext_edge.edge.common import (
 from azext_edge.edge.providers.base import DEFAULT_NAMESPACE
 from azext_edge.edge.providers.orchestration.common import (
     ARM_ENDPOINT,
-    CONTRIBUTOR_ROLE_ID,
+    AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID,
     DEFAULT_HEALTH_CHECKS_INTERVAL,
     EXTENSION_TYPE_CM,
     EXTENSION_TYPE_OPS,
@@ -418,7 +418,7 @@ class ServiceGenerator:
                 body = json.loads(request_kpis.body_str)
                 assert body["properties"]["roleDefinitionId"] == ROLE_DEF_FORMAT_STR.format(
                     subscription_id=ZEROED_SUBSCRIPTION,
-                    role_id=CONTRIBUTOR_ROLE_ID,
+                    role_id=AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID,
                 )
                 assert body["properties"]["principalId"] == ops_ext_identity["principalId"]
                 assert body["properties"]["principalType"] == "ServicePrincipal"
