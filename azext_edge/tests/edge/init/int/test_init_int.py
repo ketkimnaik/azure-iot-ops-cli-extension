@@ -268,17 +268,17 @@ def assert_aio_instance(
     assert instance_props["adrNamespaceRef"] == {"resourceId": adr_namespace_id}
 
     # Verify the schema registry role assignment uses Azure Device Registry Administrator, not Contributor
-    if iot_ops_ext_principal_id:
-        sr_role_assignments = run(
-            f"az role assignment list --scope {schema_registry_id} "
-            f"--assignee {iot_ops_ext_principal_id} "
-            "--query \"[].roleDefinitionId\" -o tsv"
-        )
-        assigned_role_ids = [ra.split("/")[-1] for ra in sr_role_assignments.strip().splitlines()]
-        assert AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID in assigned_role_ids, (
-            f"Expected Azure Device Registry Administrator ({AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID}) "
-            f"on schema registry {schema_registry_id}, but found role IDs: {assigned_role_ids}"
-        )
+    assert iot_ops_ext_principal_id, "IoT Operations extension is missing 'identity.principalId'."
+    sr_role_assignments = run(
+        f"az role assignment list --scope {schema_registry_id} "
+        f"--assignee {iot_ops_ext_principal_id} "
+        "--query \"[].roleDefinitionId\" -o tsv"
+    ) or ""
+    assigned_role_ids = [ra.split("/")[-1] for ra in sr_role_assignments.splitlines() if ra.strip()]
+    assert AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID in assigned_role_ids, (
+        f"Expected Azure Device Registry Administrator ({AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID}) "
+        f"on schema registry {schema_registry_id}, but found role IDs: {assigned_role_ids}"
+    )
 
     tree = run(f"az iot ops show -n {instance_name} -g {resource_group} --tree")
     assert expected_custom_location in tree

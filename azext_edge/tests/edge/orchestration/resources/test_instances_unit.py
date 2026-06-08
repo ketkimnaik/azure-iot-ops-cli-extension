@@ -23,7 +23,6 @@ from azext_edge.edge.commands_edge import (
 from azext_edge.edge.commands_secretsync import secretsync_disable, secretsync_enable
 from azext_edge.edge.providers.orchestration.common import (
     AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID,
-    CONTRIBUTOR_ROLE_ID,
     IdentityUsageType,
 )
 from azext_edge.edge.providers.orchestration.resources import Instances
