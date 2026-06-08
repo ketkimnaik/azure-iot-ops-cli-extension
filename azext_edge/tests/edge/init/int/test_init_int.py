@@ -276,12 +276,13 @@ def assert_aio_instance(
         "--query \"[].roleDefinitionId\" -o tsv"
     )
     assigned_role_ids = []
-    for _ in range(6):
+    for i in range(6):
         sr_role_assignments = run(ra_command) or ""
         assigned_role_ids = [ra.split("/")[-1] for ra in sr_role_assignments.splitlines() if ra.strip()]
         if assigned_role_ids:
             break
-        sleep(10)
+        if i < 5:
+            sleep(10)
     assert AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID in assigned_role_ids, (
         f"Expected Azure Device Registry Administrator ({AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID}) "
         f"on schema registry {schema_registry_id}, but found role IDs: {assigned_role_ids}"
