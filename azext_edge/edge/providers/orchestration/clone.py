@@ -1746,7 +1746,8 @@ def get_role_assignment():
         ),
         "properties": {
             "roleDefinitionId": (
-                f"[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '{AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID}')]"
+                "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', "
+                f"'{AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID}')]"
             ),
             "principalId": "[parameters('principalId')]",
             "principalType": "ServicePrincipal",

@@ -6,6 +6,7 @@
 
 import json
 from os.path import isfile
+from time import sleep
 from typing import List, Optional
 
 import pytest
@@ -269,12 +270,18 @@ def assert_aio_instance(
 
     # Verify the schema registry role assignment uses Azure Device Registry Administrator, not Contributor
     assert iot_ops_ext_principal_id, "IoT Operations extension is missing 'identity.principalId'."
-    sr_role_assignments = run(
+    ra_command = (
         f"az role assignment list --scope {schema_registry_id} "
         f"--assignee {iot_ops_ext_principal_id} "
         "--query \"[].roleDefinitionId\" -o tsv"
-    ) or ""
-    assigned_role_ids = [ra.split("/")[-1] for ra in sr_role_assignments.splitlines() if ra.strip()]
+    )
+    assigned_role_ids = []
+    for _ in range(6):
+        sr_role_assignments = run(ra_command) or ""
+        assigned_role_ids = [ra.split("/")[-1] for ra in sr_role_assignments.splitlines() if ra.strip()]
+        if assigned_role_ids:
+            break
+        sleep(10)
     assert AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID in assigned_role_ids, (
         f"Expected Azure Device Registry Administrator ({AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID}) "
         f"on schema registry {schema_registry_id}, but found role IDs: {assigned_role_ids}"
