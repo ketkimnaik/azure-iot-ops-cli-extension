@@ -329,7 +329,7 @@ class Instances(Queryable):
                         error_str=str(http_exc),
                         sp_name=mi_resource_id_container.resource_name,
                         sp_id=mi_resource["properties"]["principalId"],
-                        expected_role=custom_sr_role_id.split("/")[-1]
+                        expected_role=custom_sr_role_id
                         if custom_sr_role_id
                         else "Azure Device Registry Administrator",
                         scope=schema_registry_id,
