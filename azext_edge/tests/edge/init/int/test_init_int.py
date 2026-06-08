@@ -10,6 +10,7 @@ from time import sleep
 from typing import List, Optional
 
 import pytest
+from azure.cli.core.azclierror import CLIInternalError
 from knack.log import get_logger
 
 from azext_edge.edge.common import DEFAULT_BROKER, DEFAULT_BROKER_LISTENER
@@ -277,9 +278,12 @@ def assert_aio_instance(
     )
     assigned_role_ids = []
     for i in range(6):
-        sr_role_assignments = run(ra_command) or ""
+        try:
+            sr_role_assignments = run(ra_command) or ""
+        except CLIInternalError:
+            sr_role_assignments = ""
         assigned_role_ids = [ra.split("/")[-1] for ra in sr_role_assignments.splitlines() if ra.strip()]
-        if assigned_role_ids:
+        if AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID in assigned_role_ids:
             break
         if i < 5:
             sleep(10)
