@@ -49,7 +49,7 @@ from .providers.orchestration.common import (
     TlsKeyAlgo,
     TlsKeyRotation,
 )
-from .providers.adr.common import EndpointTemplateMode
+from .providers.adr.common import EndpointTemplateMode, FileType
 
 
 def load_iotops_arguments(self, _):
@@ -2168,6 +2168,38 @@ def load_iotops_arguments(self, _):
             arg_type=get_three_state_flag(),
         )
 
+    with self.argument_context("iot ops ns asset dataset export") as context:
+        context.argument(
+            "extension",
+            options_list=["--format", "--ext"],
+            arg_type=get_enum_type(FileType),
+            help="File format to export the datasets to.",
+        )
+        context.argument(
+            "output_dir",
+            options_list=["--output-dir", "--od"],
+            help="Directory to export the datasets file to. Defaults to the current directory.",
+        )
+        context.argument(
+            "replace",
+            options_list=["--replace"],
+            help="Overwrite the export file if it already exists.",
+            arg_type=get_three_state_flag(),
+        )
+
+    with self.argument_context("iot ops ns asset dataset import") as context:
+        context.argument(
+            "file_path",
+            options_list=["--file-path", "--fp"],
+            help="Path to the file (.json, .yaml, .yml) containing the datasets to import.",
+        )
+        context.argument(
+            "replace",
+            options_list=["--replace"],
+            help="Replace existing datasets that share a name with an imported dataset.",
+            arg_type=get_three_state_flag(),
+        )
+
     with self.argument_context("iot ops ns asset datapoint") as context:
         context.argument(
             "asset_name",
@@ -2220,6 +2252,38 @@ def load_iotops_arguments(self, _):
             "replace",
             options_list=["--replace"],
             help="Replace the data point if another point with the same name is already present.",
+            arg_type=get_three_state_flag(),
+        )
+
+    with self.argument_context("iot ops ns asset datapoint export") as context:
+        context.argument(
+            "extension",
+            options_list=["--format", "--ext"],
+            arg_type=get_enum_type(FileType),
+            help="File format to export the data points to.",
+        )
+        context.argument(
+            "output_dir",
+            options_list=["--output-dir", "--od"],
+            help="Directory to export the data points file to. Defaults to the current directory.",
+        )
+        context.argument(
+            "replace",
+            options_list=["--replace"],
+            help="Overwrite the export file if it already exists.",
+            arg_type=get_three_state_flag(),
+        )
+
+    with self.argument_context("iot ops ns asset datapoint import") as context:
+        context.argument(
+            "file_path",
+            options_list=["--file-path", "--fp"],
+            help="Path to the file (.json, .yaml, .yml) containing the data points to import.",
+        )
+        context.argument(
+            "replace",
+            options_list=["--replace"],
+            help="Replace existing data points that share a name with an imported data point.",
             arg_type=get_three_state_flag(),
         )
 
