@@ -256,9 +256,6 @@ def assert_role_assignment(
         f"Missing role(s) {missing} for {assignee} on {scope}; found: {assigned}{cli_err_suffix}"
     )
 
-    missing = [role_id for role_id in expected if role_id not in assigned]
-    assert not missing, f"Missing role(s) {missing} for {assignee} on {scope}; found: {assigned}"
-
     present_disallowed = [role_id for role_id in disallowed if role_id in assigned]
     assert not present_disallowed, (
         f"Disallowed role(s) {present_disallowed} for {assignee} on {scope}; found: {assigned}{cli_err_suffix}"
