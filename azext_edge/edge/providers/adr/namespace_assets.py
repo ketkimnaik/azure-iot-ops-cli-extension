@@ -235,7 +235,8 @@ class NamespaceAssets(Queryable):
                 f"{resource_label} validation skipped: could not load connector metadata ({e}). "
                 "This can occur when the connector metadata version is ahead of the bundled schema "
                 "or the cluster is not reachable. "
-                f"The {resource_label.lower()} will be imported but may fail at runtime."
+                f"The {resource_label.lower()} will be imported but may fail at runtime.",
+                exc_info=True,
             )
             return
 
@@ -3787,18 +3788,27 @@ def _deep_merge_template(template, existing):
 
 
 def _merge_destinations_template(template_dests: list, existing_dests: list) -> list:
-    """Pre-fill template destinations with existing ARM values, matched by target name."""
+    """Pre-fill template destinations with existing ARM values, matched by target name.
+
+    Existing destinations whose target is not present in the template are appended as-is so that
+    current configuration is preserved and the template stays round-trippable.
+    """
     if not existing_dests:
         return template_dests
-    existing_by_target = {d.get("target"): d for d in existing_dests if d.get("target")}
+    existing_by_target = {d.get("target"): d for d in existing_dests if isinstance(d, dict) and d.get("target")}
+    matched_targets = set()
     result = []
     for tmpl_dest in template_dests:
-        target = tmpl_dest.get("target")
+        target = tmpl_dest.get("target") if isinstance(tmpl_dest, dict) else None
         existing_dest = existing_by_target.get(target)
         if existing_dest:
+            matched_targets.add(target)
             result.append(_deep_merge_template(tmpl_dest, existing_dest))
         else:
             result.append(tmpl_dest)
+    for target, existing_dest in existing_by_target.items():
+        if target not in matched_targets:
+            result.append(existing_dest)
     return result
 
 
