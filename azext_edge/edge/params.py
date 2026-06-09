@@ -1270,6 +1270,7 @@ def load_iotops_arguments(self, _):
             arg_type=get_three_state_flag(),
             help="When used the role assignment between the IoT Operations extension "
             "system-managed identity and schema registry will be skipped.",
+            arg_group="Role Assignment",
         )
         context.argument(
             "custom_sr_role_id",
