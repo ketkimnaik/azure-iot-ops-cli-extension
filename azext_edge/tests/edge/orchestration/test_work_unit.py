@@ -1110,7 +1110,7 @@ def assert_cluster_prechecks(mock_prechecks: Dict[str, Mock], target_scenario: d
         ),
         build_target_scenario(
             apiControl={CallKey.PUT_SCHEMA_REGISTRY_RA: {"code": 400, "body": {"status": "Failed"}}},
-            warnings=[(0, "Role assignment failed with:\nOperation returned an invalid status 'Bad Request'")],
+            warnings=[(0, "Role assignment failed with:\n\nOperation returned an invalid status 'Bad Request'")],
         ),
         build_target_scenario(
             apiControl={

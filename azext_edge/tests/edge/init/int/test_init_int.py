@@ -6,11 +6,9 @@
 
 import json
 from os.path import isfile
-from time import sleep
 from typing import List, Optional
 
 import pytest
-from azure.cli.core.azclierror import CLIInternalError
 from knack.log import get_logger
 
 from azext_edge.edge.common import DEFAULT_BROKER, DEFAULT_BROKER_LISTENER
@@ -23,7 +21,7 @@ from azext_edge.edge.providers.orchestration.common import (
 )
 
 from ....generators import generate_random_string
-from ....helpers import process_additional_args, run, strip_quotes
+from ....helpers import assert_role_assignment, process_additional_args, run, strip_quotes
 
 logger = get_logger(__name__)
 
@@ -269,27 +267,12 @@ def assert_aio_instance(
     assert instance_props["schemaRegistryRef"] == {"resourceId": schema_registry_id}
     assert instance_props["adrNamespaceRef"] == {"resourceId": adr_namespace_id}
 
-    # Verify the schema registry role assignment uses Azure Device Registry Administrator, not Contributor
+    # Verify the schema registry role assignment includes Azure Device Registry Administrator
     assert iot_ops_ext_principal_id, "IoT Operations extension is missing 'identity.principalId'."
-    ra_command = (
-        f"az role assignment list --scope {schema_registry_id} "
-        f"--assignee {iot_ops_ext_principal_id} "
-        "--query \"[].roleDefinitionId\" -o tsv"
-    )
-    assigned_role_ids = []
-    for i in range(6):
-        try:
-            sr_role_assignments = run(ra_command) or ""
-        except CLIInternalError:
-            sr_role_assignments = ""
-        assigned_role_ids = [ra.split("/")[-1] for ra in sr_role_assignments.splitlines() if ra.strip()]
-        if AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID in assigned_role_ids:
-            break
-        if i < 5:
-            sleep(10)
-    assert AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID in assigned_role_ids, (
-        f"Expected Azure Device Registry Administrator ({AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID}) "
-        f"on schema registry {schema_registry_id}, but found role IDs: {assigned_role_ids}"
+    assert_role_assignment(
+        scope=schema_registry_id,
+        assignee=iot_ops_ext_principal_id,
+        expected_role_ids=AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID,
     )
 
     tree = run(f"az iot ops show -n {instance_name} -g {resource_group} --tree")

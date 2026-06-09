@@ -212,6 +212,50 @@ def remove_file(file_path):
             logger.error(f"Failed to remove file: {file_path}. {e}")
 
 
+def get_role_assignment_ids(scope: str, assignee: str) -> List[str]:
+    """Return the role definition GUIDs assigned to `assignee` at `scope` (empty if none/propagating)."""
+    command = (
+        f"az role assignment list --scope {scope} "
+        f"--assignee {assignee} --query \"[].roleDefinitionId\" -o tsv"
+    )
+    try:
+        output = run(command) or ""
+    except CLIInternalError:
+        output = ""
+    return [ra.rsplit("/", maxsplit=1)[-1] for ra in str(output).splitlines() if ra.strip()]
+
+
+def assert_role_assignment(
+    scope: str,
+    assignee: str,
+    expected_role_ids: Union[str, List[str]],
+    disallowed_role_ids: Optional[Union[str, List[str]]] = None,
+    max_retries: int = 6,
+    retry_interval: int = 10,
+):
+    """Poll for RBAC propagation, then assert expected roles are present (and optionally others absent)."""
+    expected = [expected_role_ids] if isinstance(expected_role_ids, str) else list(expected_role_ids)
+    disallowed = (
+        [disallowed_role_ids] if isinstance(disallowed_role_ids, str) else list(disallowed_role_ids or [])
+    )
+
+    assigned: List[str] = []
+    for attempt in range(max_retries):
+        assigned = get_role_assignment_ids(scope=scope, assignee=assignee)
+        if all(role_id in assigned for role_id in expected):
+            break
+        if attempt < max_retries - 1:
+            sleep(retry_interval)
+
+    missing = [role_id for role_id in expected if role_id not in assigned]
+    assert not missing, f"Missing role(s) {missing} for {assignee} on {scope}; found: {assigned}"
+
+    present_disallowed = [role_id for role_id in disallowed if role_id in assigned]
+    assert not present_disallowed, (
+        f"Disallowed role(s) {present_disallowed} for {assignee} on {scope}; found: {assigned}"
+    )
+
+
 def run(
     command: str,
     shell_mode: bool = True,
