@@ -279,7 +279,9 @@ class WorkManager:
                     error_str=get_api_error_str(e),
                     sp_name="IoT Operations arc extension",
                     sp_id=ops_ext_principal_id,
-                    expected_role=effective_role_def_id,
+                    expected_role=(
+                        self._custom_sr_role_id if self._custom_sr_role_id else "Azure Device Registry Administrator"
+                    ),
                     scope=self._targets.schema_registry_resource_id,
                 )
             )
