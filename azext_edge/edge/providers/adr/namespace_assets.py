@@ -217,7 +217,12 @@ class NamespaceAssets(Queryable):
         instance_name: str,
         instance_resource_group: str,
     ):
-        """Run connector-metadata validation on items, with graceful fallback."""
+        """Run connector-metadata validation on items, with graceful fallback.
+
+        Metadata fetch/schema failures (e.g. connector metadata with fields not yet recognised by
+        the bundled schema) are treated as warnings so import can proceed. Only item-level
+        ValidationErrors (user data does not conform to the connector's own schema) are hard errors.
+        """
         try:
             validator = ConnectorMetadataValidator.from_asset(
                 cmd=self.cmd,
@@ -225,6 +230,16 @@ class NamespaceAssets(Queryable):
                 instance_name=instance_name,
                 instance_resource_group=instance_resource_group,
             )
+        except Exception as e:
+            logger.warning(
+                f"{resource_label} validation skipped: could not load connector metadata ({e}). "
+                "This can occur when the connector metadata version is ahead of the bundled schema "
+                "or the cluster is not reachable. "
+                f"The {resource_label.lower()} will be imported but may fail at runtime."
+            )
+            return
+
+        try:
             for item in items:
                 validate_fn(validator, item)
             logger.info(f"{resource_label} validated successfully.")
@@ -233,7 +248,6 @@ class NamespaceAssets(Queryable):
         except Exception as e:
             logger.warning(
                 f"{resource_label} validation skipped: {e}. "
-                "This may occur if the connector is not deployed or the cluster is not connected. "
                 f"The {resource_label.lower()} will be imported but may fail at runtime."
             )
 
