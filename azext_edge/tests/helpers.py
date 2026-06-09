@@ -218,10 +218,7 @@ def get_role_assignment_ids(scope: str, assignee: str) -> List[str]:
         f"az role assignment list --scope {scope} "
         f"--assignee {assignee} --query \"[].roleDefinitionId\" -o tsv"
     )
-    try:
-        output = run(command) or ""
-    except CLIInternalError:
-        output = ""
+    output = run(command) or ""
     return [ra.rsplit("/", maxsplit=1)[-1] for ra in str(output).splitlines() if ra.strip()]
 
 
@@ -240,19 +237,31 @@ def assert_role_assignment(
     )
 
     assigned: List[str] = []
+    last_cli_error: Optional[str] = None
     for attempt in range(max_retries):
-        assigned = get_role_assignment_ids(scope=scope, assignee=assignee)
-        if all(role_id in assigned for role_id in expected):
+        try:
+            assigned = get_role_assignment_ids(scope=scope, assignee=assignee)
+            last_cli_error = None
+        except CLIInternalError as e:
+            last_cli_error = str(e)
+            assigned = []
+        if not last_cli_error and all(role_id in assigned for role_id in expected):
             break
         if attempt < max_retries - 1:
             sleep(retry_interval)
+
+    missing = [role_id for role_id in expected if role_id not in assigned]
+    cli_err_suffix = f"; last az error: {last_cli_error}" if last_cli_error else ""
+    assert not missing, (
+        f"Missing role(s) {missing} for {assignee} on {scope}; found: {assigned}{cli_err_suffix}"
+    )
 
     missing = [role_id for role_id in expected if role_id not in assigned]
     assert not missing, f"Missing role(s) {missing} for {assignee} on {scope}; found: {assigned}"
 
     present_disallowed = [role_id for role_id in disallowed if role_id in assigned]
     assert not present_disallowed, (
-        f"Disallowed role(s) {present_disallowed} for {assignee} on {scope}; found: {assigned}"
+        f"Disallowed role(s) {present_disallowed} for {assignee} on {scope}; found: {assigned}{cli_err_suffix}"
     )
 
 
