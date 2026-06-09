@@ -933,20 +933,33 @@ class NamespaceAssets(Queryable):
         dest_raw = parsed.get("destinations")
         if dest_raw is not None:
             dest_data = _strip_nulls(dest_raw)
-            if isinstance(dest_data, list):
-                dest_data = [
-                    item for item in dest_data
-                    if not isinstance(item, dict) or item.get("configuration")
-                ]
+            if not isinstance(dest_data, list):
+                raise InvalidArgumentValueError(
+                    "--dataset-config 'destinations' must be a JSON array of destination objects."
+                )
+            filtered: List[dict] = []
+            for item in dest_data:
+                if not isinstance(item, dict):
+                    raise InvalidArgumentValueError(
+                        "--dataset-config 'destinations' entries must be JSON objects."
+                    )
+                if not item.get("configuration"):
+                    logger.warning(
+                        "Ignoring destination '%s' because its configuration is empty.",
+                        item.get("target"),
+                    )
+                    continue
+                filtered.append(item)
+            dest_data = filtered
             if dest_data:
                 dest_section = dataset_section.get("destinations", {}) if dataset_section else {}
                 supported = (
                     dest_section.get("supportedDestinations", [])
                     if isinstance(dest_section, dict) else []
                 )
-                if supported and isinstance(dest_data, list):
+                if supported:
                     for dest_item in dest_data:
-                        target = dest_item.get("target") if isinstance(dest_item, dict) else None
+                        target = dest_item.get("target")
                         if target and target not in supported:
                             raise InvalidArgumentValueError(
                                 f"Destination target '{target}' is not supported for datasets. "
