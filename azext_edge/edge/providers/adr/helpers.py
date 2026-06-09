@@ -165,6 +165,10 @@ def get_default_dataset(asset: dict, dataset_name: str, create_if_none: bool = F
     asset["properties"]["datasets"] = asset["properties"].get("datasets", [])
     datasets = asset["properties"]["datasets"]
     matched_datasets = [dset for dset in datasets if dset["name"] == dataset_name]
+    # backward compat: assets created during the transition period may have a single
+    # dataset with an empty name that represents the "default" dataset
+    if not matched_datasets and dataset_name == "default":
+        matched_datasets = [dset for dset in datasets if dset["name"] == ""]
     if not matched_datasets and create_if_none:
         matched_datasets = [{}]
         datasets.extend(matched_datasets)

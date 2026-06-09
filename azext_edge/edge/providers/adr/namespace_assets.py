@@ -3770,8 +3770,10 @@ class NamespaceAssets(Queryable):
 def _deep_merge_template(template, existing):
     """Recursively merge existing values into a schema template dict.
 
-    Template keys that are None (nulls from --show-template config) are replaced by the
-    existing value.  Keys present in existing but absent from template are added as-is.
+    Existing values take precedence over template values. When both values are dicts,
+    merge recursively; otherwise return the existing value (unless it is None, in which
+    case the template value is kept). Keys present in existing but absent from template
+    are added as-is.
     """
     if not isinstance(template, dict) or not isinstance(existing, dict):
         return existing if existing is not None else template
