@@ -330,6 +330,30 @@ def load_iotops_commands(self, _):
             cmd_group.command("create", f"create_namespace_{asset_type}_asset")
             cmd_group.command("update", f"update_namespace_{asset_type}_asset")
 
+    # generalized dataset group (connector-agnostic)
+    with self.command_group(
+        "iot ops ns asset dataset",
+        command_type=namespace_resource_ops,
+    ) as cmd_group:
+        cmd_group.command("add", "add_namespace_asset_dataset")
+        cmd_group.command("export", "export_namespace_asset_dataset")
+        cmd_group.command("import", "import_namespace_asset_dataset")
+        cmd_group.command("list", "list_namespace_asset_datasets")
+        cmd_group.command("remove", "remove_namespace_asset_dataset")
+        cmd_group.show_command("show", "show_namespace_asset_dataset")
+        cmd_group.command("update", "update_namespace_asset_dataset")
+
+    # generalized datapoint group (connector-agnostic)
+    with self.command_group(
+        "iot ops ns asset datapoint",
+        command_type=namespace_resource_ops,
+    ) as cmd_group:
+        cmd_group.command("add", "add_namespace_asset_dataset_point")
+        cmd_group.command("export", "export_namespace_asset_dataset_point")
+        cmd_group.command("import", "import_namespace_asset_dataset_point")
+        cmd_group.command("list", "list_namespace_asset_dataset_points")
+        cmd_group.command("remove", "remove_namespace_asset_dataset_point")
+
     # dataset
     for asset_type in ["custom", "opcua", "rest", "sse", "mqtt"]:
         with self.command_group(

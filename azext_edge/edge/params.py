@@ -2117,6 +2117,112 @@ def load_iotops_arguments(self, _):
             "Draft-07 $ref pointers (#/definitions/...) are resolved inline in both modes.",
         )
 
+    with self.argument_context("iot ops ns asset dataset") as context:
+        context.argument(
+            "asset_name",
+            options_list=["--asset", "-a"],
+            help="Asset name.",
+        )
+        context.argument(
+            "dataset_name",
+            options_list=["--name", "-n"],
+            help="Dataset name.",
+        )
+        context.argument(
+            "data_source",
+            options_list=["--data-source", "--ds"],
+            help="Data source for the dataset.",
+        )
+        context.argument(
+            "type_ref",
+            options_list=["--type-ref", "--tr"],
+            help="Type definition ID or URI.",
+        )
+        context.argument(
+            "dataset_config",
+            options_list=["--dataset-config", "--dc"],
+            help="Inline JSON string or path to a JSON/YAML file (.json, .yaml, .yml) containing "
+            "connector-specific dataset configuration and/or destinations. Accepted keys are "
+            "'datasetConfiguration' (connector-specific config object) and 'destinations' (list of "
+            "destination objects). Use --show-template to discover the supported keys and schema "
+            "for the asset's connector type. Cannot be combined with --show-template. "
+            "For non-OPC UA connectors, a connector template must exist in the instance.",
+        )
+        context.argument(
+            "show_template",
+            options_list=["--show-template"],
+            arg_type=get_enum_type(EndpointTemplateMode),
+            help="Show a starter dataset configuration template for the asset's connector type and "
+            "exit without modifying the dataset. The connector type is read from the existing asset. "
+            "config: fields shown with their default values (null if no default); output is "
+            "directly usable as --dataset-config input. "
+            "schema: every field includes type, default, and constraints (min, max, enum, pattern). "
+            "Draft-07 $ref pointers (#/definitions/...) are resolved inline in both modes.",
+        )
+
+    with self.argument_context("iot ops ns asset dataset add") as context:
+        context.argument(
+            "replace",
+            options_list=["--replace"],
+            help="Replace the dataset if another dataset with the same name is already present.",
+            arg_type=get_three_state_flag(),
+        )
+
+    with self.argument_context("iot ops ns asset datapoint") as context:
+        context.argument(
+            "asset_name",
+            options_list=["--asset", "-a"],
+            help="Asset name.",
+        )
+        context.argument(
+            "dataset_name",
+            options_list=["--dataset", "-d"],
+            help="Dataset name.",
+        )
+        context.argument(
+            "datapoint_name",
+            options_list=["--name", "-n"],
+            help="Data point name.",
+        )
+        context.argument(
+            "data_source",
+            options_list=["--data-source", "--ds"],
+            help="Data source for the data point.",
+        )
+        context.argument(
+            "type_ref",
+            options_list=["--type-ref", "--tr"],
+            help="Type definition ID or URI.",
+        )
+        context.argument(
+            "datapoint_config",
+            options_list=["--datapoint-config", "--dpc"],
+            help="Inline JSON string or path to a JSON/YAML file (.json, .yaml, .yml) containing "
+            "connector-specific datapoint configuration. Accepted key is 'datapointConfiguration' "
+            "(connector-specific config object). Use --show-template to discover the supported keys "
+            "and schema for the asset's connector type. Cannot be combined with --show-template. "
+            "For non-OPC UA connectors, a connector template must exist in the instance.",
+        )
+        context.argument(
+            "show_template",
+            options_list=["--show-template"],
+            arg_type=get_enum_type(EndpointTemplateMode),
+            help="Show a starter datapoint configuration template for the asset's connector type "
+            "and exit without modifying the datapoint. The connector type is read from the existing "
+            "asset. config: fields shown with their default values (null if no default); output is "
+            "directly usable as --datapoint-config input. "
+            "schema: every field includes type, default, and constraints (min, max, enum, pattern). "
+            "Draft-07 $ref pointers (#/definitions/...) are resolved inline in both modes.",
+        )
+
+    with self.argument_context("iot ops ns asset datapoint add") as context:
+        context.argument(
+            "replace",
+            options_list=["--replace"],
+            help="Replace the data point if another point with the same name is already present.",
+            arg_type=get_three_state_flag(),
+        )
+
     with self.argument_context("iot ops clone") as context:
         context.argument(
             "summary_mode",
