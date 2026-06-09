@@ -2171,27 +2171,27 @@ def load_iotops_arguments(self, _):
     with self.argument_context("iot ops ns asset dataset export") as context:
         context.argument(
             "extension",
-            options_list=["--format", "--ext"],
-            arg_type=get_enum_type(FileType),
-            help="File format to export the datasets to.",
+            options_list=["--format", "-f"],
+            arg_type=get_enum_type([FileType.json.value, FileType.yaml.value], default=FileType.json.value),
+            help="Export file format (JSON or YAML).",
         )
         context.argument(
             "output_dir",
             options_list=["--output-dir", "--od"],
-            help="Directory to export the datasets file to. Defaults to the current directory.",
+            help="Output directory for export.",
         )
         context.argument(
             "replace",
             options_list=["--replace"],
-            help="Overwrite the export file if it already exists.",
+            help="Replace the local file if present.",
             arg_type=get_three_state_flag(),
         )
 
     with self.argument_context("iot ops ns asset dataset import") as context:
         context.argument(
             "file_path",
-            options_list=["--file-path", "--fp"],
-            help="Path to the file (.json, .yaml, .yml) containing the datasets to import.",
+            options_list=["--input-file", "--if"],
+            help="Path to import file (JSON or YAML).",
         )
         context.argument(
             "replace",
@@ -2258,27 +2258,27 @@ def load_iotops_arguments(self, _):
     with self.argument_context("iot ops ns asset datapoint export") as context:
         context.argument(
             "extension",
-            options_list=["--format", "--ext"],
-            arg_type=get_enum_type(FileType),
-            help="File format to export the data points to.",
+            options_list=["--format", "-f"],
+            arg_type=get_enum_type(FileType, default=FileType.json.value),
+            help="Export file format.",
         )
         context.argument(
             "output_dir",
             options_list=["--output-dir", "--od"],
-            help="Directory to export the data points file to. Defaults to the current directory.",
+            help="Output directory for export.",
         )
         context.argument(
             "replace",
             options_list=["--replace"],
-            help="Overwrite the export file if it already exists.",
+            help="Replace the local file if present.",
             arg_type=get_three_state_flag(),
         )
 
     with self.argument_context("iot ops ns asset datapoint import") as context:
         context.argument(
             "file_path",
-            options_list=["--file-path", "--fp"],
-            help="Path to the file (.json, .yaml, .yml) containing the data points to import.",
+            options_list=["--input-file", "--if"],
+            help="Path to import file (JSON, YAML, or CSV).",
         )
         context.argument(
             "replace",
