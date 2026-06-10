@@ -15,6 +15,7 @@ from azext_edge.edge.common import DEFAULT_BROKER, DEFAULT_BROKER_LISTENER
 from azext_edge.edge.util.common import assemble_nargs_to_dict
 from azext_edge.edge.providers.orchestration.common import (
     AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID,
+    CONTRIBUTOR_ROLE_ID,
     EXTENSION_TYPE_CM,
     EXTENSION_TYPE_OPS,
     EXTENSION_TYPE_SSC,
@@ -273,6 +274,7 @@ def assert_aio_instance(
         scope=schema_registry_id,
         assignee=iot_ops_ext_principal_id,
         expected_role_ids=AZURE_DEVICE_REGISTRY_ADMINISTRATOR_ROLE_ID,
+        disallowed_role_ids=CONTRIBUTOR_ROLE_ID,
     )
 
     tree = run(f"az iot ops show -n {instance_name} -g {resource_group} --tree")
