@@ -1265,7 +1265,7 @@ class NamespaceAssets(Queryable):
             )
         dataset = dataset_list[0]
 
-        if dataset_config:
+        if dataset_config is not None:
             config_result = self._load_and_validate_dataset_config(
                 dataset_config=dataset_config,
                 connector_type=connector_type,
@@ -1277,9 +1277,9 @@ class NamespaceAssets(Queryable):
             if "destinations" in config_result:
                 dataset["destinations"] = config_result["destinations"]
 
-        if data_source:
+        if data_source is not None:
             dataset["dataSource"] = data_source
-        if type_ref:
+        if type_ref is not None:
             dataset["typeRef"] = type_ref
 
         update_payload = {"properties": {"datasets": datasets}}
