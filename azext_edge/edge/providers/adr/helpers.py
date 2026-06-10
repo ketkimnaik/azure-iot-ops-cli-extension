@@ -155,31 +155,25 @@ def get_query(param_mapping: Dict[str, str], params: Dict[str, Union[str, bool]]
 
 def get_default_dataset(asset: dict, dataset_name: str, create_if_none: bool = False):
     """
-    Temporary helper function to get a dataset from an asset.
+    Helper function to get or create a dataset from an asset by name.
 
-    If the dataset is not found but it has the name 'default' and create_if_none is True,
-    it will create a new dataset with that name that is added to the asset's datasets.
+    If the dataset is not found and create_if_none is True, a new empty dataset
+    with the given name is created and appended to the asset's datasets list.
 
-    Will raise errors if the dataset is not found and create_if_none is False, or
-    if the dataset name is not 'default' and create_if_none is True.
+    Raises an error if the dataset is not found and create_if_none is False.
     """
-    # ensure datasets will get populated if not there
     asset["properties"]["datasets"] = asset["properties"].get("datasets", [])
     datasets = asset["properties"]["datasets"]
     matched_datasets = [dset for dset in datasets if dset["name"] == dataset_name]
-    # Temporary convert empty names to default
+    # backward compat: assets created during the transition period may have a single
+    # dataset with an empty name that represents the "default" dataset
     if not matched_datasets and dataset_name == "default":
         matched_datasets = [dset for dset in datasets if dset["name"] == ""]
-    # create if add or import (and no datasets yet)
     if not matched_datasets and create_if_none:
-        if dataset_name != "default":
-            raise InvalidArgumentValueError("Currently only one dataset with the name default is supported.")
         matched_datasets = [{}]
         datasets.extend(matched_datasets)
     elif not matched_datasets:
         raise InvalidArgumentValueError(f"Dataset {dataset_name} not found in asset {asset['name']}.")
-    # note: right now we can have datasets with the same name but this will not be allowed later
-    # part of the temporary convert
     matched_datasets[0]["name"] = dataset_name
     return matched_datasets[0]
 

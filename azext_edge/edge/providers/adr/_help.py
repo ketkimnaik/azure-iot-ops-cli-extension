@@ -169,7 +169,7 @@ def load_iotops_adr_help():
     ] = """
         type: command
         short-summary: Add a datapoint to an asset dataset.
-        long-summary: If no datasets exist yet, this will create a new dataset. Currently, only one dataset is supported with the name "default".
+        long-summary: If no datasets exist yet, this will create a new dataset.
 
         examples:
         - name: Add a datapoint to an asset.
@@ -1090,6 +1090,13 @@ def load_iotops_adr_help():
     ] = """
         type: command
         short-summary: Update a namespaced asset in an IoT Operations instance.
+        long-summary: >
+            The connector type is detected from the asset's device endpoint.
+            Use --asset-config to supply connector-specific configuration (defaultDatasetsConfiguration,
+            defaultEventsConfiguration, etc.). Use --show-template config to see the current asset
+            configuration pre-filled with existing values (ready to edit and pass back via
+            --asset-config). Use --show-template schema to see the full connector schema with types
+            and constraints.
 
         examples:
         - name: Update an asset's basic properties
@@ -1113,10 +1120,15 @@ def load_iotops_adr_help():
             --asset-config path/to/config.yaml --description "Updated factory sensor" --display-name "My Asset v2"
             --manufacturer "Contoso" --model "SensorX1" --serial-number "SN-001"
 
-        - name: Show the configuration template for the asset's connector type without updating
+        - name: Show current asset config pre-filled with existing values (for editing before update)
           text: >
             az iot ops ns asset update --name myasset --instance myInstance -g myInstanceResourceGroup
             --show-template config
+
+        - name: Show the full connector schema structure with types and constraints
+          text: >
+            az iot ops ns asset update --name myasset --instance myInstance -g myInstanceResourceGroup
+            --show-template schema
     """
 
     helps[
@@ -1199,7 +1211,6 @@ def load_iotops_adr_help():
     ] = """
         type: group
         short-summary: Manage datasets for custom namespaced assets in an IoT Operations instance.
-        long-summary: Currently, only one dataset with the name "default" is supported for assets.
     """
 
     helps[
@@ -2376,11 +2387,271 @@ def load_iotops_adr_help():
     """
 
     helps[
+        "iot ops ns asset dataset"
+    ] = """
+        type: group
+        short-summary: Manage datasets for namespaced assets in an IoT Operations instance.
+        long-summary: >
+            The connector type is detected automatically from the existing asset.
+            For connector-specific parameters use --dataset-config (inline JSON or file).
+            Use --show-template to discover the supported configuration schema for the asset's connector type.
+    """
+
+    helps[
+        "iot ops ns asset dataset add"
+    ] = """
+        type: command
+        short-summary: Add a dataset to a namespaced asset in an IoT Operations instance.
+        long-summary: >
+            The connector type is detected from the asset's device endpoint.
+            Connector-specific configuration (publishing interval, queue size, etc.) can
+            be supplied via --dataset-config. Use --show-template to discover the supported config
+            schema. For non-OPC UA connectors, a connector template must exist in the instance.
+
+        examples:
+        - name: Add a basic dataset to any asset type
+          text: >
+            az iot ops ns asset dataset add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name default --data-source "ns=2;s=Temperature"
+
+        - name: Show the dataset config template for the asset's connector type
+          text: >
+            az iot ops ns asset dataset add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name default --show-template config
+
+        - name: Add a dataset with connector-specific configuration from inline JSON
+          text: >
+            az iot ops ns asset dataset add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name default
+            --dataset-config '{"datasetConfiguration": {"publishingInterval": 1000, "samplingInterval": 500}}'
+
+        - name: Add a dataset with configuration from a file
+          text: >
+            az iot ops ns asset dataset add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name default --dataset-config ./dataset_config.json
+
+        - name: Add a dataset with an MQTT destination
+          text: >
+            az iot ops ns asset dataset add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name default
+            --dataset-config '{"destinations": [{"target": "Mqtt", "configuration": {"topic": "factory/data", "retain": "Keep", "qos": "Qos1", "ttl": 3600}}]}'
+
+        - name: Replace an existing dataset
+          text: >
+            az iot ops ns asset dataset add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name default --replace
+    """
+
+    helps[
+        "iot ops ns asset dataset update"
+    ] = """
+        type: command
+        short-summary: Update a dataset for a namespaced asset in an IoT Operations instance.
+        long-summary: >
+            The connector type is detected from the asset's device endpoint.
+            Use --dataset-config to supply connector-specific configuration.
+            Use --show-template config to see current dataset values pre-filled in the full schema
+            structure (ready to edit and pass back via --dataset-config).
+            Use --show-template schema to see the full connector schema with types and constraints.
+
+        examples:
+        - name: Show current dataset config pre-filled with existing values (for editing before update)
+          text: >
+            az iot ops ns asset dataset update --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name default --show-template config
+
+        - name: Show the dataset config schema with types and constraints
+          text: >
+            az iot ops ns asset dataset update --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name default --show-template schema
+
+        - name: Update dataset configuration from inline JSON
+          text: >
+            az iot ops ns asset dataset update --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name default
+            --dataset-config '{"datasetConfiguration": {"publishingInterval": 2000}}'
+
+        - name: Update dataset data source
+          text: >
+            az iot ops ns asset dataset update --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name default --data-source "ns=3;s=UpdatedSensor"
+    """
+
+    helps[
+        "iot ops ns asset dataset list"
+    ] = """
+        type: command
+        short-summary: List datasets for a namespaced asset in an IoT Operations instance.
+
+        examples:
+        - name: List all datasets for an asset
+          text: >
+            az iot ops ns asset dataset list --asset myasset --instance myInstance
+            -g myInstanceResourceGroup
+    """
+
+    helps[
+        "iot ops ns asset dataset remove"
+    ] = """
+        type: command
+        short-summary: Remove a dataset from a namespaced asset in an IoT Operations instance.
+
+        examples:
+        - name: Remove a dataset from an asset
+          text: >
+            az iot ops ns asset dataset remove --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name default
+    """
+
+    helps[
+        "iot ops ns asset dataset show"
+    ] = """
+        type: command
+        short-summary: Show details of a dataset for a namespaced asset in an IoT Operations instance.
+
+        examples:
+        - name: Show dataset details
+          text: >
+            az iot ops ns asset dataset show --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name default
+    """
+
+    helps[
+        "iot ops ns asset dataset export"
+    ] = """
+        type: command
+        short-summary: Export datasets to file.
+
+        examples:
+        - name: Export datasets to JSON
+          text: >
+            az iot ops ns asset dataset export --asset myasset --instance myInstance
+            -g myInstanceResourceGroup
+    """
+
+    helps[
+        "iot ops ns asset dataset import"
+    ] = """
+        type: command
+        short-summary: Import datasets from file.
+
+        examples:
+        - name: Import datasets from a JSON file
+          text: >
+            az iot ops ns asset dataset import --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --input-file ./datasets.json
+    """
+
+    helps[
+        "iot ops ns asset datapoint"
+    ] = """
+        type: group
+        short-summary: Manage data points for asset datasets in IoT Operations namespaces.
+        long-summary: >
+            The connector type is detected automatically from the existing asset.
+            For connector-specific parameters use --datapoint-config (inline JSON or file).
+            Use --show-template to discover the supported configuration schema for the asset's connector type.
+    """
+
+    helps[
+        "iot ops ns asset datapoint add"
+    ] = """
+        type: command
+        short-summary: Add a datapoint to an asset dataset in an IoT Operations namespace.
+        long-summary: >
+            The connector type is detected from the asset's device endpoint.
+            Connector-specific configuration (queue size, sampling interval, etc.)
+            can be supplied via --datapoint-config. Use --show-template to discover the supported
+            config schema. For non-OPC UA connectors, a connector template must exist in the instance.
+
+        examples:
+        - name: Add a basic datapoint to any asset type
+          text: >
+            az iot ops ns asset datapoint add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --dataset default --name temp1 --data-source "ns=2;s=Temp1"
+
+        - name: Show the datapoint config template for the asset's connector type
+          text: >
+            az iot ops ns asset datapoint add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --dataset default --name temp1 --data-source "ns=2;s=Temp1"
+            --show-template config
+
+        - name: Add a datapoint with connector-specific configuration from inline JSON
+          text: >
+            az iot ops ns asset datapoint add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --dataset default --name temp1 --data-source "ns=2;s=Temp1"
+            --datapoint-config '{"datapointConfiguration": {"samplingInterval": 1000, "queueSize": 5}}'
+
+        - name: Add a datapoint with configuration from a file
+          text: >
+            az iot ops ns asset datapoint add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --dataset default --name temp1 --data-source "ns=2;s=Temp1"
+            --datapoint-config ./datapoint_config.json
+
+        - name: Replace an existing datapoint
+          text: >
+            az iot ops ns asset datapoint add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --dataset default --name temp1 --data-source "ns=3;s=NewTemp"
+            --replace
+    """
+
+    helps[
+        "iot ops ns asset datapoint list"
+    ] = """
+        type: command
+        short-summary: List data points for an asset dataset in an IoT Operations namespace.
+
+        examples:
+        - name: List all data points for a dataset
+          text: >
+            az iot ops ns asset datapoint list --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --dataset default
+    """
+
+    helps[
+        "iot ops ns asset datapoint remove"
+    ] = """
+        type: command
+        short-summary: Remove a datapoint from an asset dataset in an IoT Operations namespace.
+
+        examples:
+        - name: Remove a datapoint from a dataset
+          text: >
+            az iot ops ns asset datapoint remove --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --dataset default --name temp1
+    """
+
+    helps[
+        "iot ops ns asset datapoint export"
+    ] = """
+        type: command
+        short-summary: Export datapoints to file.
+
+        examples:
+        - name: Export datapoints to JSON
+          text: >
+            az iot ops ns asset datapoint export --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --dataset default
+    """
+
+    helps[
+        "iot ops ns asset datapoint import"
+    ] = """
+        type: command
+        short-summary: Import datapoints from file.
+
+        examples:
+        - name: Import datapoints from a JSON file
+          text: >
+            az iot ops ns asset datapoint import --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --dataset default --input-file ./datapoints.json
+    """
+
+    helps[
         "iot ops ns asset opcua dataset"
     ] = """
         type: group
         short-summary: Manage datasets for OPC UA namespaced assets in an IoT Operations instance.
-        long-summary: Currently, only one dataset with the name "default" is supported for assets.
     """
 
     helps[
@@ -2990,7 +3261,6 @@ def load_iotops_adr_help():
     ] = """
         type: group
         short-summary: Manage datasets for REST namespaced assets in an IoT Operations instance.
-        long-summary: Currently, only one dataset with the name "default" is supported for assets.
     """
 
     helps[

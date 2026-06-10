@@ -3087,3 +3087,98 @@ export_namespace_custom_asset_management_group_action = _make_mgmt_action_export
 export_namespace_opcua_asset_management_group_action = _make_mgmt_action_export_func("export_management_group_actions")
 import_namespace_custom_asset_management_group_action = _make_mgmt_action_import_func("import_management_group_actions")
 import_namespace_opcua_asset_management_group_action = _make_mgmt_action_import_func("import_management_group_actions")
+
+
+# GENERALIZED DATASET COMMANDS
+
+
+def add_namespace_asset_dataset(
+    cmd,
+    asset_name: str,
+    instance_name: str,
+    instance_resource_group: str,
+    dataset_name: str,
+    data_source: Optional[str] = None,
+    type_ref: Optional[str] = None,
+    replace: Optional[bool] = False,
+    dataset_config: Optional[str] = None,
+    show_template: Optional[str] = None,
+    **kwargs
+) -> dict:
+    return NamespaceAssets(cmd).add_dataset_generalized(
+        asset_name=asset_name,
+        instance_name=instance_name,
+        instance_resource_group=instance_resource_group,
+        dataset_name=dataset_name,
+        data_source=data_source,
+        type_ref=type_ref,
+        replace=replace,
+        dataset_config=dataset_config,
+        show_template=show_template,
+        **kwargs
+    )
+
+
+def update_namespace_asset_dataset(
+    cmd,
+    asset_name: str,
+    instance_name: str,
+    instance_resource_group: str,
+    dataset_name: str,
+    data_source: Optional[str] = None,
+    type_ref: Optional[str] = None,
+    dataset_config: Optional[str] = None,
+    show_template: Optional[str] = None,
+    **kwargs
+) -> dict:
+    return NamespaceAssets(cmd).update_dataset_generalized(
+        asset_name=asset_name,
+        instance_name=instance_name,
+        instance_resource_group=instance_resource_group,
+        dataset_name=dataset_name,
+        data_source=data_source,
+        type_ref=type_ref,
+        dataset_config=dataset_config,
+        show_template=show_template,
+        **kwargs
+    )
+
+
+export_namespace_asset_dataset = _make_export_func("export_datasets")
+import_namespace_asset_dataset = _make_import_func("import_datasets")
+
+
+# GENERALIZED DATAPOINT COMMANDS
+
+
+def add_namespace_asset_dataset_point(
+    cmd,
+    asset_name: str,
+    instance_name: str,
+    instance_resource_group: str,
+    dataset_name: str,
+    datapoint_name: str,
+    data_source: str,
+    type_ref: Optional[str] = None,
+    replace: Optional[bool] = False,
+    datapoint_config: Optional[str] = None,
+    show_template: Optional[str] = None,
+    **kwargs
+) -> List[dict]:
+    return NamespaceAssets(cmd).add_dataset_datapoint_generalized(
+        asset_name=asset_name,
+        instance_name=instance_name,
+        instance_resource_group=instance_resource_group,
+        dataset_name=dataset_name,
+        datapoint_name=datapoint_name,
+        data_source=data_source,
+        type_ref=type_ref,
+        replace=replace,
+        datapoint_config=datapoint_config,
+        show_template=show_template,
+        **kwargs
+    )
+
+
+export_namespace_asset_dataset_point = _make_datapoint_export_func("export_dataset_datapoints")
+import_namespace_asset_dataset_point = _make_datapoint_import_func("import_dataset_datapoints")
