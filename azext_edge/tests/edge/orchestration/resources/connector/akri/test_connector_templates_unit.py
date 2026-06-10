@@ -155,7 +155,8 @@ def test_safe_extract_blocks_relative_traversal(malicious_name, tmp_path):
 
 def test_safe_extract_blocks_absolute_path(tmp_path):
     # An absolute member name escapes the destination via os.path.join and must be rejected.
-    marker = f"/tmp/{generate_random_string()}.txt"
+    marker = str(tmp_path.parent / f"{generate_random_string()}.txt")
+    assert not os.path.exists(marker)
     blob = _build_tar_blob([_file_member(marker, generate_random_string().encode("utf-8"))])
 
     with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:

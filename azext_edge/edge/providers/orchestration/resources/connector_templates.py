@@ -829,9 +829,9 @@ class ConnectorTemplates(Queryable):
         Safely extract all members of a tar archive into dest_dir.
 
         Prevents Tar Slip / path traversal (CWE-22) by rejecting members whose
-        resolved destination would fall outside dest_dir (e.g. absolute paths,
-        ``..`` traversal sequences, or links pointing outside the destination).
-        Special file members (FIFO/character/block devices) are also rejected.
+        resolved destination would fall outside dest_dir (e.g. absolute paths or
+        ``..`` traversal sequences). Link members (symlink/hardlink) and special
+        file members (FIFO/character/block devices) are also rejected.
 
         Args:
             tar: An open tarfile.TarFile to extract.
@@ -856,19 +856,18 @@ class ConnectorTemplates(Queryable):
             if member.isdev() or member.isfifo():
                 raise ValidationError(
                     f"Refusing to extract unsupported tar member from artifact: '{member.name}'. "
-                    "Only regular files, directories, and contained links are allowed."
+                    "Only regular files and directories are allowed."
                 )
 
-            # Reject links (symlink/hardlink) that resolve outside the destination.
+            # Links (symlink/hardlink) are unnecessary for metadata extraction and are easy to misuse for
+            # path traversal-style attacks, so reject them entirely.
             if member.islnk() or member.issym():
-                link_target = os.path.realpath(os.path.join(os.path.dirname(member_path), member.linkname))
-                if not self._is_within_directory(dest_root, link_target):
-                    raise ValidationError(
-                        f"Refusing to extract unsafe link from artifact: '{member.name}'. "
-                        "The archive contains a link pointing outside the extraction directory."
-                    )
+                raise ValidationError(
+                    f"Refusing to extract link from artifact: '{member.name}'. "
+                    "Link members are not supported."
+                )
 
-        tar.extractall(dest_root)
+        tar.extractall(dest_root, members=[m for m in tar.getmembers() if m.isdir() or m.isreg()])
 
     @staticmethod
     def _is_within_directory(directory: str, target: str) -> bool:
