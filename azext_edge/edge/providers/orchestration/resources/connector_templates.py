@@ -824,6 +824,49 @@ class ConnectorTemplates(Queryable):
                 f"Failed to fetch connector metadata from {metadata_ref}: {str(e)}"
             )
 
+    def _safe_extractall(self, tar: tarfile.TarFile, dest_dir: str) -> None:
+        """
+        Safely extract all members of a tar archive into dest_dir.
+
+        Prevents Tar Slip / path traversal (CWE-22) by rejecting members whose
+        resolved destination would fall outside dest_dir (e.g. absolute paths,
+        ``..`` traversal sequences, or links pointing outside the destination).
+
+        Args:
+            tar: An open tarfile.TarFile to extract.
+            dest_dir: The directory into which members must be extracted.
+
+        Raises:
+            ValidationError: If any member would be written outside dest_dir.
+        """
+        dest_root = os.path.realpath(dest_dir)
+
+        for member in tar.getmembers():
+            member_path = os.path.realpath(os.path.join(dest_root, member.name))
+            if not self._is_within_directory(dest_root, member_path):
+                raise ValidationError(
+                    f"Refusing to extract unsafe path from artifact: '{member.name}'. "
+                    "The archive attempts to write outside the extraction directory."
+                )
+
+            # Reject links (symlink/hardlink) that resolve outside the destination.
+            if member.islnk() or member.issym():
+                link_target = os.path.realpath(os.path.join(os.path.dirname(member_path), member.linkname))
+                if not self._is_within_directory(dest_root, link_target):
+                    raise ValidationError(
+                        f"Refusing to extract unsafe link from artifact: '{member.name}'. "
+                        "The archive contains a link pointing outside the extraction directory."
+                    )
+
+        tar.extractall(dest_root)
+
+    @staticmethod
+    def _is_within_directory(directory: str, target: str) -> bool:
+        """Return True if ``target`` is located within ``directory``."""
+        directory = os.path.realpath(directory)
+        target = os.path.realpath(target)
+        return os.path.commonpath([directory]) == os.path.commonpath([directory, target])
+
     def _parse_metadata_blob(self, blob_content: bytes, metadata_ref: str) -> dict:
         """
         Parse connector metadata from blob content.
@@ -859,13 +902,13 @@ class ConnectorTemplates(Queryable):
             try:
                 logger.debug("Attempting to extract as tar.gz")
                 with tarfile.open(fileobj=io.BytesIO(blob_content), mode="r:gz") as tar:
-                    tar.extractall(temp_dir)
+                    self._safe_extractall(tar, temp_dir)
             except (tarfile.ReadError, OSError):
                 # Try as plain tar
                 try:
                     logger.debug("tar.gz failed, attempting to extract as plain tar")
                     with tarfile.open(fileobj=io.BytesIO(blob_content), mode="r") as tar:
-                        tar.extractall(temp_dir)
+                        self._safe_extractall(tar, temp_dir)
                 except (tarfile.ReadError, OSError) as e:
                     raise CLIInternalError(
                         f"Failed to extract artifact from {metadata_ref}. "
