@@ -843,7 +843,8 @@ class ConnectorTemplates(Queryable):
         """
         dest_root = os.path.realpath(dest_dir)
 
-        for member in tar.getmembers():
+        members = tar.getmembers()
+        for member in members:
             member_path = os.path.realpath(os.path.join(dest_root, member.name))
             if not self._is_within_directory(dest_root, member_path):
                 raise ValidationError(
@@ -867,7 +868,7 @@ class ConnectorTemplates(Queryable):
                     "Link members are not supported."
                 )
 
-        tar.extractall(dest_root, members=[m for m in tar.getmembers() if m.isdir() or m.isreg()])
+        tar.extractall(dest_root, members=[m for m in members if m.isdir() or m.isreg()])
 
     @staticmethod
     def _is_within_directory(directory: str, target: str) -> bool:

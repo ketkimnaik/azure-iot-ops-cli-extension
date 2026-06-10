@@ -150,7 +150,8 @@ def test_safe_extract_blocks_relative_traversal(malicious_name, tmp_path):
             _provider()._safe_extractall(tar, str(tmp_path))
 
     # Ensure nothing was written outside the destination directory.
-    assert not (tmp_path.parent / "malicious.txt").exists()
+    outside_path = os.path.realpath(os.path.join(str(tmp_path), malicious_name))
+    assert not os.path.exists(outside_path)
 
 
 def test_safe_extract_blocks_absolute_path(tmp_path):
