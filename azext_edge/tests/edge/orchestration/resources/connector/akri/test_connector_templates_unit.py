@@ -176,6 +176,16 @@ def test_safe_extract_blocks_symlink_escape(tmp_path):
             _provider()._safe_extractall(tar, str(tmp_path))
 
 
+def test_safe_extract_blocks_special_files(tmp_path):
+    fifo = tarfile.TarInfo(name="connector-metadata.json")
+    fifo.type = tarfile.FIFOTYPE
+    blob = _build_tar_blob([(fifo, None)])
+
+    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
+        with pytest.raises(ValidationError):
+            _provider()._safe_extractall(tar, str(tmp_path))
+
+
 def test_is_within_directory(tmp_path):
     inside = os.path.join(str(tmp_path), "sub", "file.txt")
     outside = os.path.join(str(tmp_path), "..", "file.txt")

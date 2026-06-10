@@ -831,13 +831,15 @@ class ConnectorTemplates(Queryable):
         Prevents Tar Slip / path traversal (CWE-22) by rejecting members whose
         resolved destination would fall outside dest_dir (e.g. absolute paths,
         ``..`` traversal sequences, or links pointing outside the destination).
+        Special file members (FIFO/character/block devices) are also rejected.
 
         Args:
             tar: An open tarfile.TarFile to extract.
             dest_dir: The directory into which members must be extracted.
 
         Raises:
-            ValidationError: If any member would be written outside dest_dir.
+            ValidationError: If any member would be written outside dest_dir or
+                is an unsupported special file type.
         """
         dest_root = os.path.realpath(dest_dir)
 
@@ -847,6 +849,14 @@ class ConnectorTemplates(Queryable):
                 raise ValidationError(
                     f"Refusing to extract unsafe path from artifact: '{member.name}'. "
                     "The archive attempts to write outside the extraction directory."
+                )
+
+            # Reject special file types (FIFO/character/block devices). They are unnecessary for
+            # metadata extraction and could cause the later open() to block or have unsafe side effects.
+            if member.isdev() or member.isfifo():
+                raise ValidationError(
+                    f"Refusing to extract unsupported tar member from artifact: '{member.name}'. "
+                    "Only regular files, directories, and contained links are allowed."
                 )
 
             # Reject links (symlink/hardlink) that resolve outside the destination.
@@ -865,7 +875,12 @@ class ConnectorTemplates(Queryable):
         """Return True if ``target`` is located within ``directory``."""
         directory = os.path.realpath(directory)
         target = os.path.realpath(target)
-        return os.path.commonpath([directory]) == os.path.commonpath([directory, target])
+        try:
+            return os.path.commonpath([directory]) == os.path.commonpath([directory, target])
+        except ValueError:
+            # Raised when paths are on different drives (Windows) or mix absolute/relative;
+            # such a target cannot be within the directory, so treat it as unsafe.
+            return False
 
     def _parse_metadata_blob(self, blob_content: bytes, metadata_ref: str) -> dict:
         """
