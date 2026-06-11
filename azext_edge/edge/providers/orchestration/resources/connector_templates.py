@@ -824,7 +824,8 @@ class ConnectorTemplates(Queryable):
                 f"Failed to fetch connector metadata from {metadata_ref}: {str(e)}"
             )
 
-    def _safe_extractall(self, tar: tarfile.TarFile, dest_dir: str) -> None:
+    @staticmethod
+    def _safe_extractall(tar: tarfile.TarFile, dest_dir: str) -> None:
         """
         Safely extract all members of a tar archive into dest_dir.
 
@@ -846,7 +847,7 @@ class ConnectorTemplates(Queryable):
         members = tar.getmembers()
         for member in members:
             member_path = os.path.realpath(os.path.join(dest_root, member.name))
-            if not self._is_within_directory(dest_root, member_path):
+            if not ConnectorTemplates._is_within_directory(dest_root, member_path):
                 raise ValidationError(
                     f"Refusing to extract unsafe path from artifact: '{member.name}'. "
                     "The archive attempts to write outside the extraction directory."

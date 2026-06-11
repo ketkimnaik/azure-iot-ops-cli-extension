@@ -167,21 +167,22 @@ def test_safe_extract_blocks_absolute_path(tmp_path):
     assert not os.path.exists(marker)
 
 
-def test_safe_extract_blocks_symlink_escape(tmp_path):
-    link = tarfile.TarInfo(name="link")
-    link.type = tarfile.SYMTYPE
-    link.linkname = "../../etc/passwd"
-    blob = _build_tar_blob([(link, None)])
-
-    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
-        with pytest.raises(ValidationError):
-            _provider()._safe_extractall(tar, str(tmp_path))
-
-
-def test_safe_extract_blocks_special_files(tmp_path):
-    fifo = tarfile.TarInfo(name="connector-metadata.json")
-    fifo.type = tarfile.FIFOTYPE
-    blob = _build_tar_blob([(fifo, None)])
+@pytest.mark.parametrize(
+    "member_type",
+    [
+        tarfile.SYMTYPE,
+        tarfile.LNKTYPE,
+        tarfile.FIFOTYPE,
+        tarfile.CHRTYPE,
+        tarfile.BLKTYPE,
+    ],
+)
+def test_safe_extract_blocks_unsupported_members(member_type, tmp_path):
+    member = tarfile.TarInfo(name="connector-metadata.json")
+    member.type = member_type
+    if member_type in (tarfile.SYMTYPE, tarfile.LNKTYPE):
+        member.linkname = "../../etc/passwd"
+    blob = _build_tar_blob([(member, None)])
 
     with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
         with pytest.raises(ValidationError):
