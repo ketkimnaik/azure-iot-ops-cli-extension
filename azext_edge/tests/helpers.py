@@ -474,7 +474,7 @@ CLOUD_CONFIG_FIXTURES = {
 }
 
 
-def build_mock_cmd_for_cloud(cloud_name: str) -> "Mock":
+def build_mock_cmd_for_cloud(cloud_name: str):
     """Build a mock cmd whose cli_ctx.cloud reflects the given cloud's endpoints/suffixes."""
     from unittest.mock import Mock
 
