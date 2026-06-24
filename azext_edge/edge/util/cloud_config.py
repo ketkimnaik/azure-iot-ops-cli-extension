@@ -71,6 +71,16 @@ class CloudConfig:
         return f"{self._cloud.endpoints.active_directory_resource_id.rstrip('/')}/.default"
 
     @property
+    def arm_endpoint_scope(self) -> str:
+        """ARM resource manager endpoint token scope (e.g. https://management.azure.com/.default).
+
+        Unlike ``arm_scope`` (derived from ``active_directory_resource_id``), this is derived from
+        the ARM endpoint itself. Required by flows such as ACR's oauth2/exchange that expect a token
+        for the resource manager audience (``https://management.<cloud>/``).
+        """
+        return f"{self._cloud.endpoints.resource_manager.rstrip('/')}/.default"
+
+    @property
     def graph_endpoint(self) -> str:
         """Microsoft Graph endpoint with trailing slash (e.g. https://graph.microsoft.com/)."""
         endpoint = self._cloud.endpoints.microsoft_graph_resource_id

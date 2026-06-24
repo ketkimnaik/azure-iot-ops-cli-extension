@@ -361,7 +361,7 @@ class OciRegistryClient:
         try:
             from .cloud_config import CloudConfig
 
-            arm_token = AZURE_CLI_CREDENTIAL.get_token(CloudConfig(cmd).arm_scope).token
+            arm_token = AZURE_CLI_CREDENTIAL.get_token(CloudConfig(cmd).arm_endpoint_scope).token
         except Exception as ex:  # pragma: no cover - credential failures
             logger.warning(f"Failed to obtain ARM token for ACR: {ex}")
             return None

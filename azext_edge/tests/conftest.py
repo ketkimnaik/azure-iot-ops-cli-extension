@@ -106,7 +106,7 @@ def mocked_cmd(mocker, mocked_get_subscription_id, mocked_azcli_cred_get_token, 
     cloud.endpoints = Stub()
     cloud.endpoints.resource_manager = "https://management.azure.com/"
     cloud.endpoints.active_directory = "https://login.microsoftonline.com/"
-    cloud.endpoints.active_directory_resource_id = "https://management.azure.com/"
+    cloud.endpoints.active_directory_resource_id = "https://management.core.windows.net/"
     cloud.endpoints.microsoft_graph_resource_id = "https://graph.microsoft.com/"
     cloud.suffixes = Stub()
     cloud.suffixes.storage_endpoint = "core.windows.net"
