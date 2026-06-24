@@ -67,7 +67,7 @@ class CloudConfig:
 
     @property
     def arm_scope(self) -> str:
-        """ARM token scope (e.g. https://management.azure.com/.default)."""
+        """ARM token scope derived from active_directory_resource_id (e.g. https://management.core.windows.net/.default)."""
         return f"{self._cloud.endpoints.active_directory_resource_id.rstrip('/')}/.default"
 
     @property
