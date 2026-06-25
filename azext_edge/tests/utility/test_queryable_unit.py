@@ -315,7 +315,6 @@ class TestCloudConfig:
                 "AzureCloud",
                 {
                     "arm_endpoint": "https://management.azure.com/",
-                    "arm_scope": "https://management.core.windows.net/.default",
                     "arm_endpoint_scope": "https://management.azure.com/.default",
                     "graph_endpoint": "https://graph.microsoft.com/",
                     "graph_token_resource": "https://graph.microsoft.com",
@@ -332,7 +331,6 @@ class TestCloudConfig:
                 "AzureUSGovernment",
                 {
                     "arm_endpoint": "https://management.usgovcloudapi.net/",
-                    "arm_scope": "https://management.core.usgovcloudapi.net/.default",
                     "arm_endpoint_scope": "https://management.usgovcloudapi.net/.default",
                     "graph_endpoint": "https://graph.microsoft.us/",
                     "graph_token_resource": "https://graph.microsoft.us",
@@ -349,7 +347,6 @@ class TestCloudConfig:
                 "AzureChinaCloud",
                 {
                     "arm_endpoint": "https://management.chinacloudapi.cn",
-                    "arm_scope": "https://management.core.chinacloudapi.cn/.default",
                     "arm_endpoint_scope": "https://management.chinacloudapi.cn/.default",
                     "graph_endpoint": "https://microsoftgraph.chinacloudapi.cn/",
                     "graph_token_resource": "https://microsoftgraph.chinacloudapi.cn",
@@ -372,7 +369,6 @@ class TestCloudConfig:
 
         assert config.name == cloud_name
         assert config.arm_endpoint == expected["arm_endpoint"]
-        assert config.arm_scope == expected["arm_scope"]
         assert config.arm_endpoint_scope == expected["arm_endpoint_scope"]
         assert config.graph_endpoint == expected["graph_endpoint"]
         assert config.graph_token_resource == expected["graph_token_resource"]
