@@ -25,6 +25,11 @@ if TYPE_CHECKING:
 # Known cloud names as reported by ``cmd.cli_ctx.cloud.name``.
 CLOUD_AZURE_PUBLIC = "AzureCloud"
 CLOUD_AZURE_US_GOVERNMENT = "AzureUSGovernment"
+# NOTE: Azure China (Mooncake) is NOT functional today — the Azure IoT Operations service
+# does not have server-side support in Mooncake, so end-to-end flows cannot be validated
+# there yet. The China endpoint/suffix mappings below are intentionally retained so that
+# support is already in place if/when Mooncake gains server-side support in the future.
+# Until then, treat AzureChinaCloud as best-effort / untested.
 CLOUD_AZURE_CHINA = "AzureChinaCloud"
 
 # Service Bus FQDN suffix per cloud. Not provided by the Azure CLI cloud framework.
