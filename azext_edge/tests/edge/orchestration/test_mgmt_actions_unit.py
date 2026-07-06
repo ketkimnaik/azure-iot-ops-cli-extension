@@ -5761,6 +5761,12 @@ class TestMgmtActionsCloudGate:
         # In supported clouds the cloud gate must NOT raise. To prove we get past the gate,
         # assert enable() reaches the first client interaction (instance lookup) and fails there
         # because no mgmt client is wired in this lightweight setup.
+        #
+        # NOTE: This intentionally couples to the internal `iotops_mgmt_client` attribute because
+        # the instance lookup (`self.iotops_mgmt_client.instance.get(...)`) is the first client
+        # interaction after the gate. It assumes the gate check, the semver import, and
+        # WorkflowDisplay setup all run before that lookup. If the enable() flow is reordered so a
+        # different client is touched first, update this assertion to match the new first interaction.
         with pytest.raises(AttributeError) as exc:
             provider.enable(
                 name=generate_random_string(),
