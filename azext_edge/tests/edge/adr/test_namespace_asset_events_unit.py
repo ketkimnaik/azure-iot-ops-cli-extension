@@ -30,6 +30,11 @@ from azext_edge.edge.commands_namespaces import (
     list_namespace_asset_event_group_events,
     remove_namespace_asset_event_group_event
 )
+from azext_edge.edge.commands_namespaces import (
+    add_namespace_asset_event_group,
+    update_namespace_asset_event_group,
+    add_namespace_asset_event_group_event,
+)
 
 from .test_namespace_assets_unit import (
     get_namespace_asset_mgmt_uri, get_namespace_asset_record, add_device_get_call
@@ -1370,3 +1375,620 @@ def test_remove_namespace_asset_event_group_event(
         instance_name=instance_name,
         instance_resource_group=instance_resource_group
     )
+
+
+# ---------------------------------------------------------------------------
+# Generalized (connector-agnostic) event-group / event unit tests
+# ---------------------------------------------------------------------------
+
+
+def _build_asset_with_connector_events(
+    asset_name: str,
+    namespace_name: str,
+    resource_group_name: str,
+    event_groups: Optional[list] = None,
+) -> dict:
+    """Build a mock asset record pre-wired for the generalized event path."""
+    asset = get_namespace_asset_record(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+    )
+    asset["properties"]["eventGroups"] = event_groups or []
+    return asset
+
+
+def _add_device_get_for_generalized_events(
+    mocked_responses: responses,
+    asset: dict,
+    namespace_name: str,
+    resource_group_name: str,
+    connector_type: str,
+) -> None:
+    """Register GET device mock needed by _get_connector_type_from_asset and _check_device_props."""
+    device_name = asset["properties"]["deviceRef"]["deviceName"]
+    endpoint_name = asset["properties"]["deviceRef"]["endpointName"]
+    add_device_get_call(
+        mocked_responses,
+        device_name=device_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        endpoint_name=endpoint_name,
+        endpoint_type=connector_type,
+    )
+
+
+def _event_metadata(connector_type: str, eg_schema=None, ev_schema=None, supported=("Mqtt",)) -> dict:
+    """Build a connector metadata payload for the generalized event path."""
+    return {
+        "inboundEndpoints": [{
+            "endpointType": f"Microsoft.{connector_type}",
+            "eventGroups": {
+                "eventGroupConfigurationSchema": eg_schema,
+                "events": {
+                    "eventConfigurationSchema": ev_schema,
+                    "destinations": {"supportedDestinations": list(supported)},
+                },
+            },
+        }]
+    }
+
+
+# ---------------------------------------------------------------------------
+# add_namespace_asset_event_group (generalized) unit tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("has_event_group_config", [False, True])
+@pytest.mark.parametrize("replace, pre_existing", [
+    (False, False),
+    (True, False),
+    (True, True),
+])
+def test_add_namespace_asset_event_group_generalized(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+    has_event_group_config: bool,
+    replace: bool,
+    pre_existing: bool,
+):
+    asset_name = "gen-asset"
+    group_name = f"eg-{generate_random_string()}"
+    connector_type = "Custom.Test"
+
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    event_group_config_json = json.dumps({
+        "eventGroupConfiguration": {"publishingInterval": 1000},
+        "destinations": [{"target": "Mqtt", "configuration": {"topic": "t/test"}}],
+    })
+
+    existing_egs = [generate_event_group(group_name=group_name)] if pre_existing else []
+    asset = _build_asset_with_connector_events(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        event_groups=existing_egs,
+    )
+
+    # _get_connector_type_from_asset: GET asset + GET device
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+
+    # _check_device_props: GET asset + GET device
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+
+    if has_event_group_config:
+        mocker.patch(
+            "azext_edge.edge.providers.adr.namespace_assets.NamespaceAssets._get_connector_metadata",
+            return_value=_event_metadata(connector_type),
+        )
+
+    updated_asset = deepcopy(asset)
+    updated_asset["properties"]["eventGroups"] = [
+        {"name": group_name, "dataSource": "src/test", "events": []}
+    ]
+    mocked_responses.add(
+        responses.PATCH,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        status=200,
+    )
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=updated_asset, status=200,
+    )
+
+    result = add_namespace_asset_event_group(
+        cmd=mocked_cmd,
+        asset_name=asset_name,
+        instance_name="inst",
+        instance_resource_group="rg",
+        group_name=group_name,
+        data_source="src/test",
+        replace=replace,
+        event_group_config=event_group_config_json if has_event_group_config else None,
+        wait_sec=0,
+    )
+
+    assert result["name"] == group_name
+
+
+def test_add_namespace_asset_event_group_generalized_raises_on_duplicate(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+):
+    asset_name = "gen-asset"
+    group_name = "existing-eg"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    asset = _build_asset_with_connector_events(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        event_groups=[generate_event_group(group_name=group_name)],
+    )
+
+    # _get_connector_type_from_asset
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+    # _check_device_props
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+
+    with pytest.raises(InvalidArgumentValueError, match="already exists"):
+        add_namespace_asset_event_group(
+            cmd=mocked_cmd,
+            asset_name=asset_name,
+            instance_name="inst",
+            instance_resource_group="rg",
+            group_name=group_name,
+            replace=False,
+            wait_sec=0,
+        )
+
+
+def test_add_namespace_asset_event_group_generalized_show_template_config(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+):
+    """show_template=config on add should return a blank template wrapped with connectorType."""
+    asset_name = "gen-asset"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    asset = _build_asset_with_connector_events(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        event_groups=[],
+    )
+
+    # _get_connector_type_from_asset
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+
+    mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_assets.NamespaceAssets._get_connector_metadata",
+        return_value=_event_metadata(
+            connector_type,
+            eg_schema={
+                "type": "object",
+                "properties": {"publishingInterval": {"type": "integer", "default": 1000}},
+            },
+        ),
+    )
+
+    result = add_namespace_asset_event_group(
+        cmd=mocked_cmd,
+        asset_name=asset_name,
+        instance_name="inst",
+        instance_resource_group="rg",
+        group_name="new-eg",
+        show_template="config",
+        wait_sec=0,
+    )
+
+    assert result["connectorType"] == f"Microsoft.{connector_type}"
+    eg_cfg = result["eventGroupConfig"]
+    assert "eventGroupConfiguration" in eg_cfg
+    # Destinations metadata pulled from the event level
+    dests = eg_cfg["destinations"]
+    assert any(d["target"] == "Mqtt" for d in dests)
+
+
+# ---------------------------------------------------------------------------
+# update_namespace_asset_event_group (generalized) unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_update_namespace_asset_event_group_generalized(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+):
+    asset_name = "gen-asset"
+    group_name = "sensor-eg"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    existing_eg = {
+        "name": group_name,
+        "dataSource": "orig/src",
+        "eventGroupConfiguration": json.dumps({"publishingInterval": 1000}),
+        "defaultDestinations": [],
+        "events": [],
+        "typeRef": None,
+    }
+    asset = _build_asset_with_connector_events(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        event_groups=[existing_eg],
+    )
+
+    event_group_config_json = json.dumps({
+        "eventGroupConfiguration": {"publishingInterval": 5000},
+        "destinations": [{"target": "Mqtt", "configuration": {"topic": "updated/topic"}}],
+    })
+
+    # _get_connector_type_from_asset
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+    # _check_device_props
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+
+    mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_assets.NamespaceAssets._get_connector_metadata",
+        return_value=_event_metadata(connector_type),
+    )
+
+    updated_asset = deepcopy(asset)
+    updated_eg = deepcopy(existing_eg)
+    updated_eg["eventGroupConfiguration"] = json.dumps({"publishingInterval": 5000})
+    updated_eg["defaultDestinations"] = [{"target": "Mqtt", "configuration": {"topic": "updated/topic"}}]
+    updated_asset["properties"]["eventGroups"] = [updated_eg]
+
+    mocked_responses.add(
+        responses.PATCH,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        status=200,
+    )
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=updated_asset, status=200,
+    )
+
+    result = update_namespace_asset_event_group(
+        cmd=mocked_cmd,
+        asset_name=asset_name,
+        instance_name="inst",
+        instance_resource_group="rg",
+        group_name=group_name,
+        event_group_config=event_group_config_json,
+        wait_sec=0,
+    )
+
+    assert result["name"] == group_name
+    assert json.loads(result["eventGroupConfiguration"])["publishingInterval"] == 5000
+
+
+def test_update_namespace_asset_event_group_generalized_show_template_config(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+):
+    """show_template=config on update should pre-fill existing ARM values into the template."""
+    asset_name = "gen-asset"
+    group_name = "sensor-eg"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    existing_eg = {
+        "name": group_name,
+        "dataSource": "orig/src",
+        "eventGroupConfiguration": json.dumps({"publishingInterval": 3000, "bufferSize": 5}),
+        "defaultDestinations": [{"target": "Mqtt", "configuration": {"topic": "live/topic", "qos": "Qos1"}}],
+        "events": [],
+        "typeRef": None,
+    }
+    asset = _build_asset_with_connector_events(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        event_groups=[existing_eg],
+    )
+
+    # _get_connector_type_from_asset
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+
+    mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_assets.NamespaceAssets._get_connector_metadata",
+        return_value=_event_metadata(
+            connector_type,
+            eg_schema={
+                "type": "object",
+                "properties": {
+                    "publishingInterval": {"type": "integer", "default": 1000},
+                    "bufferSize": {"type": "integer", "default": 10},
+                },
+            },
+        ),
+    )
+
+    result = update_namespace_asset_event_group(
+        cmd=mocked_cmd,
+        asset_name=asset_name,
+        instance_name="inst",
+        instance_resource_group="rg",
+        group_name=group_name,
+        show_template="config",
+        wait_sec=0,
+    )
+
+    assert result["connectorType"] == f"Microsoft.{connector_type}"
+    eg_cfg = result["eventGroupConfig"]["eventGroupConfiguration"]
+    # Existing ARM values should be pre-filled
+    assert eg_cfg["publishingInterval"] == 3000
+    assert eg_cfg["bufferSize"] == 5
+    # Existing destination topic should be pre-filled
+    dests = result["eventGroupConfig"]["destinations"]
+    mqtt_dest = next((d for d in dests if d["target"] == "Mqtt"), None)
+    assert mqtt_dest is not None
+    assert mqtt_dest["configuration"]["topic"] == "live/topic"
+
+
+def test_update_namespace_asset_event_group_generalized_raises_if_not_found(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+):
+    asset_name = "gen-asset"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    asset = _build_asset_with_connector_events(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        event_groups=[],
+    )
+
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+
+    with pytest.raises(InvalidArgumentValueError, match="not found"):
+        update_namespace_asset_event_group(
+            cmd=mocked_cmd,
+            asset_name=asset_name,
+            instance_name="inst",
+            instance_resource_group="rg",
+            group_name="missing-eg",
+            show_template="config",
+            wait_sec=0,
+        )
+
+
+# ---------------------------------------------------------------------------
+# add_namespace_asset_event_group_event (generalized) unit tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("has_event_config", [False, True])
+def test_add_namespace_asset_event_group_event_generalized(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+    has_event_config: bool,
+):
+    asset_name = "gen-asset"
+    group_name = "sensor-eg"
+    event_name = "temp-ev"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    existing_eg = {
+        "name": group_name,
+        "dataSource": "s/src",
+        "events": [],
+    }
+    asset = _build_asset_with_connector_events(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        event_groups=[existing_eg],
+    )
+
+    event_config_json = json.dumps({
+        "eventConfiguration": {"samplingInterval": 250, "queueSize": 10},
+        "destinations": [{"target": "Mqtt", "configuration": {"topic": "ev/temp"}}],
+    })
+
+    # _get_connector_type_from_asset
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+    # _check_device_props
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+
+    if has_event_config:
+        mocker.patch(
+            "azext_edge.edge.providers.adr.namespace_assets.NamespaceAssets._get_connector_metadata",
+            return_value=_event_metadata(connector_type),
+        )
+
+    updated_asset = deepcopy(asset)
+    added_ev = {"name": event_name, "dataSource": "sensors/temp"}
+    if has_event_config:
+        added_ev["eventConfiguration"] = json.dumps({"samplingInterval": 250, "queueSize": 10})
+        added_ev["destinations"] = [{"target": "Mqtt", "configuration": {"topic": "ev/temp"}}]
+    updated_asset["properties"]["eventGroups"][0]["events"] = [added_ev]
+
+    mocked_responses.add(
+        responses.PATCH,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        status=200,
+    )
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=updated_asset, status=200,
+    )
+
+    result = add_namespace_asset_event_group_event(
+        cmd=mocked_cmd,
+        asset_name=asset_name,
+        instance_name="inst",
+        instance_resource_group="rg",
+        group_name=group_name,
+        event_name=event_name,
+        data_source="sensors/temp",
+        replace=False,
+        event_config=event_config_json if has_event_config else None,
+        wait_sec=0,
+    )
+
+    assert isinstance(result, list)
+    ev = next((e for e in result if e["name"] == event_name), None)
+    assert ev is not None
+    assert ev["dataSource"] == "sensors/temp"
+    if has_event_config:
+        cfg = json.loads(ev["eventConfiguration"])
+        assert cfg["samplingInterval"] == 250
+        assert cfg["queueSize"] == 10
+
+
+def test_add_namespace_asset_event_group_event_generalized_raises_on_duplicate(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+):
+    asset_name = "gen-asset"
+    group_name = "sensor-eg"
+    event_name = "existing-ev"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    existing_eg = {
+        "name": group_name,
+        "dataSource": "s/src",
+        "events": [{"name": event_name, "dataSource": "sensors/old"}],
+    }
+    asset = _build_asset_with_connector_events(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        event_groups=[existing_eg],
+    )
+
+    # _get_connector_type_from_asset
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+    # _check_device_props
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_events(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+
+    with pytest.raises(InvalidArgumentValueError, match="already exists"):
+        add_namespace_asset_event_group_event(
+            cmd=mocked_cmd,
+            asset_name=asset_name,
+            instance_name="inst",
+            instance_resource_group="rg",
+            group_name=group_name,
+            event_name=event_name,
+            data_source="sensors/new",
+            replace=False,
+            wait_sec=0,
+        )

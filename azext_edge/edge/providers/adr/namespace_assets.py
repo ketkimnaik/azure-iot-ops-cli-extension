@@ -2479,6 +2479,606 @@ class NamespaceAssets(Queryable):
             )
             return _get_sub_property(asset, event_group_name, property_key="eventGroups")["events"]
 
+    def _handle_event_group_show_template(
+        self,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+        template_mode: str,
+        event_group_config: Optional[str],
+    ) -> dict:
+        """Return an event-group config/schema template for --show-template and exit early.
+
+        Discovers the eventGroupConfigurationSchema and supported destinations from connector
+        metadata and returns a slimmed template. OPC UA uses bundled metadata; all other types
+        require a connector template in the instance.
+        """
+        from .helpers import _slim_schema, _consolidate_warnings
+        from .common import EndpointTemplateMode
+
+        if event_group_config:
+            raise InvalidArgumentValueError(
+                "--show-template and --event-group-config cannot be used together. "
+                "--show-template displays the template and exits without modifying the event-group."
+            )
+
+        metadata = self._get_connector_metadata(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+        )
+        endpoint = _get_metadata_endpoint(metadata, connector_type)
+        eg_section = endpoint.get("eventGroups", {})
+        schema = eg_section.get("eventGroupConfigurationSchema")
+
+        event_group_config_template: dict = {}
+        all_warnings: List[str] = []
+
+        if schema:
+            warnings: List[str] = []
+            slimmed = _slim_schema(schema, mode=template_mode, _warnings=warnings)
+            all_warnings.extend(warnings)
+            if template_mode == EndpointTemplateMode.SCHEMA.value and isinstance(slimmed, dict):
+                slimmed.pop("$id", None)
+            event_group_config_template["eventGroupConfiguration"] = slimmed
+
+        # Destinations metadata lives at the event level; the event-group's defaultDestinations
+        # share the same supported destination set.
+        destinations = self._build_event_destinations_template(eg_section, template_mode)
+        if destinations is not None:
+            event_group_config_template["destinations"] = destinations
+
+        for w in _consolidate_warnings(all_warnings):
+            logger.warning(w)
+
+        return {"connectorType": connector_type, "eventGroupConfig": event_group_config_template}
+
+    def _build_event_destinations_template(self, eg_section: dict, template_mode: str) -> Optional[list]:
+        """Build a destinations template from the connector's supported event destinations.
+
+        Event-group defaultDestinations and event destinations share the same supported set, which
+        lives at ``eventGroups.events.destinations``. Returns None when no destinations are supported.
+        """
+        events_section = eg_section.get("events", {}) if isinstance(eg_section, dict) else {}
+        dest_section = events_section.get("destinations", {}) if isinstance(events_section, dict) else {}
+        supported = dest_section.get("supportedDestinations", []) if isinstance(dest_section, dict) else []
+        if not supported:
+            return None
+        return _build_destination_template(
+            supported_destinations=supported,
+            default_destination=dest_section.get("defaultDestination"),
+            mode=template_mode,
+        )
+
+    def _load_and_validate_event_group_config(
+        self,
+        event_group_config: str,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+    ) -> dict:
+        """Load event-group config from file/inline JSON, validate against connector schema, and
+        return ARM-ready values.
+
+        Input JSON is expected to be the 'eventGroupConfig' dict (output of --show-template), e.g.:
+          {
+            "eventGroupConfiguration": {...},
+            "destinations": [...]
+          }
+        Or the full --show-template output with 'connectorType' and 'eventGroupConfig' keys,
+        which is auto-unwrapped.
+
+        Returns a dict with:
+          - "eventGroupConfiguration": serialized JSON string (if present)
+          - "destinations": list of destination dicts (if present)
+        """
+        from .helpers import strip_nulls as _strip_nulls
+
+        raw = process_additional_configuration(
+            additional_configuration=event_group_config,
+            config_type="event-group",
+        )
+        parsed = json.loads(raw)
+
+        if isinstance(parsed, dict) and "eventGroupConfig" in parsed and "connectorType" in parsed:
+            parsed = parsed["eventGroupConfig"]
+
+        if not isinstance(parsed, dict):
+            raise InvalidArgumentValueError(
+                "--event-group-config must be a JSON object with 'eventGroupConfiguration' "
+                "and/or 'destinations' keys."
+            )
+
+        metadata = self._get_connector_metadata(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+        )
+        endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
+        eg_section = endpoint.get("eventGroups", {}) if endpoint else {}
+
+        result = {}
+
+        config_data_raw = parsed.get("eventGroupConfiguration")
+        if config_data_raw is not None:
+            config_data = _strip_nulls(config_data_raw)
+            schema = eg_section.get("eventGroupConfigurationSchema") if eg_section else None
+            if schema:
+                from ...util.schema_validation import check_json_schema, validate_data_against_schema
+                skip_reason = check_json_schema(schema)
+                if skip_reason:
+                    logger.warning("Skipping eventGroupConfiguration validation: %s", skip_reason)
+                else:
+                    validate_data_against_schema(schema, config_data, name="eventGroupConfiguration")
+            result["eventGroupConfiguration"] = json.dumps(config_data)
+
+        dest_raw = parsed.get("destinations")
+        if dest_raw is not None:
+            dest_data = self._validate_event_destinations(dest_raw, eg_section)
+            if dest_data:
+                result["destinations"] = dest_data
+
+        return result
+
+    def _validate_event_destinations(self, dest_raw, eg_section: dict) -> List[dict]:
+        """Validate and filter a destinations list against the connector's supported event
+        destinations. Shared by event-group and event config loaders."""
+        from .helpers import strip_nulls as _strip_nulls
+
+        dest_data = _strip_nulls(dest_raw)
+        if not isinstance(dest_data, list):
+            raise InvalidArgumentValueError(
+                "'destinations' must be a JSON array of destination objects."
+            )
+        filtered: List[dict] = []
+        for item in dest_data:
+            if not isinstance(item, dict):
+                raise InvalidArgumentValueError(
+                    "'destinations' entries must be JSON objects."
+                )
+            if not item.get("configuration"):
+                logger.warning(
+                    "Ignoring destination '%s' because its configuration is empty.",
+                    item.get("target"),
+                )
+                continue
+            filtered.append(item)
+        dest_data = filtered
+        if dest_data:
+            events_section = eg_section.get("events", {}) if eg_section else {}
+            dest_section = events_section.get("destinations", {}) if isinstance(events_section, dict) else {}
+            supported = (
+                dest_section.get("supportedDestinations", [])
+                if isinstance(dest_section, dict) else []
+            )
+            if supported:
+                for dest_item in dest_data:
+                    target = dest_item.get("target")
+                    if target and target not in supported:
+                        raise InvalidArgumentValueError(
+                            f"Destination target '{target}' is not supported for events. "
+                            f"Supported: {supported}."
+                        )
+        return dest_data
+
+    def _handle_event_show_template(
+        self,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+        template_mode: str,
+        event_config: Optional[str],
+    ) -> dict:
+        """Return an event config/schema template for --show-template and exit early."""
+        from .helpers import _slim_schema, _consolidate_warnings
+        from .common import EndpointTemplateMode
+
+        if event_config:
+            raise InvalidArgumentValueError(
+                "--show-template and --event-config cannot be used together. "
+                "--show-template displays the template and exits without modifying the event."
+            )
+
+        metadata = self._get_connector_metadata(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+        )
+        endpoint = _get_metadata_endpoint(metadata, connector_type)
+        eg_section = endpoint.get("eventGroups", {})
+        events_section = eg_section.get("events", {})
+        schema = events_section.get("eventConfigurationSchema")
+
+        event_config_template: dict = {}
+        all_warnings: List[str] = []
+
+        if schema:
+            warnings: List[str] = []
+            slimmed = _slim_schema(schema, mode=template_mode, _warnings=warnings)
+            all_warnings.extend(warnings)
+            if template_mode == EndpointTemplateMode.SCHEMA.value and isinstance(slimmed, dict):
+                slimmed.pop("$id", None)
+            event_config_template["eventConfiguration"] = slimmed
+
+        destinations = self._build_event_destinations_template(eg_section, template_mode)
+        if destinations is not None:
+            event_config_template["destinations"] = destinations
+
+        for w in _consolidate_warnings(all_warnings):
+            logger.warning(w)
+
+        return {"connectorType": connector_type, "eventConfig": event_config_template}
+
+    def _load_and_validate_event_config(
+        self,
+        event_config: str,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+    ) -> dict:
+        """Load event config from file/inline JSON, validate against connector schema.
+
+        Input JSON is expected to be the 'eventConfig' dict (output of --show-template), e.g.:
+          {
+            "eventConfiguration": {...},
+            "destinations": [...]
+          }
+        Or the full --show-template output with 'connectorType' and 'eventConfig' keys,
+        which is auto-unwrapped.
+
+        Returns a dict with:
+          - "eventConfiguration": serialized JSON string (if present)
+          - "destinations": list of destination dicts (if present)
+        """
+        from .helpers import strip_nulls as _strip_nulls
+
+        raw = process_additional_configuration(
+            additional_configuration=event_config,
+            config_type="event",
+        )
+        parsed = json.loads(raw)
+
+        if isinstance(parsed, dict) and "eventConfig" in parsed and "connectorType" in parsed:
+            parsed = parsed["eventConfig"]
+
+        if not isinstance(parsed, dict):
+            raise InvalidArgumentValueError(
+                "--event-config must be a JSON object with 'eventConfiguration' "
+                "and/or 'destinations' keys."
+            )
+
+        metadata = self._get_connector_metadata(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+        )
+        endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
+        eg_section = endpoint.get("eventGroups", {}) if endpoint else {}
+        events_section = eg_section.get("events", {}) if eg_section else {}
+
+        result = {}
+
+        config_data_raw = parsed.get("eventConfiguration")
+        if config_data_raw is not None:
+            config_data = _strip_nulls(config_data_raw)
+            schema = events_section.get("eventConfigurationSchema") if events_section else None
+            if schema:
+                from ...util.schema_validation import check_json_schema, validate_data_against_schema
+                skip_reason = check_json_schema(schema)
+                if skip_reason:
+                    logger.warning("Skipping eventConfiguration validation: %s", skip_reason)
+                else:
+                    validate_data_against_schema(schema, config_data, name="eventConfiguration")
+            result["eventConfiguration"] = json.dumps(config_data)
+
+        dest_raw = parsed.get("destinations")
+        if dest_raw is not None:
+            dest_data = self._validate_event_destinations(dest_raw, eg_section)
+            if dest_data:
+                result["destinations"] = dest_data
+
+        return result
+
+    def add_event_group_generalized(
+        self,
+        asset_name: str,
+        instance_name: str,
+        instance_resource_group: str,
+        group_name: str,
+        data_source: Optional[str] = None,
+        type_ref: Optional[str] = None,
+        replace: bool = False,
+        event_group_config: Optional[str] = None,
+        show_template: Optional[str] = None,
+        **kwargs,
+    ) -> dict:
+        """Generalized add-event-group that detects connector type from the asset.
+
+        Supports --show-template for config/schema discovery and --event-group-config for
+        JSON or file-based connector-specific event-group configuration. For non-OPC UA
+        connectors, a connector template must exist in the instance.
+        """
+        asset = self.show(
+            asset_name=asset_name,
+            instance_name=instance_name,
+            resource_group=instance_resource_group,
+        )
+        connector_type = self._get_connector_type_from_asset(asset)
+
+        if show_template:
+            return self._handle_event_group_show_template(
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                template_mode=show_template.lower(),
+                event_group_config=event_group_config,
+            )
+
+        _, namespace = self._check_device_props(
+            instance_resource_group=instance_resource_group,
+            instance_name=instance_name,
+            asset_type=connector_type,
+            asset_name=asset_name,
+        )
+
+        original_egs = asset["properties"].get("eventGroups", [])
+        new_egs = [event for event in original_egs if event["name"] != group_name]
+        if len(new_egs) < len(original_egs) and not replace:
+            raise InvalidArgumentValueError(
+                f"Event group '{group_name}' already exists in asset '{asset_name}'. "
+                "Use --replace to overwrite the existing event group."
+            )
+
+        new_eg: dict = {
+            "name": group_name,
+            "eventGroupConfiguration": None,
+            "defaultDestinations": [],
+            "events": [],
+            "typeRef": type_ref,
+        }
+        if data_source:
+            new_eg["dataSource"] = data_source
+
+        if event_group_config:
+            config_result = self._load_and_validate_event_group_config(
+                event_group_config=event_group_config,
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+            )
+            if "eventGroupConfiguration" in config_result:
+                new_eg["eventGroupConfiguration"] = config_result["eventGroupConfiguration"]
+            if "destinations" in config_result:
+                new_eg["defaultDestinations"] = config_result["destinations"]
+
+        new_egs.append(new_eg)
+        update_payload = {"properties": {"eventGroups": new_egs}}
+
+        with console.status(f"Adding event group {group_name} to asset {asset_name}..."):
+            poller = self.ops.begin_update(
+                resource_group_name=namespace["resource_group"],
+                namespace_name=namespace["name"],
+                asset_name=asset_name,
+                properties=update_payload,
+            )
+            wait_for_terminal_state(poller, **kwargs)
+            asset = self.show(
+                asset_name=asset_name,
+                namespace_name=namespace["name"],
+                resource_group=namespace["resource_group"],
+            )
+            return _get_sub_property(asset, group_name, property_key="eventGroups")
+
+    def update_event_group_generalized(
+        self,
+        asset_name: str,
+        instance_name: str,
+        instance_resource_group: str,
+        group_name: str,
+        data_source: Optional[str] = None,
+        type_ref: Optional[str] = None,
+        event_group_config: Optional[str] = None,
+        show_template: Optional[str] = None,
+        **kwargs,
+    ) -> dict:
+        """Generalized update-event-group that detects connector type from the asset.
+
+        Supports --show-template for config/schema discovery and --event-group-config for
+        JSON or file-based connector-specific event-group configuration. For non-OPC UA
+        connectors, a connector template must exist in the instance.
+        """
+        asset = self.show(
+            asset_name=asset_name,
+            instance_name=instance_name,
+            resource_group=instance_resource_group,
+        )
+        connector_type = self._get_connector_type_from_asset(asset)
+
+        if show_template:
+            from .common import EndpointTemplateMode
+            template_mode = show_template.lower()
+            if template_mode == EndpointTemplateMode.CONFIG.value:
+                if event_group_config:
+                    raise InvalidArgumentValueError(
+                        "--show-template and --event-group-config cannot be used together. "
+                        "--show-template displays the template and exits without modifying the event-group."
+                    )
+                egs_existing = asset["properties"].get("eventGroups", [])
+                existing = next((d for d in egs_existing if d["name"] == group_name), None)
+                if existing is None:
+                    raise InvalidArgumentValueError(
+                        f"Event group '{group_name}' not found in asset '{asset_name}'."
+                    )
+                template_result = self._handle_event_group_show_template(
+                    connector_type=connector_type,
+                    instance_name=instance_name,
+                    instance_resource_group=instance_resource_group,
+                    template_mode=template_mode,
+                    event_group_config=None,
+                )
+                eg_config_tmpl = template_result.get("eventGroupConfig", {})
+                raw_config = existing.get("eventGroupConfiguration")
+                if raw_config:
+                    existing_config = json.loads(raw_config) if isinstance(raw_config, str) else raw_config
+                    tmpl_ec = eg_config_tmpl.get("eventGroupConfiguration")
+                    eg_config_tmpl["eventGroupConfiguration"] = (
+                        _deep_merge_template(tmpl_ec, existing_config)
+                        if isinstance(tmpl_ec, dict)
+                        else existing_config
+                    )
+                existing_dests = existing.get("defaultDestinations", [])
+                if existing_dests:
+                    tmpl_dests = eg_config_tmpl.get("destinations", [])
+                    eg_config_tmpl["destinations"] = _merge_destinations_template(
+                        tmpl_dests, existing_dests
+                    )
+                return {"connectorType": connector_type, "eventGroupConfig": eg_config_tmpl}
+            else:
+                return self._handle_event_group_show_template(
+                    connector_type=connector_type,
+                    instance_name=instance_name,
+                    instance_resource_group=instance_resource_group,
+                    template_mode=template_mode,
+                    event_group_config=event_group_config,
+                )
+
+        _, namespace = self._check_device_props(
+            instance_resource_group=instance_resource_group,
+            instance_name=instance_name,
+            asset_type=connector_type,
+            asset_name=asset_name,
+        )
+
+        event_groups = asset["properties"].get("eventGroups", [])
+        group_list = [eg for eg in event_groups if eg["name"] == group_name]
+        if not group_list:
+            raise InvalidArgumentValueError(
+                f"Event group '{group_name}' not found in asset '{asset_name}'."
+            )
+        group = group_list[0]
+
+        if event_group_config is not None:
+            config_result = self._load_and_validate_event_group_config(
+                event_group_config=event_group_config,
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+            )
+            if "eventGroupConfiguration" in config_result:
+                group["eventGroupConfiguration"] = config_result["eventGroupConfiguration"]
+            if "destinations" in config_result:
+                group["defaultDestinations"] = config_result["destinations"]
+
+        if data_source is not None:
+            group["dataSource"] = data_source
+        if type_ref is not None:
+            group["typeRef"] = type_ref
+
+        update_payload = {"properties": {"eventGroups": event_groups}}
+        with console.status(f"Updating event group {group_name} in asset {asset_name}..."):
+            poller = self.ops.begin_update(
+                resource_group_name=namespace["resource_group"],
+                namespace_name=namespace["name"],
+                asset_name=asset_name,
+                properties=update_payload,
+            )
+            wait_for_terminal_state(poller, **kwargs)
+            asset = self.show(
+                asset_name=asset_name,
+                namespace_name=namespace["name"],
+                resource_group=namespace["resource_group"],
+            )
+            return _get_sub_property(asset, group_name, property_key="eventGroups")
+
+    def add_event_group_event_generalized(
+        self,
+        asset_name: str,
+        instance_name: str,
+        instance_resource_group: str,
+        group_name: str,
+        event_name: str,
+        data_source: Optional[str] = None,
+        type_ref: Optional[str] = None,
+        replace: bool = False,
+        event_config: Optional[str] = None,
+        show_template: Optional[str] = None,
+        **kwargs,
+    ) -> List[dict]:
+        """Generalized add-event that detects connector type from the asset.
+
+        Supports --show-template for config/schema discovery and --event-config for
+        JSON or file-based connector-specific event configuration. For non-OPC UA
+        connectors, a connector template must exist in the instance.
+        """
+        asset = self.show(
+            asset_name=asset_name,
+            instance_name=instance_name,
+            resource_group=instance_resource_group,
+        )
+        connector_type = self._get_connector_type_from_asset(asset)
+
+        if show_template:
+            return self._handle_event_show_template(
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                template_mode=show_template.lower(),
+                event_config=event_config,
+            )
+
+        _, namespace = self._check_device_props(
+            instance_resource_group=instance_resource_group,
+            instance_name=instance_name,
+            asset_type=connector_type,
+            asset_name=asset_name,
+        )
+
+        event_group = _get_sub_property(asset, group_name, property_key="eventGroups")
+        og_events = event_group.get("events", [])
+        remaining_events = [ev for ev in og_events if ev["name"] != event_name]
+        if len(remaining_events) < len(og_events) and not replace:
+            raise InvalidArgumentValueError(
+                f"event '{event_name}' already exists in event group '{group_name}' of asset '{asset_name}'. "
+                "Use --replace to overwrite the existing event."
+            )
+
+        event: dict = {"name": event_name}
+        if data_source:
+            event["dataSource"] = data_source
+        if type_ref:
+            event["typeRef"] = type_ref
+
+        if event_config:
+            config_result = self._load_and_validate_event_config(
+                event_config=event_config,
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+            )
+            if "eventConfiguration" in config_result:
+                event["eventConfiguration"] = config_result["eventConfiguration"]
+            if "destinations" in config_result:
+                event["destinations"] = config_result["destinations"]
+
+        remaining_events.append(event)
+        event_group["events"] = remaining_events
+
+        update_payload = {"properties": {"eventGroups": asset["properties"]["eventGroups"]}}
+        with console.status(f"Adding event {event_name} to event group {group_name} in asset {asset_name}..."):
+            poller = self.ops.begin_update(
+                resource_group_name=namespace["resource_group"],
+                namespace_name=namespace["name"],
+                asset_name=asset_name,
+                properties=update_payload,
+            )
+            wait_for_terminal_state(poller, **kwargs)
+            asset = self.show(
+                asset_name=asset_name,
+                namespace_name=namespace["name"],
+                resource_group=namespace["resource_group"],
+            )
+            return _get_sub_property(asset, group_name, property_key="eventGroups")["events"]
+
     # EVENT GROUPS - allowed for opcua, onvif, and custom assets
     def add_event_group(
         self,
