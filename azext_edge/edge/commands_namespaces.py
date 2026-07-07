@@ -1923,12 +1923,12 @@ def _make_datapoint_import_func(method_name: str):
 def _make_event_export_func(method_name: str):
     """Factory that generates a typed event export command function."""
     def export_func(
-        cmd, asset_name: str, event_group_name: str, instance_name: str,
+        cmd, asset_name: str, group_name: str, instance_name: str,
         instance_resource_group: str, extension: str = "json",
         output_dir: str = ".", replace: bool = False,
     ) -> dict:
         return getattr(NamespaceAssets(cmd), method_name)(
-            asset_name=asset_name, event_group_name=event_group_name,
+            asset_name=asset_name, event_group_name=group_name,
             instance_name=instance_name, instance_resource_group=instance_resource_group,
             extension=extension, output_dir=output_dir, replace=replace,
         )
@@ -1938,12 +1938,12 @@ def _make_event_export_func(method_name: str):
 def _make_event_import_func(method_name: str):
     """Factory that generates a typed event import command function."""
     def import_func(
-        cmd, asset_name: str, event_group_name: str, instance_name: str,
+        cmd, asset_name: str, group_name: str, instance_name: str,
         instance_resource_group: str, file_path: str,
         replace: bool = False, **kwargs
     ) -> List[dict]:
         return getattr(NamespaceAssets(cmd), method_name)(
-            asset_name=asset_name, event_group_name=event_group_name,
+            asset_name=asset_name, event_group_name=group_name,
             instance_name=instance_name, instance_resource_group=instance_resource_group,
             file_path=file_path, replace=replace, **kwargs
         )

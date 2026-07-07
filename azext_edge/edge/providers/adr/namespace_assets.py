@@ -725,8 +725,12 @@ class NamespaceAssets(Queryable):
                 resource_group=namespace["resource_group"],
             )
 
-    def _get_connector_type_from_asset(self, asset: dict) -> str:
-        """Extract the connector type from an existing asset via its device endpoint type."""
+    def _get_connector_type_and_device(self, asset: dict) -> Tuple[str, dict]:
+        """Extract the connector type from an asset and return the fetched device.
+
+        Returns the device alongside the connector type so callers can reuse the device
+        (e.g. pass it into ``_check_device_props``) instead of re-fetching it.
+        """
         device_ref = asset.get("properties", {}).get("deviceRef", {})
         device_name = device_ref.get("deviceName", "")
         endpoint_name = device_ref.get("endpointName", "")
@@ -750,7 +754,7 @@ class NamespaceAssets(Queryable):
                 f"Device '{device_name}' endpoint '{endpoint_name}' is missing 'endpointType'. "
                 "Verify the device endpoint was created correctly."
             )
-        return connector_type
+        return connector_type, device
 
     def _get_connector_metadata(
         self,
@@ -1098,7 +1102,7 @@ class NamespaceAssets(Queryable):
             instance_name=instance_name,
             resource_group=instance_resource_group,
         )
-        connector_type = self._get_connector_type_from_asset(asset)
+        connector_type, device = self._get_connector_type_and_device(asset)
 
         if show_template:
             return self._handle_dataset_show_template(
@@ -1115,6 +1119,8 @@ class NamespaceAssets(Queryable):
             instance_name=instance_name,
             asset_type=connector_type,
             asset_name=asset_name,
+            asset=asset,
+            device=device,
         )
 
         datasets = asset["properties"].get("datasets", [])
@@ -1193,7 +1199,7 @@ class NamespaceAssets(Queryable):
             instance_name=instance_name,
             resource_group=instance_resource_group,
         )
-        connector_type = self._get_connector_type_from_asset(asset)
+        connector_type, device = self._get_connector_type_and_device(asset)
 
         if show_template:
             from .common import EndpointTemplateMode
@@ -1255,6 +1261,8 @@ class NamespaceAssets(Queryable):
             instance_name=instance_name,
             asset_type=connector_type,
             asset_name=asset_name,
+            asset=asset,
+            device=device,
         )
 
         datasets = asset["properties"].get("datasets", [])
@@ -1328,7 +1336,7 @@ class NamespaceAssets(Queryable):
             instance_name=instance_name,
             resource_group=instance_resource_group,
         )
-        connector_type = self._get_connector_type_from_asset(asset)
+        connector_type, device = self._get_connector_type_and_device(asset)
 
         if show_template:
             return self._handle_datapoint_show_template(
@@ -1344,6 +1352,8 @@ class NamespaceAssets(Queryable):
             instance_name=instance_name,
             asset_type=connector_type,
             asset_name=asset_name,
+            asset=asset,
+            device=device,
         )
 
         dataset = _get_sub_property(asset, dataset_name, property_key="datasets")
@@ -2803,7 +2813,7 @@ class NamespaceAssets(Queryable):
             instance_name=instance_name,
             resource_group=instance_resource_group,
         )
-        connector_type = self._get_connector_type_from_asset(asset)
+        connector_type, device = self._get_connector_type_and_device(asset)
 
         if show_template:
             return self._handle_event_group_show_template(
@@ -2819,6 +2829,8 @@ class NamespaceAssets(Queryable):
             instance_name=instance_name,
             asset_type=connector_type,
             asset_name=asset_name,
+            asset=asset,
+            device=device,
         )
 
         original_egs = asset["properties"].get("eventGroups", [])
@@ -2892,7 +2904,7 @@ class NamespaceAssets(Queryable):
             instance_name=instance_name,
             resource_group=instance_resource_group,
         )
-        connector_type = self._get_connector_type_from_asset(asset)
+        connector_type, device = self._get_connector_type_and_device(asset)
 
         if show_template:
             from .common import EndpointTemplateMode
@@ -2947,6 +2959,8 @@ class NamespaceAssets(Queryable):
             instance_name=instance_name,
             asset_type=connector_type,
             asset_name=asset_name,
+            asset=asset,
+            device=device,
         )
 
         event_groups = asset["properties"].get("eventGroups", [])
@@ -3015,7 +3029,7 @@ class NamespaceAssets(Queryable):
             instance_name=instance_name,
             resource_group=instance_resource_group,
         )
-        connector_type = self._get_connector_type_from_asset(asset)
+        connector_type, device = self._get_connector_type_and_device(asset)
 
         if show_template:
             return self._handle_event_show_template(
@@ -3031,6 +3045,8 @@ class NamespaceAssets(Queryable):
             instance_name=instance_name,
             asset_type=connector_type,
             asset_name=asset_name,
+            asset=asset,
+            device=device,
         )
 
         event_group = _get_sub_property(asset, group_name, property_key="eventGroups")
@@ -4309,7 +4325,9 @@ class NamespaceAssets(Queryable):
         asset_type: Union[List[str], str],  # change to list
         asset_name: Optional[str] = None,
         device_name: Optional[str] = None,
-        device_endpoint_name: Optional[str] = None
+        device_endpoint_name: Optional[str] = None,
+        asset: Optional[dict] = None,
+        device: Optional[dict] = None,
     ) -> Tuple[dict, Dict[str, str]]:
         """
         Checks the device properties to ensure the endpoint type matches the asset operation's type.
@@ -4319,17 +4337,18 @@ class NamespaceAssets(Queryable):
         This also includes the cluster connectivity check.
 
         If asset_name is provided (in the case of the asset is already created), it will retrieve the
-        asset to populate the device_name and device_endpoint_name.
+        asset to populate the device_name and device_endpoint_name. A previously fetched ``asset``
+        and/or ``device`` may be passed in to avoid redundant round trips.
         """
-        asset = None
         namespace = None
         if asset_name:
             # get the asset to populate the device name and endpoint name
-            asset = self.show(
-                resource_group=instance_resource_group,
-                instance_name=instance_name,
-                asset_name=asset_name
-            )
+            if asset is None:
+                asset = self.show(
+                    resource_group=instance_resource_group,
+                    instance_name=instance_name,
+                    asset_name=asset_name
+                )
             device_name = asset["properties"]["deviceRef"]["deviceName"]
             device_endpoint_name = asset["properties"]["deviceRef"]["endpointName"]
             namespace = parse_resource_id(asset["id"])
@@ -4340,11 +4359,12 @@ class NamespaceAssets(Queryable):
                 instance_resource_group=instance_resource_group
             )
 
-        device = self.device_ops.get(
-            resource_group_name=namespace["resource_group"],
-            namespace_name=namespace["name"],
-            device_name=device_name
-        )
+        if device is None:
+            device = self.device_ops.get(
+                resource_group_name=namespace["resource_group"],
+                namespace_name=namespace["name"],
+                device_name=device_name
+            )
 
         # use the device to check cluster connectivity
         check_cluster_connectivity(self.cmd, device)

@@ -2414,11 +2414,6 @@ def load_iotops_arguments(self, _):
             help="Event-group name.",
         )
         context.argument(
-            "event_group_name",
-            options_list=["--event-group", "--eg"],
-            help="Event-group name.",
-        )
-        context.argument(
             "event_name",
             options_list=["--name", "-n"],
             help="Event name.",
