@@ -2208,3 +2208,45 @@ def test_add_event_generalized_show_template_config(
     assert "eventConfiguration" in ev_cfg
     # Destinations metadata is surfaced at the event level too
     assert any(d["target"] == "Mqtt" for d in ev_cfg["destinations"])
+
+
+def test_add_event_group_generalized_connector_type_mismatch_raises(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+):
+    """A --show-template output generated for a different connector type is rejected."""
+    asset_name = "gen-asset"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    asset = _build_asset_with_connector_events(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        event_groups=[],
+    )
+    _register_asset_and_device_get(
+        mocked_responses, asset, namespace_name, resource_group_name, asset_name, connector_type
+    )
+
+    # Config wrapper declares a different connectorType than the asset's
+    mismatched_config = json.dumps({
+        "connectorType": "Microsoft.OpcUa",
+        "eventGroupConfig": {"eventGroupConfiguration": {"publishingInterval": 1000}},
+    })
+
+    with pytest.raises(InvalidArgumentValueError, match="does not match asset connectorType"):
+        add_namespace_asset_event_group(
+            cmd=mocked_cmd,
+            asset_name=asset_name,
+            instance_name="inst",
+            instance_resource_group="rg",
+            group_name="new-eg",
+            event_group_config=mismatched_config,
+            wait_sec=0,
+        )

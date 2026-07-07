@@ -902,10 +902,15 @@ class NamespaceAssets(Queryable):
         )
         parsed = json.loads(raw)
 
-        if isinstance(parsed, dict) and "datasetConfig" in parsed and "connectorType" in parsed:
+        if isinstance(parsed, dict) and "datasetConfig" in parsed:
+            provided = parsed.get("connectorType")
+            if provided and connector_type and provided.lower() != connector_type.lower():
+                raise InvalidArgumentValueError(
+                    f"Config connectorType '{provided}' does not match asset connectorType '{connector_type}'."
+                )
             parsed = parsed["datasetConfig"]
 
-        if not isinstance(parsed, dict):
+        if not isinstance(parsed, dict) or not {"datasetConfiguration", "destinations"}.intersection(parsed):
             raise InvalidArgumentValueError(
                 "--dataset-config must be a JSON object with 'datasetConfiguration' "
                 "and/or 'destinations' keys."
@@ -1044,10 +1049,15 @@ class NamespaceAssets(Queryable):
         )
         parsed = json.loads(raw)
 
-        if isinstance(parsed, dict) and "datapointConfig" in parsed and "connectorType" in parsed:
+        if isinstance(parsed, dict) and "datapointConfig" in parsed:
+            provided = parsed.get("connectorType")
+            if provided and connector_type and provided.lower() != connector_type.lower():
+                raise InvalidArgumentValueError(
+                    f"Config connectorType '{provided}' does not match asset connectorType '{connector_type}'."
+                )
             parsed = parsed["datapointConfig"]
 
-        if not isinstance(parsed, dict):
+        if not isinstance(parsed, dict) or "datapointConfiguration" not in parsed:
             raise InvalidArgumentValueError(
                 "--datapoint-config must be a JSON object with a 'datapointConfiguration' key."
             )
@@ -1428,10 +1438,16 @@ class NamespaceAssets(Queryable):
         parsed = json.loads(raw)
 
         # Auto-unwrap --show-template output
-        if isinstance(parsed, dict) and "assetConfig" in parsed and "connectorType" in parsed:
+        if isinstance(parsed, dict) and "assetConfig" in parsed:
+            provided = parsed.get("connectorType")
+            if provided and connector_type and provided.lower() != connector_type.lower():
+                raise InvalidArgumentValueError(
+                    f"Config connectorType '{provided}' does not match asset connectorType '{connector_type}'."
+                )
             parsed = parsed["assetConfig"]
 
-        if not isinstance(parsed, dict):
+        _asset_config_keys = {s[2] for s in _ASSET_SCHEMA_SECTIONS} | {s[4] for s in _ASSET_SCHEMA_SECTIONS if s[4]}
+        if not isinstance(parsed, dict) or not _asset_config_keys.intersection(parsed):
             raise InvalidArgumentValueError(
                 "--asset-config must be a JSON object with defaultDatasetsConfiguration, "
                 "defaultEventsConfiguration, and/or defaultStreamsConfiguration keys."
@@ -2590,10 +2606,15 @@ class NamespaceAssets(Queryable):
         )
         parsed = json.loads(raw)
 
-        if isinstance(parsed, dict) and "eventGroupConfig" in parsed and "connectorType" in parsed:
+        if isinstance(parsed, dict) and "eventGroupConfig" in parsed:
+            provided = parsed.get("connectorType")
+            if provided and connector_type and provided.lower() != connector_type.lower():
+                raise InvalidArgumentValueError(
+                    f"Config connectorType '{provided}' does not match asset connectorType '{connector_type}'."
+                )
             parsed = parsed["eventGroupConfig"]
 
-        if not isinstance(parsed, dict):
+        if not isinstance(parsed, dict) or not {"eventGroupConfiguration", "destinations"}.intersection(parsed):
             raise InvalidArgumentValueError(
                 "--event-group-config must be a JSON object with 'eventGroupConfiguration' "
                 "and/or 'destinations' keys."
@@ -2748,10 +2769,15 @@ class NamespaceAssets(Queryable):
         )
         parsed = json.loads(raw)
 
-        if isinstance(parsed, dict) and "eventConfig" in parsed and "connectorType" in parsed:
+        if isinstance(parsed, dict) and "eventConfig" in parsed:
+            provided = parsed.get("connectorType")
+            if provided and connector_type and provided.lower() != connector_type.lower():
+                raise InvalidArgumentValueError(
+                    f"Config connectorType '{provided}' does not match asset connectorType '{connector_type}'."
+                )
             parsed = parsed["eventConfig"]
 
-        if not isinstance(parsed, dict):
+        if not isinstance(parsed, dict) or not {"eventConfiguration", "destinations"}.intersection(parsed):
             raise InvalidArgumentValueError(
                 "--event-config must be a JSON object with 'eventConfiguration' "
                 "and/or 'destinations' keys."
