@@ -2490,6 +2490,84 @@ def load_iotops_arguments(self, _):
             arg_type=get_three_state_flag(),
         )
 
+    with self.argument_context("iot ops ns asset stream") as context:
+        context.argument(
+            "asset_name",
+            options_list=["--asset", "-a"],
+            help="Asset name.",
+        )
+        context.argument(
+            "stream_name",
+            options_list=["--name", "-n"],
+            help="Stream name.",
+        )
+        context.argument(
+            "type_ref",
+            options_list=["--type-ref", "--tr"],
+            help="Type definition ID or URI.",
+        )
+        context.argument(
+            "stream_config",
+            options_list=["--stream-config", "--stc"],
+            help="Inline JSON string or path to a JSON/YAML file (.json, .yaml, .yml) containing "
+            "connector-specific stream configuration and/or destinations. Accepted keys are "
+            "'streamConfiguration' (connector-specific config object) and 'destinations' (list of "
+            "destination objects). Use --show-template to discover the supported keys and schema "
+            "for the asset's connector type. Cannot be combined with --show-template. "
+            "For non-OPC UA connectors, a connector template must exist in the instance.",
+        )
+        context.argument(
+            "show_template",
+            options_list=["--show-template"],
+            arg_type=get_enum_type(EndpointTemplateMode),
+            help="Show a starter stream configuration template for the asset's connector type "
+            "and exit without modifying the stream. The connector type is read from the existing "
+            "asset. config: fields shown with their default values (null if no default); output is "
+            "directly usable as --stream-config input. "
+            "schema: every field includes type, default, and constraints (min, max, enum, pattern). "
+            "Draft-07 $ref pointers (#/definitions/...) are resolved inline in both modes.",
+        )
+
+    with self.argument_context("iot ops ns asset stream add") as context:
+        context.argument(
+            "replace",
+            options_list=["--replace"],
+            help="Replace the stream if another stream with the same name is already present.",
+            arg_type=get_three_state_flag(),
+        )
+
+    with self.argument_context("iot ops ns asset stream export") as context:
+        context.argument(
+            "extension",
+            options_list=["--format", "-f"],
+            arg_type=get_enum_type([FileType.json.value, FileType.yaml.value], default=FileType.json.value),
+            help="Export file format (JSON or YAML).",
+        )
+        context.argument(
+            "output_dir",
+            options_list=["--output-dir", "--od"],
+            help="Output directory for export.",
+        )
+        context.argument(
+            "replace",
+            options_list=["--replace"],
+            help="Replace the local file if present.",
+            arg_type=get_three_state_flag(),
+        )
+
+    with self.argument_context("iot ops ns asset stream import") as context:
+        context.argument(
+            "file_path",
+            options_list=["--input-file", "--if"],
+            help="Path to import file (JSON or YAML).",
+        )
+        context.argument(
+            "replace",
+            options_list=["--replace"],
+            help="Replace existing streams that share a name with an imported stream.",
+            arg_type=get_three_state_flag(),
+        )
+
     with self.argument_context("iot ops clone") as context:
         context.argument(
             "summary_mode",

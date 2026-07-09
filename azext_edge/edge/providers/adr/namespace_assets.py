@@ -2651,9 +2651,15 @@ class NamespaceAssets(Queryable):
 
         return result
 
-    def _validate_event_destinations(self, dest_raw, eg_section: dict) -> List[dict]:
-        """Validate and filter a destinations list against the connector's supported event
-        destinations. Shared by event-group and event config loaders."""
+    def _filter_and_validate_destinations(
+        self, dest_raw, supported: List[str], resource_label: str
+    ) -> List[dict]:
+        """Filter a destinations list (dropping entries with empty configuration) and validate the
+        remaining targets against the connector's supported destination set.
+
+        Shared by the event, event-group, and stream config loaders. ``supported`` is the already
+        resolved ``supportedDestinations`` list; ``resource_label`` is used in error messages.
+        """
         from .helpers import strip_nulls as _strip_nulls
 
         dest_data = _strip_nulls(dest_raw)
@@ -2674,23 +2680,26 @@ class NamespaceAssets(Queryable):
                 )
                 continue
             filtered.append(item)
-        dest_data = filtered
-        if dest_data:
-            events_section = eg_section.get("events", {}) if eg_section else {}
-            dest_section = events_section.get("destinations", {}) if isinstance(events_section, dict) else {}
-            supported = (
-                dest_section.get("supportedDestinations", [])
-                if isinstance(dest_section, dict) else []
-            )
-            if supported:
-                for dest_item in dest_data:
-                    target = dest_item.get("target")
-                    if target and target not in supported:
-                        raise InvalidArgumentValueError(
-                            f"Destination target '{target}' is not supported for events. "
-                            f"Supported: {supported}."
-                        )
-        return dest_data
+        if filtered and supported:
+            for dest_item in filtered:
+                target = dest_item.get("target")
+                if target and target not in supported:
+                    raise InvalidArgumentValueError(
+                        f"Destination target '{target}' is not supported for {resource_label}. "
+                        f"Supported: {supported}."
+                    )
+        return filtered
+
+    def _validate_event_destinations(self, dest_raw, eg_section: dict) -> List[dict]:
+        """Validate and filter a destinations list against the connector's supported event
+        destinations. Shared by event-group and event config loaders."""
+        events_section = eg_section.get("events", {}) if eg_section else {}
+        dest_section = events_section.get("destinations", {}) if isinstance(events_section, dict) else {}
+        supported = (
+            dest_section.get("supportedDestinations", [])
+            if isinstance(dest_section, dict) else []
+        )
+        return self._filter_and_validate_destinations(dest_raw, supported, "events")
 
     def _handle_event_show_template(
         self,
@@ -3445,6 +3454,367 @@ class NamespaceAssets(Queryable):
             )
             # note that we return a list of events
             return _get_sub_property(asset, group_name, property_key="eventGroups")["events"]
+
+    def _handle_stream_show_template(
+        self,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+        template_mode: str,
+        stream_config: Optional[str],
+    ) -> dict:
+        """Return a stream config/schema template for --show-template and exit early.
+
+        Discovers the streamConfigurationSchema and supported destinations from connector
+        metadata and returns a slimmed template. OPC UA uses bundled metadata; all other types
+        require a connector template in the instance.
+        """
+        from .helpers import _slim_schema, _consolidate_warnings
+        from .common import EndpointTemplateMode
+
+        if stream_config:
+            raise InvalidArgumentValueError(
+                "--show-template and --stream-config cannot be used together. "
+                "--show-template displays the template and exits without modifying the stream."
+            )
+
+        metadata = self._get_connector_metadata(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+        )
+        endpoint = _get_metadata_endpoint(metadata, connector_type)
+        stream_section = endpoint.get("streams", {})
+        schema = stream_section.get("streamConfigurationSchema")
+
+        stream_config_template: dict = {}
+        all_warnings: List[str] = []
+
+        if schema:
+            warnings: List[str] = []
+            slimmed = _slim_schema(schema, mode=template_mode, _warnings=warnings)
+            all_warnings.extend(warnings)
+            if template_mode == EndpointTemplateMode.SCHEMA.value and isinstance(slimmed, dict):
+                slimmed.pop("$id", None)
+            stream_config_template["streamConfiguration"] = slimmed
+
+        destinations = self._build_stream_destinations_template(stream_section, template_mode)
+        if destinations is not None:
+            stream_config_template["destinations"] = destinations
+
+        for w in _consolidate_warnings(all_warnings):
+            logger.warning(w)
+
+        return {"connectorType": connector_type, "streamConfig": stream_config_template}
+
+    def _build_stream_destinations_template(self, stream_section: dict, template_mode: str) -> Optional[list]:
+        """Build a destinations template from the connector's supported stream destinations.
+
+        Stream destinations live at ``streams.destinations``. Returns None when no destinations
+        are supported.
+        """
+        dest_section = stream_section.get("destinations", {}) if isinstance(stream_section, dict) else {}
+        supported = dest_section.get("supportedDestinations", []) if isinstance(dest_section, dict) else []
+        if not supported:
+            return None
+        return _build_destination_template(
+            supported_destinations=supported,
+            default_destination=dest_section.get("defaultDestination"),
+            mode=template_mode,
+        )
+
+    def _validate_stream_destinations(self, dest_raw, stream_section: dict) -> List[dict]:
+        """Validate and filter a destinations list against the connector's supported stream
+        destinations."""
+        dest_section = stream_section.get("destinations", {}) if isinstance(stream_section, dict) else {}
+        supported = (
+            dest_section.get("supportedDestinations", [])
+            if isinstance(dest_section, dict) else []
+        )
+        return self._filter_and_validate_destinations(dest_raw, supported, "streams")
+
+    def _load_and_validate_stream_config(
+        self,
+        stream_config: str,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+    ) -> dict:
+        """Load stream config from file/inline JSON, validate against connector schema, and
+        return ARM-ready values.
+
+        Input JSON is expected to be the 'streamConfig' dict (output of --show-template), e.g.:
+          {
+            "streamConfiguration": {...},
+            "destinations": [...]
+          }
+        Or the full --show-template output with 'connectorType' and 'streamConfig' keys,
+        which is auto-unwrapped.
+
+        Returns a dict with:
+          - "streamConfiguration": serialized JSON string (if present)
+          - "destinations": list of destination dicts (if present)
+        """
+        from .helpers import strip_nulls as _strip_nulls
+
+        raw = process_additional_configuration(
+            additional_configuration=stream_config,
+            config_type="stream",
+        )
+        parsed = json.loads(raw)
+
+        if isinstance(parsed, dict) and "streamConfig" in parsed:
+            provided = parsed.get("connectorType")
+            if provided and connector_type and provided.lower() != connector_type.lower():
+                raise InvalidArgumentValueError(
+                    f"Config connectorType '{provided}' does not match asset connectorType '{connector_type}'."
+                )
+            parsed = parsed["streamConfig"]
+
+        if not isinstance(parsed, dict) or not {"streamConfiguration", "destinations"}.intersection(parsed):
+            raise InvalidArgumentValueError(
+                "--stream-config must be a JSON object with 'streamConfiguration' "
+                "and/or 'destinations' keys."
+            )
+
+        metadata = self._get_connector_metadata(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+        )
+        endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
+        stream_section = endpoint.get("streams", {}) if endpoint else {}
+
+        result = {}
+
+        config_data_raw = parsed.get("streamConfiguration")
+        if config_data_raw is not None:
+            config_data = _strip_nulls(config_data_raw)
+            schema = stream_section.get("streamConfigurationSchema") if stream_section else None
+            if schema:
+                from ...util.schema_validation import check_json_schema, validate_data_against_schema
+                skip_reason = check_json_schema(schema)
+                if skip_reason:
+                    logger.warning("Skipping streamConfiguration validation: %s", skip_reason)
+                else:
+                    validate_data_against_schema(schema, config_data, name="streamConfiguration")
+            result["streamConfiguration"] = json.dumps(config_data)
+
+        dest_raw = parsed.get("destinations")
+        if dest_raw is not None:
+            dest_data = self._validate_stream_destinations(dest_raw, stream_section)
+            if dest_data:
+                result["destinations"] = dest_data
+
+        return result
+
+    def add_stream_generalized(
+        self,
+        asset_name: str,
+        instance_name: str,
+        instance_resource_group: str,
+        stream_name: str,
+        type_ref: Optional[str] = None,
+        replace: bool = False,
+        stream_config: Optional[str] = None,
+        show_template: Optional[str] = None,
+        **kwargs,
+    ) -> dict:
+        """Generalized add-stream that detects connector type from the asset.
+
+        Supports --show-template for config/schema discovery and --stream-config for
+        JSON or file-based connector-specific stream configuration. For non-OPC UA
+        connectors, a connector template must exist in the instance.
+        """
+        asset = self.show(
+            asset_name=asset_name,
+            instance_name=instance_name,
+            resource_group=instance_resource_group,
+        )
+        connector_type, device = self._get_connector_type_and_device(asset)
+
+        if show_template:
+            return self._handle_stream_show_template(
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+                template_mode=show_template.lower(),
+                stream_config=stream_config,
+            )
+
+        _, namespace = self._check_device_props(
+            instance_resource_group=instance_resource_group,
+            instance_name=instance_name,
+            asset_type=connector_type,
+            asset_name=asset_name,
+            asset=asset,
+            device=device,
+        )
+
+        original_streams = asset["properties"].get("streams", [])
+        new_streams = [stream for stream in original_streams if stream["name"] != stream_name]
+        if len(new_streams) < len(original_streams) and not replace:
+            raise InvalidArgumentValueError(
+                f"Stream '{stream_name}' already exists in asset '{asset_name}'. "
+                "Use --replace to overwrite the existing stream."
+            )
+
+        new_stream: dict = {
+            "name": stream_name,
+            "streamConfiguration": None,
+            "destinations": [],
+            "typeRef": type_ref,
+        }
+
+        if stream_config:
+            config_result = self._load_and_validate_stream_config(
+                stream_config=stream_config,
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+            )
+            if "streamConfiguration" in config_result:
+                new_stream["streamConfiguration"] = config_result["streamConfiguration"]
+            if "destinations" in config_result:
+                new_stream["destinations"] = config_result["destinations"]
+
+        new_streams.append(new_stream)
+        update_payload = {"properties": {"streams": new_streams}}
+
+        with console.status(f"Adding stream {stream_name} to asset {asset_name}..."):
+            poller = self.ops.begin_update(
+                resource_group_name=namespace["resource_group"],
+                namespace_name=namespace["name"],
+                asset_name=asset_name,
+                properties=update_payload,
+            )
+            wait_for_terminal_state(poller, **kwargs)
+            asset = self.show(
+                asset_name=asset_name,
+                namespace_name=namespace["name"],
+                resource_group=namespace["resource_group"],
+            )
+            return _get_sub_property(asset, stream_name, property_key="streams")
+
+    def update_stream_generalized(
+        self,
+        asset_name: str,
+        instance_name: str,
+        instance_resource_group: str,
+        stream_name: str,
+        type_ref: Optional[str] = None,
+        stream_config: Optional[str] = None,
+        show_template: Optional[str] = None,
+        **kwargs,
+    ) -> dict:
+        """Generalized update-stream that detects connector type from the asset.
+
+        Supports --show-template for config/schema discovery and --stream-config for
+        JSON or file-based connector-specific stream configuration. For non-OPC UA
+        connectors, a connector template must exist in the instance.
+        """
+        asset = self.show(
+            asset_name=asset_name,
+            instance_name=instance_name,
+            resource_group=instance_resource_group,
+        )
+        connector_type, device = self._get_connector_type_and_device(asset)
+
+        if show_template:
+            from .common import EndpointTemplateMode
+            template_mode = show_template.lower()
+            if template_mode == EndpointTemplateMode.CONFIG.value:
+                if stream_config:
+                    raise InvalidArgumentValueError(
+                        "--show-template and --stream-config cannot be used together. "
+                        "--show-template displays the template and exits without modifying the stream."
+                    )
+                streams_existing = asset["properties"].get("streams", [])
+                existing = next((s for s in streams_existing if s["name"] == stream_name), None)
+                if existing is None:
+                    raise InvalidArgumentValueError(
+                        f"Stream '{stream_name}' not found in asset '{asset_name}'."
+                    )
+                template_result = self._handle_stream_show_template(
+                    connector_type=connector_type,
+                    instance_name=instance_name,
+                    instance_resource_group=instance_resource_group,
+                    template_mode=template_mode,
+                    stream_config=None,
+                )
+                stream_config_tmpl = template_result.get("streamConfig", {})
+                raw_config = existing.get("streamConfiguration")
+                if raw_config:
+                    existing_config = json.loads(raw_config) if isinstance(raw_config, str) else raw_config
+                    tmpl_sc = stream_config_tmpl.get("streamConfiguration")
+                    stream_config_tmpl["streamConfiguration"] = (
+                        _deep_merge_template(tmpl_sc, existing_config)
+                        if isinstance(tmpl_sc, dict)
+                        else existing_config
+                    )
+                existing_dests = existing.get("destinations", [])
+                if existing_dests:
+                    tmpl_dests = stream_config_tmpl.get("destinations", [])
+                    stream_config_tmpl["destinations"] = _merge_destinations_template(
+                        tmpl_dests, existing_dests
+                    )
+                return {"connectorType": connector_type, "streamConfig": stream_config_tmpl}
+            else:
+                return self._handle_stream_show_template(
+                    connector_type=connector_type,
+                    instance_name=instance_name,
+                    instance_resource_group=instance_resource_group,
+                    template_mode=template_mode,
+                    stream_config=stream_config,
+                )
+
+        _, namespace = self._check_device_props(
+            instance_resource_group=instance_resource_group,
+            instance_name=instance_name,
+            asset_type=connector_type,
+            asset_name=asset_name,
+            asset=asset,
+            device=device,
+        )
+
+        streams = asset["properties"].get("streams", [])
+        stream_list = [s for s in streams if s["name"] == stream_name]
+        if not stream_list:
+            raise InvalidArgumentValueError(
+                f"Stream '{stream_name}' not found in asset '{asset_name}'."
+            )
+        stream = stream_list[0]
+
+        if stream_config is not None:
+            config_result = self._load_and_validate_stream_config(
+                stream_config=stream_config,
+                connector_type=connector_type,
+                instance_name=instance_name,
+                instance_resource_group=instance_resource_group,
+            )
+            if "streamConfiguration" in config_result:
+                stream["streamConfiguration"] = config_result["streamConfiguration"]
+            if "destinations" in config_result:
+                stream["destinations"] = config_result["destinations"]
+
+        if type_ref is not None:
+            stream["typeRef"] = type_ref
+
+        update_payload = {"properties": {"streams": streams}}
+        with console.status(f"Updating stream {stream_name} in asset {asset_name}..."):
+            poller = self.ops.begin_update(
+                resource_group_name=namespace["resource_group"],
+                namespace_name=namespace["name"],
+                asset_name=asset_name,
+                properties=update_payload,
+            )
+            wait_for_terminal_state(poller, **kwargs)
+            asset = self.show(
+                asset_name=asset_name,
+                namespace_name=namespace["name"],
+                resource_group=namespace["resource_group"],
+            )
+            return _get_sub_property(asset, stream_name, property_key="streams")
 
     # STREAMS - allowed for media and custom assets
     def add_stream(
