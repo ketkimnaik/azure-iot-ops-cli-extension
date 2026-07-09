@@ -2019,3 +2019,81 @@ def test_add_namespace_asset_stream_generalized_invalid_config_shape_raises(
             stream_config=json.dumps({"foo": "bar"}),
             wait_sec=0,
         )
+
+
+def test_update_namespace_asset_stream_generalized_clears_destinations(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+):
+    """An explicit empty destinations array clears the stream's existing destinations."""
+    asset_name = "gen-asset"
+    stream_name = "sensor-stream"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    existing_stream = {
+        "name": stream_name,
+        "streamConfiguration": json.dumps({"snapshotsPerSecond": 1}),
+        "destinations": [{"target": "Mqtt", "configuration": {"topic": "old/topic"}}],
+        "typeRef": None,
+    }
+    asset = _build_asset_with_connector_streams(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        streams=[existing_stream],
+    )
+
+    _register_asset_and_device_get(
+        mocked_responses, asset, namespace_name, resource_group_name, asset_name, connector_type
+    )
+
+    mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_assets.NamespaceAssets._get_connector_metadata",
+        return_value=_stream_metadata(connector_type),
+    )
+
+    captured = {}
+
+    def _capture_patch(request):
+        captured["body"] = json.loads(request.body)
+        return (200, {}, json.dumps(asset))
+
+    mocked_responses.add_callback(
+        responses.PATCH,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        callback=_capture_patch,
+        content_type="application/json",
+    )
+
+    updated_asset = deepcopy(asset)
+    updated_stream = deepcopy(existing_stream)
+    updated_stream["destinations"] = []
+    updated_asset["properties"]["streams"] = [updated_stream]
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=updated_asset, status=200,
+    )
+
+    result = update_namespace_asset_stream(
+        cmd=mocked_cmd,
+        asset_name=asset_name,
+        instance_name="inst",
+        instance_resource_group="rg",
+        stream_name=stream_name,
+        stream_config=json.dumps({"destinations": []}),
+        wait_sec=0,
+    )
+
+    # The PATCH payload should carry an empty destinations list (cleared, not left in place).
+    patched_stream = next(
+        s for s in captured["body"]["properties"]["streams"] if s["name"] == stream_name
+    )
+    assert patched_stream["destinations"] == []
+    assert result["destinations"] == []

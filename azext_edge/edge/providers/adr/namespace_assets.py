@@ -3603,7 +3603,8 @@ class NamespaceAssets(Queryable):
         dest_raw = parsed.get("destinations")
         if dest_raw is not None:
             dest_data = self._validate_stream_destinations(dest_raw, stream_section)
-            if dest_data:
+            # Preserve an explicitly empty list so callers can clear destinations.
+            if dest_data or dest_raw == []:
                 result["destinations"] = dest_data
 
         return result
