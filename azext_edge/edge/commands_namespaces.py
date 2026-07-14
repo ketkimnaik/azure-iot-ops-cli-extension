@@ -3386,3 +3386,58 @@ def add_namespace_asset_management_group_action(
 
 export_namespace_asset_management_group_action = _make_mgmt_action_export_func("export_management_group_actions")
 import_namespace_asset_management_group_action = _make_mgmt_action_import_func("import_management_group_actions")
+
+
+# GENERALIZED STREAM COMMANDS
+
+
+def add_namespace_asset_stream(
+    cmd,
+    asset_name: str,
+    instance_name: str,
+    instance_resource_group: str,
+    stream_name: str,
+    type_ref: Optional[str] = None,
+    replace: Optional[bool] = False,
+    stream_config: Optional[str] = None,
+    show_template: Optional[str] = None,
+    **kwargs
+) -> dict:
+    return NamespaceAssets(cmd).add_stream_generalized(
+        asset_name=asset_name,
+        instance_name=instance_name,
+        instance_resource_group=instance_resource_group,
+        stream_name=stream_name,
+        type_ref=type_ref,
+        replace=replace,
+        stream_config=stream_config,
+        show_template=show_template,
+        **kwargs
+    )
+
+
+def update_namespace_asset_stream(
+    cmd,
+    asset_name: str,
+    instance_name: str,
+    instance_resource_group: str,
+    stream_name: str,
+    type_ref: Optional[str] = None,
+    stream_config: Optional[str] = None,
+    show_template: Optional[str] = None,
+    **kwargs
+) -> dict:
+    return NamespaceAssets(cmd).update_stream_generalized(
+        asset_name=asset_name,
+        instance_name=instance_name,
+        instance_resource_group=instance_resource_group,
+        stream_name=stream_name,
+        type_ref=type_ref,
+        stream_config=stream_config,
+        show_template=show_template,
+        **kwargs
+    )
+
+
+export_namespace_asset_stream = _make_export_func("export_streams")
+import_namespace_asset_stream = _make_import_func("import_streams")

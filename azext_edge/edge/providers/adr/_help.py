@@ -3169,6 +3169,162 @@ def load_iotops_adr_help():
     """
 
     helps[
+        "iot ops ns asset stream"
+    ] = """
+        type: group
+        short-summary: Manage streams for namespaced assets in an IoT Operations instance.
+        long-summary: >
+            The connector type is detected automatically from the existing asset.
+            For connector-specific parameters use --stream-config (inline JSON or file).
+            Use --show-template to discover the supported configuration schema for the asset's connector type.
+    """
+
+    helps[
+        "iot ops ns asset stream add"
+    ] = """
+        type: command
+        short-summary: Add a stream to a namespaced asset in an IoT Operations instance.
+        long-summary: >
+            The connector type is detected from the asset's device endpoint.
+            Connector-specific configuration and destinations can be supplied via --stream-config.
+            Use --show-template to discover the supported config schema. For non-OPC UA connectors,
+            a connector template must exist in the instance.
+
+        examples:
+        - name: Add a basic stream to any asset type
+          text: >
+            az iot ops ns asset stream add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name videoStream
+
+        - name: Show the stream config template for the asset's connector type
+          text: >
+            az iot ops ns asset stream add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name videoStream --show-template config
+
+        - name: Add a stream with connector-specific configuration from inline JSON
+          text: >
+            az iot ops ns asset stream add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name videoStream
+            --stream-config '{"streamConfiguration": {"taskType": "snapshot-to-mqtt", "snapshotsPerSecond": 5}}'
+
+        - name: Add a stream with configuration from a file
+          text: >
+            az iot ops ns asset stream add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name videoStream --stream-config ./stream_config.json
+
+        - name: Add a stream with an MQTT destination
+          text: >
+            az iot ops ns asset stream add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name videoStream
+            --stream-config '{"destinations": [{"target": "Mqtt", "configuration": {"topic": "factory/streams", "retain": "Keep", "qos": "Qos1", "ttl": 3600}}]}'
+
+        - name: Replace an existing stream
+          text: >
+            az iot ops ns asset stream add --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name videoStream --replace
+    """
+
+    helps[
+        "iot ops ns asset stream update"
+    ] = """
+        type: command
+        short-summary: Update a stream for a namespaced asset in an IoT Operations instance.
+        long-summary: >
+            The connector type is detected from the asset's device endpoint.
+            Use --stream-config to supply connector-specific configuration.
+            Use --show-template config to see current stream values pre-filled in the full schema
+            structure (ready to edit and pass back via --stream-config).
+            Use --show-template schema to see the full connector schema with types and constraints.
+
+        examples:
+        - name: Show current stream config pre-filled with existing values (for editing before update)
+          text: >
+            az iot ops ns asset stream update --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name videoStream --show-template config
+
+        - name: Show the stream config schema with types and constraints
+          text: >
+            az iot ops ns asset stream update --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name videoStream --show-template schema
+
+        - name: Update stream configuration from inline JSON
+          text: >
+            az iot ops ns asset stream update --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name videoStream
+            --stream-config '{"streamConfiguration": {"snapshotsPerSecond": 10}}'
+
+        - name: Update stream type reference
+          text: >
+            az iot ops ns asset stream update --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name videoStream --type-ref "myTypeRef"
+    """
+
+    helps[
+        "iot ops ns asset stream list"
+    ] = """
+        type: command
+        short-summary: List streams for a namespaced asset in an IoT Operations instance.
+
+        examples:
+        - name: List all streams for an asset
+          text: >
+            az iot ops ns asset stream list --asset myasset --instance myInstance
+            -g myInstanceResourceGroup
+    """
+
+    helps[
+        "iot ops ns asset stream remove"
+    ] = """
+        type: command
+        short-summary: Remove a stream from a namespaced asset in an IoT Operations instance.
+
+        examples:
+        - name: Remove a stream from an asset
+          text: >
+            az iot ops ns asset stream remove --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name videoStream
+    """
+
+    helps[
+        "iot ops ns asset stream show"
+    ] = """
+        type: command
+        short-summary: Show details of a stream for a namespaced asset in an IoT Operations instance.
+
+        examples:
+        - name: Show stream details
+          text: >
+            az iot ops ns asset stream show --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --name videoStream
+    """
+
+    helps[
+        "iot ops ns asset stream export"
+    ] = """
+        type: command
+        short-summary: Export streams to file.
+
+        examples:
+        - name: Export streams to JSON
+          text: >
+            az iot ops ns asset stream export --asset myasset --instance myInstance
+            -g myInstanceResourceGroup
+    """
+
+    helps[
+        "iot ops ns asset stream import"
+    ] = """
+        type: command
+        short-summary: Import streams from file.
+
+        examples:
+        - name: Import streams from a JSON file
+          text: >
+            az iot ops ns asset stream import --asset myasset --instance myInstance
+            -g myInstanceResourceGroup --input-file ./streams.json
+    """
+
+    helps[
         "iot ops ns asset opcua dataset"
     ] = """
         type: group

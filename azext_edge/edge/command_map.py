@@ -388,6 +388,19 @@ def load_iotops_commands(self, _):
         cmd_group.command("list", "list_namespace_asset_event_group_events", is_preview=True)
         cmd_group.command("remove", "remove_namespace_asset_event_group_event", is_preview=True)
 
+    # generalized stream group (connector-agnostic)
+    with self.command_group(
+        "iot ops ns asset stream",
+        command_type=namespace_resource_ops,
+    ) as cmd_group:
+        cmd_group.command("add", "add_namespace_asset_stream", is_preview=True)
+        cmd_group.command("export", "export_namespace_asset_stream", is_preview=True)
+        cmd_group.command("import", "import_namespace_asset_stream", is_preview=True)
+        cmd_group.command("list", "list_namespace_asset_streams", is_preview=True)
+        cmd_group.command("remove", "remove_namespace_asset_stream", is_preview=True)
+        cmd_group.show_command("show", "show_namespace_asset_stream", is_preview=True)
+        cmd_group.command("update", "update_namespace_asset_stream", is_preview=True)
+
     # generalized management group (connector-agnostic)
     with self.command_group(
         "iot ops ns asset mgmt-group",
