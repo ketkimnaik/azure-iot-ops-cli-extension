@@ -2009,6 +2009,74 @@ def test_update_namespace_asset_management_group_generalized(
     assert json.loads(result["managementGroupConfiguration"])["operationMode"] == "async"
 
 
+def test_update_namespace_asset_management_group_generalized_clears_fields(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+):
+    """defaultTopic is clearable via empty string; data_source / type_ref empty strings are
+    ignored (no-op), consistent with the existing connector-specific mgmt-group update."""
+    asset_name = "gen-asset"
+    group_name = "sensor-mg"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    existing_mg = {
+        "name": group_name,
+        "dataSource": "orig/src",
+        "typeRef": "orig-ref",
+        "defaultTopic": "orig/topic",
+        "actions": [],
+    }
+    asset = _build_asset_with_mgmt_groups(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        management_groups=[existing_mg],
+    )
+
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+    _add_device_get_for_generalized_mgmt(mocked_responses, asset, namespace_name, resource_group_name, connector_type)
+
+    mocked_responses.add(
+        responses.PATCH,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        status=200,
+    )
+    mocked_responses.add(
+        responses.GET,
+        get_namespace_asset_mgmt_uri(namespace_name, resource_group_name, asset_name),
+        json=asset, status=200,
+    )
+
+    update_namespace_asset_management_group(
+        cmd=mocked_cmd,
+        asset_name=asset_name,
+        instance_name="inst",
+        instance_resource_group="rg",
+        group_name=group_name,
+        data_source="",
+        type_ref="",
+        default_topic="",
+        wait_sec=0,
+    )
+
+    patch_call = next(c for c in mocked_responses.calls if c.request.method == "PATCH")
+    patched_mg = json.loads(patch_call.request.body)["properties"]["managementGroups"][0]
+    # defaultTopic cleared via empty string
+    assert "defaultTopic" not in patched_mg
+    # data_source / type_ref empty strings are ignored -> original values preserved
+    assert patched_mg["dataSource"] == "orig/src"
+    assert patched_mg["typeRef"] == "orig-ref"
+
+
 def test_update_namespace_asset_management_group_generalized_show_template_config(
     mocked_cmd,
     mocked_responses: responses,

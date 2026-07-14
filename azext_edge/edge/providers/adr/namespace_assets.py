@@ -4449,9 +4449,9 @@ class NamespaceAssets(Queryable):
             group["defaultTopic"] = default_topic
         if default_timeout is not None:
             group["defaultTimeoutInSeconds"] = default_timeout
-        if data_source is not None:
+        if data_source:
             group["dataSource"] = data_source
-        if type_ref is not None:
+        if type_ref:
             group["typeRef"] = type_ref
 
         update_payload = {"properties": {"managementGroups": mgmt_groups}}
