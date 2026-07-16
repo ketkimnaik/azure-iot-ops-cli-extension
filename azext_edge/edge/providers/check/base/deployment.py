@@ -52,7 +52,6 @@ def _build_access_denied_result(resource: ListableEnum, error: ClusterAccessDeni
     return result
 
 
-
 def validate_cluster_prechecks(**kwargs) -> None:
     context_name = kwargs.get("context_name")
     load_config_context(context_name=context_name)
