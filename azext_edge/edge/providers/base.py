@@ -46,6 +46,15 @@ def load_config_context(context_name: Optional[str] = None):
     DEFAULT_NAMESPACE = current_config.get("namespace") or "azure-iot-operations"
 
 
+class ClusterAccessDeniedError(Exception):
+    """Raised when a cluster API call is rejected with HTTP 401/403 due to missing permissions."""
+
+    def __init__(self, status: Optional[int], resource: Optional[str] = None):
+        self.status = int(status or 403)
+        self.resource = resource
+        super().__init__(f"Access denied (HTTP {self.status})" + (f" for '{resource}'" if resource else ""))
+
+
 _namespaced_service_cache: dict = {}
 
 
@@ -110,7 +119,12 @@ _custom_object_cache: dict = {}
 
 
 def get_custom_objects(
-    group: str, version: str, plural: str, namespace: Optional[str] = None, use_cache: bool = True
+    group: str,
+    version: str,
+    plural: str,
+    namespace: Optional[str] = None,
+    use_cache: bool = True,
+    raise_on_access_error: bool = False,
 ) -> Union[dict, None]:
     target_resource_key = (group, version, plural, namespace)
     if use_cache:
@@ -128,6 +142,8 @@ def get_custom_objects(
         _custom_object_cache[target_resource_key] = f(**kwargs)
     except ApiException as ae:
         logger.debug(str(ae))
+        if raise_on_access_error and int(ae.status or 0) in (401, 403):
+            raise ClusterAccessDeniedError(status=ae.status, resource=plural)
     else:
         return _custom_object_cache[target_resource_key]
 

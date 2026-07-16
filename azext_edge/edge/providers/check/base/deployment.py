@@ -15,7 +15,7 @@ from rich.padding import Padding
 
 from ....common import CheckTaskStatus, ListableEnum
 from ....providers.edge_api import EdgeResourceApi
-from ...base import client, load_config_context
+from ...base import ClusterAccessDeniedError, client, load_config_context
 from ..common import NON_ERROR_STATUSES, CoreServiceResourceKinds, ResourceOutputDetailLevel
 from .check_manager import CheckManager
 from .node import check_nodes
@@ -23,6 +23,34 @@ from .resource import enumerate_ops_service_resources
 from .user_strings import UNABLE_TO_DETERMINE_VERSION_MSG
 
 logger = get_logger(__name__)
+
+
+def _build_access_denied_result(resource: ListableEnum, error: ClusterAccessDeniedError, as_list: bool = False) -> dict:
+    """Build a precise per-resource 'access denied' check result for a 401/403 on a single kind."""
+    kind = getattr(resource, "value", str(resource))
+    check_manager = CheckManager(check_name=f"eval{kind}Access", check_desc=f"Evaluate {kind}")
+    target = str(error.resource or kind)
+    check_manager.add_target(target_name=target)
+    denied_text = (
+        f"[red]Access denied[/red] (HTTP {error.status}). "
+        f"Principal lacks permission to read [bright_blue]{kind}[/bright_blue]."
+    )
+    check_manager.add_target_eval(
+        target_name=target,
+        status=CheckTaskStatus.error.value,
+        value=f"Access denied (HTTP {error.status}) reading '{target}'",
+    )
+    check_manager.add_display(target_name=target, display=Padding(denied_text, (0, 0, 0, 8)))
+    check_manager.add_display(
+        target_name=target,
+        display=Padding("Grant read access to this resource to evaluate it.", (0, 0, 0, 10)),
+    )
+    result = check_manager.as_dict(as_list)
+    # Marker so rolled-up views (e.g. the summary) can surface the permission reason inline
+    # instead of showing an ambiguous error icon.
+    result["accessDenied"] = error.status
+    return result
+
 
 
 def validate_cluster_prechecks(**kwargs) -> None:
@@ -119,7 +147,14 @@ def check_post_deployment(
             append_resource = True
 
         if append_resource:
-            results.append(evaluate_func(detail_level=detail_level, as_list=as_list, resource_name=resource_name))
+            try:
+                results.append(
+                    evaluate_func(detail_level=detail_level, as_list=as_list, resource_name=resource_name)
+                )
+            except ClusterAccessDeniedError as access_error:
+                # Principal lacks permission to read this specific resource kind: report a precise
+                # per-resource 'access denied' result instead of a misleading 'unable to fetch'.
+                results.append(_build_access_denied_result(resource, access_error, as_list))
     return results
 
 
