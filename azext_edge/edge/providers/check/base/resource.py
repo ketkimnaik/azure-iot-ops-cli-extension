@@ -19,7 +19,7 @@ from azext_edge.edge.providers.k8s.config_map import get_config_map
 from .check_manager import CheckManager
 from .display import process_value_color
 from ..common import COLOR_STR_FORMAT, PADDING_SIZE, ResourceOutputDetailLevel, ValidationResourceType
-from ...base import get_cluster_custom_api, get_namespaced_secret
+from ...base import get_cluster_custom_api, get_namespaced_secret, ClusterAccessDeniedError
 from ...edge_api import EdgeResourceApi
 from ....common import CheckTaskStatus, ResourceState
 
@@ -46,7 +46,28 @@ def enumerate_ops_service_resources(
     check_manager = CheckManager(check_name=check_name, check_desc=check_desc)
     check_manager.add_target(target_name=target_api)
 
-    api_resources: V1APIResourceList = get_cluster_custom_api(group=api_info.group, version=api_info.version)
+    try:
+        api_resources: V1APIResourceList = get_cluster_custom_api(group=api_info.group, version=api_info.version)
+    except ClusterAccessDeniedError as access_error:
+        if access_error.status == 401:
+            denied_text = (
+                f"[red]Access denied[/red] (HTTP {access_error.status}). Could not authenticate to the cluster "
+                f"while reading [bright_blue]{target_api}[/bright_blue] API resources."
+            )
+        else:
+            denied_text = (
+                f"[red]Access denied[/red] (HTTP {access_error.status}). Principal lacks permission to read "
+                f"[bright_blue]{target_api}[/bright_blue] API resources."
+            )
+        check_manager.add_target_eval(
+            target_name=target_api,
+            status=CheckTaskStatus.error.value,
+            value=f"Access denied (HTTP {access_error.status}) reading '{target_api}'",
+        )
+        check_manager.add_display(target_name=target_api, display=Padding(denied_text, (0, 0, 0, 8)))
+        result = check_manager.as_dict(as_list)
+        result["accessDenied"] = access_error.status
+        return result, resource_kind_map
 
     if not api_resources:
         check_manager.add_target_eval(target_name=target_api, status=CheckTaskStatus.error.value)
@@ -117,9 +138,7 @@ def get_resources_by_name(
     resource_name: str,
     namespace: str = None,
 ) -> List[dict]:
-    resources: list = (
-        api_info.get_resources(kind=kind, namespace=namespace, raise_on_access_error=True) or {}
-    ).get("items", [])
+    resources: list = (api_info.get_resources(kind=kind, namespace=namespace) or {}).get("items", [])
     resources = filter_resources_by_name(resources, resource_name)
     return resources
 

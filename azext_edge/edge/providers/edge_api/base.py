@@ -48,8 +48,7 @@ class EdgeResourceApi:
                 self._kinds[resource.kind.lower()] = rn
             return frozenset(self._kinds.keys())
 
-    def get_resources(self, kind: Union[str, Enum], namespace: Optional[str] = None, use_cache: Optional[bool] = False,
-                      raise_on_access_error: bool = False):
+    def get_resources(self, kind: Union[str, Enum], namespace: Optional[str] = None, use_cache: Optional[bool] = False):
         if isinstance(kind, Enum):
             kind = kind.value
 
@@ -60,7 +59,6 @@ class EdgeResourceApi:
                 plural=self._kinds[kind],
                 namespace=namespace,
                 use_cache=use_cache,
-                raise_on_access_error=raise_on_access_error,
             )
 
 

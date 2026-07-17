@@ -128,7 +128,7 @@ def check_summary(
                 footer = ":locked:" + colorize_string(
                     color="red",
                     value=(
-                        " Some resources could not be evaluated - principal lacks cluster permissions. "
+                        " Some resources could not be evaluated - cluster access denied. "
                         f"See details: az iot ops check --svc {check.svc}"
                     ),
                 )

@@ -28,13 +28,25 @@ logger = get_logger(__name__)
 def _build_access_denied_result(resource: ListableEnum, error: ClusterAccessDeniedError, as_list: bool = False) -> dict:
     """Build a precise per-resource 'access denied' check result for a 401/403 on a single kind."""
     kind = getattr(resource, "value", str(resource))
+    # Prefer the actual denied read (error.resource) since an evaluator may read more than one kind;
+    # fall back to the evaluator kind when the denied read is unlabeled.
+    denied_name = str(error.resource or kind)
     check_manager = CheckManager(check_name=f"eval{kind}Access", check_desc=f"Evaluate {kind}")
-    target = str(error.resource or kind)
+    target = denied_name
     check_manager.add_target(target_name=target)
-    denied_text = (
-        f"[red]Access denied[/red] (HTTP {error.status}). "
-        f"Principal lacks permission to read [bright_blue]{kind}[/bright_blue]."
-    )
+    if error.status == 401:
+        # 401 is an authentication failure (e.g. expired/invalid kubeconfig token), not a permissions issue.
+        denied_text = (
+            f"[red]Access denied[/red] (HTTP {error.status}). Could not authenticate to the cluster while "
+            f"reading [bright_blue]{denied_name}[/bright_blue]."
+        )
+        remediation_text = "Verify your cluster credentials (kubeconfig token may be expired or invalid)."
+    else:
+        denied_text = (
+            f"[red]Access denied[/red] (HTTP {error.status}). "
+            f"Principal lacks permission to read [bright_blue]{denied_name}[/bright_blue]."
+        )
+        remediation_text = "Grant read access to this resource to evaluate it."
     check_manager.add_target_eval(
         target_name=target,
         status=CheckTaskStatus.error.value,
@@ -43,7 +55,7 @@ def _build_access_denied_result(resource: ListableEnum, error: ClusterAccessDeni
     check_manager.add_display(target_name=target, display=Padding(denied_text, (0, 0, 0, 8)))
     check_manager.add_display(
         target_name=target,
-        display=Padding("Grant read access to this resource to evaluate it.", (0, 0, 0, 10)),
+        display=Padding(remediation_text, (0, 0, 0, 10)),
     )
     result = check_manager.as_dict(as_list)
     # Marker so rolled-up views (e.g. the summary) can surface the permission reason inline
