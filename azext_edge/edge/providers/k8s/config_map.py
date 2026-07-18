@@ -14,7 +14,7 @@ generic = client.ApiClient()
 
 
 def get_config_map(name: str, namespace: str) -> Optional[dict]:
-    from ..base import _reraise_if_access_denied
+    from ..base import reraise_if_access_denied
 
     try:
         v1_core_api = client.CoreV1Api()
@@ -23,7 +23,7 @@ def get_config_map(name: str, namespace: str) -> Optional[dict]:
         logger.debug(msg=str(ae))
         if int(ae.status) == 404:
             return
-        _reraise_if_access_denied(ae, resource=f"configmap/{name}")
+        reraise_if_access_denied(ae, resource=f"configmap/{name}")
         raise ae
     else:
         if result:

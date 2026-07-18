@@ -48,7 +48,7 @@ def load_config_context(context_name: Optional[str] = None):
 
 
 class ClusterAccessDeniedError(Exception):
-    """Raised when a cluster API call is rejected with HTTP 401/403 due to missing permissions."""
+    """Raised when a cluster API call is rejected with HTTP 401/403 (authentication/authorization failure)."""
 
     def __init__(self, status: Optional[int], resource: Optional[str] = None):
         self.status = int(status or 403)
@@ -73,7 +73,7 @@ def reraise_cluster_access_errors() -> Iterator[None]:
         _reraise_access_errors.reset(token)
 
 
-def _reraise_if_access_denied(ae: ApiException, resource: Optional[str] = None) -> None:
+def reraise_if_access_denied(ae: ApiException, resource: Optional[str] = None) -> None:
     if _reraise_access_errors.get() and int(getattr(ae, "status", 0) or 0) in (401, 403):
         raise ClusterAccessDeniedError(status=ae.status, resource=resource)
 
@@ -98,7 +98,7 @@ def get_namespaced_service(name: str, namespace: str, as_dict: bool = False) -> 
         _namespaced_service_cache[target_service_key] = v1_service
     except ApiException as ae:
         logger.debug(str(ae))
-        _reraise_if_access_denied(ae, resource=f"service/{name}")
+        reraise_if_access_denied(ae, resource=f"service/{name}")
     else:
         return retrieve_namespaced_service_from_cache(target_service_key)
 
@@ -134,7 +134,7 @@ def get_namespaced_pods_by_prefix(
         _namespaced_pods_cache[target_pods_key] = pods_list.items
     except ApiException as ae:
         logger.debug(str(ae))
-        _reraise_if_access_denied(ae, resource="pods")
+        reraise_if_access_denied(ae, resource="pods")
         return []
     else:
         return filter_pods_from_cache(target_pods_key)
@@ -166,7 +166,7 @@ def get_custom_objects(
         _custom_object_cache[target_resource_key] = f(**kwargs)
     except ApiException as ae:
         logger.debug(str(ae))
-        _reraise_if_access_denied(ae, resource=plural)
+        reraise_if_access_denied(ae, resource=plural)
     else:
         return _custom_object_cache[target_resource_key]
 
@@ -188,7 +188,7 @@ def get_cluster_custom_api(group: str, version: str, raise_on_404: bool = False)
         logger.debug(msg=str(ae))
         if int(ae.status) == 404 and raise_on_404:
             raise ResourceNotFoundError(f"{group}/{version} resource API is not detected on the cluster.")
-        _reraise_if_access_denied(ae, resource=f"{group}/{version}")
+        reraise_if_access_denied(ae, resource=f"{group}/{version}")
     else:
         return _cluster_resource_api_cache[target_resource_api_key]
 
@@ -317,7 +317,7 @@ def get_namespaced_secret(namespace: str, secret_name: str) -> dict:
     except ApiException as ae:
         error_msg = str(ae)
         logger.debug(msg=error_msg)
-        _reraise_if_access_denied(ae, resource=f"secret/{secret_name}")
+        reraise_if_access_denied(ae, resource=f"secret/{secret_name}")
     else:
         if result:
             return generic.sanitize_for_serialization(obj=result)
