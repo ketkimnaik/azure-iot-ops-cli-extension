@@ -844,6 +844,7 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type)
+        _ensure_capability_supported(endpoint, connector_type, ("datasets",), "datasets")
         dataset_section = endpoint.get("datasets", {})
         schema = dataset_section.get("datasetConfigurationSchema")
 
@@ -922,6 +923,8 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
+        if endpoint is not None:
+            _ensure_capability_supported(endpoint, connector_type, ("datasets",), "datasets")
         dataset_section = endpoint.get("datasets", {}) if endpoint else {}
 
         result = {}
@@ -1002,6 +1005,7 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type)
+        _ensure_capability_supported(endpoint, connector_type, ("datasets", "dataPoints"), "datapoints")
         dataset_section = endpoint.get("datasets", {})
         dp_section = dataset_section.get("dataPoints", {})
         schema = dp_section.get("dataPointConfigurationSchema")
@@ -1068,6 +1072,8 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
+        if endpoint is not None:
+            _ensure_capability_supported(endpoint, connector_type, ("datasets", "dataPoints"), "datapoints")
         dataset_section = endpoint.get("datasets", {}) if endpoint else {}
         dp_section = dataset_section.get("dataPoints", {}) if dataset_section else {}
 
@@ -2534,6 +2540,7 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type)
+        _ensure_capability_supported(endpoint, connector_type, ("eventGroups",), "event groups")
         eg_section = endpoint.get("eventGroups", {})
         schema = eg_section.get("eventGroupConfigurationSchema")
 
@@ -2626,6 +2633,8 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
+        if endpoint is not None:
+            _ensure_capability_supported(endpoint, connector_type, ("eventGroups",), "event groups")
         eg_section = endpoint.get("eventGroups", {}) if endpoint else {}
 
         result = {}
@@ -2725,6 +2734,7 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type)
+        _ensure_capability_supported(endpoint, connector_type, ("eventGroups", "events"), "events")
         eg_section = endpoint.get("eventGroups", {})
         events_section = eg_section.get("events", {})
         schema = events_section.get("eventConfigurationSchema")
@@ -2798,6 +2808,8 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
+        if endpoint is not None:
+            _ensure_capability_supported(endpoint, connector_type, ("eventGroups", "events"), "events")
         eg_section = endpoint.get("eventGroups", {}) if endpoint else {}
         events_section = eg_section.get("events", {}) if eg_section else {}
 
@@ -3484,6 +3496,7 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type)
+        _ensure_capability_supported(endpoint, connector_type, ("streams",), "streams")
         stream_section = endpoint.get("streams", {})
         schema = stream_section.get("streamConfigurationSchema")
 
@@ -3583,6 +3596,8 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
+        if endpoint is not None:
+            _ensure_capability_supported(endpoint, connector_type, ("streams",), "streams")
         stream_section = endpoint.get("streams", {}) if endpoint else {}
 
         result = {}
@@ -4151,6 +4166,14 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type)
+        if is_action:
+            _ensure_capability_supported(
+                endpoint, connector_type, ("managementGroups", "managementGroupActions"), "management actions"
+            )
+        else:
+            _ensure_capability_supported(
+                endpoint, connector_type, ("managementGroups",), "management groups"
+            )
         mg_section = endpoint.get("managementGroups", {})
         if is_action:
             schema = mg_section.get("managementGroupActions", {}).get("actionConfigurationSchema")
@@ -4224,6 +4247,15 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
+        if endpoint is not None:
+            if is_action:
+                _ensure_capability_supported(
+                    endpoint, connector_type, ("managementGroups", "managementGroupActions"), "management actions"
+                )
+            else:
+                _ensure_capability_supported(
+                    endpoint, connector_type, ("managementGroups",), "management groups"
+                )
         mg_section = endpoint.get("managementGroups", {}) if endpoint else {}
         if is_action:
             schema_owner = mg_section.get("managementGroupActions", {}) if mg_section else {}
@@ -5356,6 +5388,28 @@ def _get_metadata_endpoint(metadata: dict, connector_type: str) -> dict:
     raise ValidationError(
         f"Connector metadata does not contain an inbound endpoint entry for '{connector_type}'."
     )
+
+
+def _ensure_capability_supported(
+    endpoint: dict,
+    connector_type: str,
+    section_path: Tuple[str, ...],
+    capability_label: str,
+) -> None:
+    """Raise if the connector metadata endpoint does not support a capability.
+
+    Support is indicated by the presence of the section (and any nested sub-section) in the
+    metadata endpoint. Every key in ``section_path`` must be present; the absence of any key
+    means the connector does not support the capability, which respects the metadata semantics
+    (a missing section means "not supported", not "supported with empty config").
+    """
+    node = endpoint
+    for key in section_path:
+        if not isinstance(node, dict) or key not in node:
+            raise InvalidArgumentValueError(
+                f"The connector of type {connector_type} does not support {capability_label}."
+            )
+        node = node[key]
 
 
 def _collect_sub_item_schemas(section: dict) -> dict:
