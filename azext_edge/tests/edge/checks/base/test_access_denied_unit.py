@@ -121,7 +121,7 @@ def test_enumerate_discovery_access_denied(mocker, status):
         as_list=True,
     )
     assert result["accessDenied"] == status
-    assert resource_map == {}
+    assert not resource_map
     assert result["status"] == "error"
 
 
