@@ -2461,6 +2461,56 @@ def test_management_group_generalized_config_unsupported_capability_raises(
 @pytest.mark.parametrize(
     "command", [add_namespace_asset_management_group, update_namespace_asset_management_group]
 )
+def test_management_group_generalized_no_config_unsupported_raises(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+    command,
+):
+    """Even with no --mgmt-group-config and no --show-template, adding/updating a management group
+    on a connector that doesn't support management groups must be blocked (DOE parity)."""
+    asset_name = "gen-asset"
+    group_name = "target-mg"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    is_update = command is update_namespace_asset_management_group
+    management_groups = [generate_management_group(group_name=group_name)] if is_update else []
+    asset = _build_asset_with_mgmt_groups(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        management_groups=management_groups,
+    )
+    _register_asset_and_device_get(
+        mocked_responses, asset, namespace_name, resource_group_name, asset_name, connector_type
+    )
+
+    metadata = _mgmt_metadata(connector_type)
+    metadata["inboundEndpoints"][0].pop("managementGroups")
+    mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_assets.NamespaceAssets._get_connector_metadata",
+        return_value=metadata,
+    )
+
+    with pytest.raises(InvalidArgumentValueError, match="does not support management groups"):
+        command(
+            cmd=mocked_cmd,
+            asset_name=asset_name,
+            instance_name="inst",
+            instance_resource_group="rg",
+            group_name=group_name,
+            wait_sec=0,
+        )
+
+
+@pytest.mark.parametrize(
+    "command", [add_namespace_asset_management_group, update_namespace_asset_management_group]
+)
 @pytest.mark.parametrize("template_mode", ["config", "schema"])
 def test_management_group_generalized_show_template_unsupported_raises(
     mocked_cmd,

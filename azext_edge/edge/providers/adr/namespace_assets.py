@@ -207,6 +207,9 @@ class NamespaceAssets(Queryable):
         self.ops: "NamespaceAssetsOperations" = self.deviceregistry_mgmt_client.namespace_assets
         self.device_ops: "NamespaceDevicesOperations" = self.deviceregistry_mgmt_client.namespace_devices
         self.resource_ops: "ResourcesOperations" = self.resource_mgmt_client.resources
+        # Per-invocation cache of connector metadata keyed by (connector_type, instance, rg) so a
+        # single command that both verifies capability support and validates config fetches once.
+        self._connector_metadata_cache: Dict[Tuple[str, str, str], dict] = {}
 
     def _validate_imported_items(
         self,
@@ -771,6 +774,10 @@ class NamespaceAssets(Queryable):
         from .namespace_devices import DeviceEndpointType as _DEType
         from .helpers import load_opcua_metadata_file as _load_opcua_metadata_file
 
+        cache_key = ((connector_type or "").lower(), instance_name or "", instance_resource_group or "")
+        if cache_key in self._connector_metadata_cache:
+            return self._connector_metadata_cache[cache_key]
+
         is_opcua = connector_type.lower() == _DEType.OPCUA.value.lower()
         if is_opcua:
             from azure.core.exceptions import ResourceNotFoundError as _AzureNotFoundError
@@ -784,6 +791,7 @@ class NamespaceAssets(Queryable):
                     pass
             if metadata is None:
                 metadata = _load_opcua_metadata_file()
+            self._connector_metadata_cache[cache_key] = metadata
             return metadata
 
         from ..orchestration.resources.connector_templates import ConnectorTemplates
@@ -813,7 +821,28 @@ class NamespaceAssets(Queryable):
             image_ref=connector_metadata_ref,
             cmd=self.cmd,
         )
-        return json.loads(artifact.content.decode("utf-8"))
+        metadata = json.loads(artifact.content.decode("utf-8"))
+        self._connector_metadata_cache[cache_key] = metadata
+        return metadata
+
+    def _ensure_connector_supports(
+        self,
+        connector_type: str,
+        instance_name: str,
+        instance_resource_group: str,
+        section_path: Tuple[str, ...],
+        capability_label: str,
+    ) -> None:
+        """Verify the asset's connector supports a capability, independent of whether config is
+        supplied. Fetches connector metadata (cached) and raises a clear error if the capability's
+        section is absent, matching DOE semantics."""
+        metadata = self._get_connector_metadata(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+        )
+        endpoint = _get_metadata_endpoint(metadata, connector_type)
+        _ensure_capability_supported(endpoint, connector_type, section_path, capability_label)
 
     def _handle_dataset_show_template(
         self,
@@ -923,8 +952,6 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
-        if endpoint is not None:
-            _ensure_capability_supported(endpoint, connector_type, ("datasets",), "datasets")
         dataset_section = endpoint.get("datasets", {}) if endpoint else {}
 
         result = {}
@@ -1072,8 +1099,6 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
-        if endpoint is not None:
-            _ensure_capability_supported(endpoint, connector_type, ("datasets", "dataPoints"), "datapoints")
         dataset_section = endpoint.get("datasets", {}) if endpoint else {}
         dp_section = dataset_section.get("dataPoints", {}) if dataset_section else {}
 
@@ -1128,6 +1153,14 @@ class NamespaceAssets(Queryable):
                 template_mode=show_template.lower(),
                 dataset_config=dataset_config,
             )
+
+        self._ensure_connector_supports(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            section_path=("datasets",),
+            capability_label="datasets",
+        )
 
         # Cluster connectivity check
         _, namespace = self._check_device_props(
@@ -1272,6 +1305,14 @@ class NamespaceAssets(Queryable):
                     dataset_config=dataset_config,
                 )
 
+        self._ensure_connector_supports(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            section_path=("datasets",),
+            capability_label="datasets",
+        )
+
         _, namespace = self._check_device_props(
             instance_resource_group=instance_resource_group,
             instance_name=instance_name,
@@ -1362,6 +1403,14 @@ class NamespaceAssets(Queryable):
                 template_mode=show_template.lower(),
                 datapoint_config=datapoint_config,
             )
+
+        self._ensure_connector_supports(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            section_path=("datasets", "dataPoints"),
+            capability_label="datapoints",
+        )
 
         _, namespace = self._check_device_props(
             instance_resource_group=instance_resource_group,
@@ -2633,8 +2682,6 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
-        if endpoint is not None:
-            _ensure_capability_supported(endpoint, connector_type, ("eventGroups",), "event groups")
         eg_section = endpoint.get("eventGroups", {}) if endpoint else {}
 
         result = {}
@@ -2808,8 +2855,6 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
-        if endpoint is not None:
-            _ensure_capability_supported(endpoint, connector_type, ("eventGroups", "events"), "events")
         eg_section = endpoint.get("eventGroups", {}) if endpoint else {}
         events_section = eg_section.get("events", {}) if eg_section else {}
 
@@ -2870,6 +2915,14 @@ class NamespaceAssets(Queryable):
                 template_mode=show_template.lower(),
                 event_group_config=event_group_config,
             )
+
+        self._ensure_connector_supports(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            section_path=("eventGroups",),
+            capability_label="event groups",
+        )
 
         _, namespace = self._check_device_props(
             instance_resource_group=instance_resource_group,
@@ -3001,6 +3054,14 @@ class NamespaceAssets(Queryable):
                     event_group_config=event_group_config,
                 )
 
+        self._ensure_connector_supports(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            section_path=("eventGroups",),
+            capability_label="event groups",
+        )
+
         _, namespace = self._check_device_props(
             instance_resource_group=instance_resource_group,
             instance_name=instance_name,
@@ -3086,6 +3147,14 @@ class NamespaceAssets(Queryable):
                 template_mode=show_template.lower(),
                 event_config=event_config,
             )
+
+        self._ensure_connector_supports(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            section_path=("eventGroups", "events"),
+            capability_label="events",
+        )
 
         _, namespace = self._check_device_props(
             instance_resource_group=instance_resource_group,
@@ -3596,8 +3665,6 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
-        if endpoint is not None:
-            _ensure_capability_supported(endpoint, connector_type, ("streams",), "streams")
         stream_section = endpoint.get("streams", {}) if endpoint else {}
 
         result = {}
@@ -3657,6 +3724,14 @@ class NamespaceAssets(Queryable):
                 template_mode=show_template.lower(),
                 stream_config=stream_config,
             )
+
+        self._ensure_connector_supports(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            section_path=("streams",),
+            capability_label="streams",
+        )
 
         _, namespace = self._check_device_props(
             instance_resource_group=instance_resource_group,
@@ -3783,6 +3858,14 @@ class NamespaceAssets(Queryable):
                     template_mode=template_mode,
                     stream_config=stream_config,
                 )
+
+        self._ensure_connector_supports(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            section_path=("streams",),
+            capability_label="streams",
+        )
 
         _, namespace = self._check_device_props(
             instance_resource_group=instance_resource_group,
@@ -4247,15 +4330,6 @@ class NamespaceAssets(Queryable):
             instance_resource_group=instance_resource_group,
         )
         endpoint = _get_metadata_endpoint(metadata, connector_type) if metadata else None
-        if endpoint is not None:
-            if is_action:
-                _ensure_capability_supported(
-                    endpoint, connector_type, ("managementGroups", "managementGroupActions"), "management actions"
-                )
-            else:
-                _ensure_capability_supported(
-                    endpoint, connector_type, ("managementGroups",), "management groups"
-                )
         mg_section = endpoint.get("managementGroups", {}) if endpoint else {}
         if is_action:
             schema_owner = mg_section.get("managementGroupActions", {}) if mg_section else {}
@@ -4318,6 +4392,14 @@ class NamespaceAssets(Queryable):
                 config=mgmt_group_config,
                 is_action=False,
             )
+
+        self._ensure_connector_supports(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            section_path=("managementGroups",),
+            capability_label="management groups",
+        )
 
         _, namespace = self._check_device_props(
             instance_resource_group=instance_resource_group,
@@ -4447,6 +4529,14 @@ class NamespaceAssets(Queryable):
                     is_action=False,
                 )
 
+        self._ensure_connector_supports(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            section_path=("managementGroups",),
+            capability_label="management groups",
+        )
+
         _, namespace = self._check_device_props(
             instance_resource_group=instance_resource_group,
             instance_name=instance_name,
@@ -4541,6 +4631,14 @@ class NamespaceAssets(Queryable):
                 config=action_config,
                 is_action=True,
             )
+
+        self._ensure_connector_supports(
+            connector_type=connector_type,
+            instance_name=instance_name,
+            instance_resource_group=instance_resource_group,
+            section_path=("managementGroups", "managementGroupActions"),
+            capability_label="management actions",
+        )
 
         _, namespace = self._check_device_props(
             instance_resource_group=instance_resource_group,
@@ -5398,14 +5496,15 @@ def _ensure_capability_supported(
 ) -> None:
     """Raise if the connector metadata endpoint does not support a capability.
 
-    Support is indicated by the presence of the section (and any nested sub-section) in the
-    metadata endpoint. Every key in ``section_path`` must be present; the absence of any key
-    means the connector does not support the capability, which respects the metadata semantics
-    (a missing section means "not supported", not "supported with empty config").
+    Support is indicated by the presence of the section (and any nested sub-section) as an
+    object in the metadata endpoint. Every key in ``section_path`` must resolve to a dict; a
+    missing key or a non-object value (e.g. ``"streams": null``) means the connector does not
+    support the capability, which respects the metadata semantics (a missing/empty section
+    means "not supported", not "supported with empty config").
     """
     node = endpoint
     for key in section_path:
-        if not isinstance(node, dict) or key not in node:
+        if not isinstance(node, dict) or not isinstance(node.get(key), dict):
             raise InvalidArgumentValueError(
                 f"The connector of type {connector_type} does not support {capability_label}."
             )

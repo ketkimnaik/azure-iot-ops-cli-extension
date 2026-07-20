@@ -1522,6 +1522,104 @@ def test_namespace_asset_stream_generalized_show_template_unsupported_raises(
         )
 
 
+@pytest.mark.parametrize("command", [add_namespace_asset_stream, update_namespace_asset_stream])
+def test_namespace_asset_stream_generalized_null_section_unsupported_raises(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+    command,
+):
+    """A connector whose metadata declares 'streams' as a non-object (e.g. null) must be treated
+    as unsupported and raise a clear error, not break with an AttributeError downstream."""
+    asset_name = "gen-asset"
+    stream_name = "target-stream"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    is_update = command is update_namespace_asset_stream
+    existing_streams = [generate_stream(stream_name=stream_name)] if is_update else []
+    asset = _build_asset_with_connector_streams(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        streams=existing_streams,
+    )
+    _register_asset_and_device_get(
+        mocked_responses, asset, namespace_name, resource_group_name, asset_name, connector_type
+    )
+
+    # 'streams' key exists but is null (not an object) -> capability is not supported.
+    metadata = _stream_metadata(connector_type)
+    metadata["inboundEndpoints"][0]["streams"] = None
+    mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_assets.NamespaceAssets._get_connector_metadata",
+        return_value=metadata,
+    )
+
+    with pytest.raises(InvalidArgumentValueError, match="does not support streams"):
+        command(
+            cmd=mocked_cmd,
+            asset_name=asset_name,
+            instance_name="inst",
+            instance_resource_group="rg",
+            stream_name=stream_name,
+            stream_config='{"streamConfiguration": {"anything": "goes"}}',
+            wait_sec=0,
+        )
+
+
+@pytest.mark.parametrize("command", [add_namespace_asset_stream, update_namespace_asset_stream])
+def test_namespace_asset_stream_generalized_no_config_unsupported_raises(
+    mocked_cmd,
+    mocked_responses: responses,
+    mocked_check_cluster_connectivity,
+    mocked_get_namespace_for_instance,
+    mocker,
+    command,
+):
+    """Even with no --stream-config and no --show-template, adding/updating a stream on a
+    connector that doesn't support streams must be blocked (DOE parity)."""
+    asset_name = "gen-asset"
+    stream_name = "target-stream"
+    connector_type = "Custom.Test"
+    ns_resource = mocked_get_namespace_for_instance.return_value
+    namespace_name = ns_resource["name"]
+    resource_group_name = ns_resource["resource_group"]
+
+    is_update = command is update_namespace_asset_stream
+    existing_streams = [generate_stream(stream_name=stream_name)] if is_update else []
+    asset = _build_asset_with_connector_streams(
+        asset_name=asset_name,
+        namespace_name=namespace_name,
+        resource_group_name=resource_group_name,
+        streams=existing_streams,
+    )
+    _register_asset_and_device_get(
+        mocked_responses, asset, namespace_name, resource_group_name, asset_name, connector_type
+    )
+
+    metadata = _stream_metadata(connector_type)
+    metadata["inboundEndpoints"][0].pop("streams")
+    mocker.patch(
+        "azext_edge.edge.providers.adr.namespace_assets.NamespaceAssets._get_connector_metadata",
+        return_value=metadata,
+    )
+
+    with pytest.raises(InvalidArgumentValueError, match="does not support streams"):
+        command(
+            cmd=mocked_cmd,
+            asset_name=asset_name,
+            instance_name="inst",
+            instance_resource_group="rg",
+            stream_name=stream_name,
+            wait_sec=0,
+        )
+
+
 def test_add_namespace_asset_stream_generalized_show_template_config(
     mocked_cmd,
     mocked_responses: responses,
