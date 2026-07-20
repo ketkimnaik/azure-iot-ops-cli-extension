@@ -5499,8 +5499,8 @@ def _ensure_capability_supported(
     Support is indicated by the presence of the section (and any nested sub-section) as an
     object in the metadata endpoint. Every key in ``section_path`` must resolve to a dict; a
     missing key or a non-object value (e.g. ``"streams": null``) means the connector does not
-    support the capability, which respects the metadata semantics (a missing/empty section
-    means "not supported", not "supported with empty config").
+    support the capability. An empty object (e.g. ``"streams": {}``) counts as supported: the
+    capability is available but declares no configuration schema.
     """
     node = endpoint
     for key in section_path:
