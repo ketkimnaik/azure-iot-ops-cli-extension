@@ -55,7 +55,10 @@ def run_checks(
         result["title"] = f"Evaluation for {title_subject}" if ops_service else "IoT Operations Summary"
 
         if pre_deployment:
-            result["preDeployment"] = check_pre_deployment(as_list)
+            # Same access-denied gate as post-deployment so precheck reads (nodes, k8s version)
+            # surface a precise 401/403 result instead of a generic connectivity error.
+            with reraise_cluster_access_errors():
+                result["preDeployment"] = check_pre_deployment(as_list)
         if post_deployment:
             result["postDeployment"] = []
             service_check_dict = {

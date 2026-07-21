@@ -42,12 +42,36 @@ from .common import (
     CheckResult,
     ResourceOutputDetailLevel,
     ValidationResourceType,
+    build_access_denied_text,
 )
 
 from ...providers.edge_api import MQ_ACTIVE_API, MqResourceKinds
 from ..support.mq import MQ_NAME_LABEL
 
-from ..base import get_namespaced_pods_by_prefix, get_namespaced_service
+from ..base import ClusterAccessDeniedError, get_namespaced_pods_by_prefix, get_namespaced_service
+
+
+def _render_ref_validation(ref_result, ref_type: ValidationResourceType, name: str):
+    """
+    Map a validate_runtime_resource_ref result to (display_text, eval_status).
+
+    A ClusterAccessDeniedError result renders a precise inline 'access denied' row so the
+    evaluator keeps its other findings instead of unwinding on a denied reference read.
+    """
+    if isinstance(ref_result, ClusterAccessDeniedError):
+        return (
+            build_access_denied_text(ref_result.status, f"{ref_type.value} reference {name}"),
+            CheckTaskStatus.error.value,
+        )
+    if ref_result:
+        return (
+            f"[green]Valid[/green] {ref_type.value} reference {{[green]{name}[/green]}}.",
+            CheckTaskStatus.success.value,
+        )
+    return (
+        f"[red]Invalid[/red] {ref_type.value} reference {{[red]{name}[/red]}}.",
+        CheckTaskStatus.error.value,
+    )
 
 
 def check_mq_deployment(
@@ -1008,9 +1032,30 @@ def _evaluate_listener_service(
         conditions=["listener_service"],
     )
 
-    associated_service: dict = get_namespaced_service(
-        name=listener_spec_service_name, namespace=namespace, as_dict=True
-    )
+    associated_service: dict = None
+    try:
+        associated_service = get_namespaced_service(
+            name=listener_spec_service_name, namespace=namespace, as_dict=True
+        )
+    except ClusterAccessDeniedError as access_error:
+        # Denied on the secondary service read: keep the listener findings and report inline.
+        processed_services[listener_spec_service_name] = True
+        check_manager.add_display(
+            target_name=target_listeners,
+            namespace=namespace,
+            display=Padding(
+                "\n" + build_access_denied_text(access_error.status, f"service {listener_spec_service_name}"),
+                (0, 0, 0, 12),
+            ),
+        )
+        check_manager.add_target_eval(
+            target_name=target_listener_service,
+            namespace=namespace,
+            status=CheckTaskStatus.error.value,
+            value={"listener_service": f"Access denied (HTTP {access_error.status})"},
+            resource_name=f"service/{listener_spec_service_name}",
+        )
+        return
     processed_services[listener_spec_service_name] = True
     if not associated_service:
         listener_service_eval_status = CheckTaskStatus.warning.value
@@ -1332,19 +1377,17 @@ def _check_authentication_method(
             trusted_client_ca_cert_value = {
                 "spec.authenticationMethods[*].x509Settings.trustedClientCaCert": trusted_client_ca_cert
             }
-            is_valid = validate_runtime_resource_ref(
+            ref_result = validate_runtime_resource_ref(
                 namespace=namespace,
                 name=trusted_client_ca_cert,
                 ref_type=ValidationResourceType.configmap,
             )
 
-            if is_valid:
-                configmap_validate_text = f"[green]Valid[/green] {ValidationResourceType.configmap.value} reference {{[green]{trusted_client_ca_cert}[/green]}}."
-            else:
-                configmap_validate_text = f"[red]Invalid[/red] {ValidationResourceType.configmap.value} reference {{[red]{trusted_client_ca_cert}[/red]}}."
+            configmap_validate_text, trusted_client_ca_cert_status = _render_ref_validation(
+                ref_result, ValidationResourceType.configmap, trusted_client_ca_cert
+            )
 
             trusted_client_ca_cert_display = "Trusted Client CA Cert: {}"
-            trusted_client_ca_cert_status = CheckTaskStatus.success.value if is_valid else CheckTaskStatus.error.value
 
             sub_check_results.append(
                 CheckResult(
@@ -1491,21 +1534,17 @@ def _evaluate_custom_authentication_method(
         # check x509
         secret_ref = auth.get("x509", {}).get("secretRef")
         secret_ref_value = {"spec.authenticationMethods[*].customSettings.auth.x509.secretRef": secret_ref}
-        is_valid = validate_runtime_resource_ref(
+        ref_result = validate_runtime_resource_ref(
             namespace=namespace,
             name=secret_ref,
             ref_type=ValidationResourceType.secret,
         )
 
-        if is_valid:
-            secret_validate_text = f"[green]Valid[/green] {ValidationResourceType.secret.value} reference {{[green]{secret_ref}[/green]}}."
-        else:
-            secret_validate_text = (
-                f"[red]Invalid[/red] {ValidationResourceType.secret.value} reference {{[red]{secret_ref}[/red]}}."
-            )
+        secret_validate_text, secret_ref_status = _render_ref_validation(
+            ref_result, ValidationResourceType.secret, secret_ref
+        )
 
         secret_ref_display = "X.509 Client Certificate Secret reference: {}"
-        secret_ref_status = CheckTaskStatus.success.value if is_valid else CheckTaskStatus.error.value
 
         sub_check_results.append(
             CheckResult(
@@ -1530,19 +1569,17 @@ def _evaluate_custom_authentication_method(
 
     if ca_cert_config_map:
         ca_cert_config_map_value = {"spec.authenticationMethods[*].customSettings.caCertConfigMap": ca_cert_config_map}
-        is_valid = validate_runtime_resource_ref(
+        ref_result = validate_runtime_resource_ref(
             namespace=namespace,
             name=ca_cert_config_map,
             ref_type=ValidationResourceType.configmap,
         )
 
-        if is_valid:
-            configmap_validate_text = f"[green]Valid[/green] {ValidationResourceType.configmap.value} reference {{[green]{ca_cert_config_map}[/green]}}."
-        else:
-            configmap_validate_text = f"[red]Invalid[/red] {ValidationResourceType.configmap.value} reference {{[red]{ca_cert_config_map}[/red]}}."
+        configmap_validate_text, ca_cert_config_map_status = _render_ref_validation(
+            ref_result, ValidationResourceType.configmap, ca_cert_config_map
+        )
 
         ca_cert_config_map_display = "CA Certificate Config Map: {}"
-        ca_cert_config_map_status = CheckTaskStatus.success.value if is_valid else CheckTaskStatus.error.value
 
         sub_check_results.append(
             CheckResult(

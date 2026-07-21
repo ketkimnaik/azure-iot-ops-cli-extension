@@ -161,3 +161,100 @@ def test_summary_footer_flips_on_access_denied(mocker):
     assert "access denied" in broker_text.lower()
     # generic footer should not be used for the denied service
     assert "See details by running" not in broker_text
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_validate_runtime_resource_ref_returns_error_on_denial(mocker, status):
+    # A denied secondary reference read must NOT unwind the evaluator: the helper returns the
+    # ClusterAccessDeniedError so the caller can render an inline row and keep its other findings.
+    from azext_edge.edge.providers.check.base.resource import validate_runtime_resource_ref
+    from azext_edge.edge.providers.check.common import ValidationResourceType
+
+    mocker.patch(
+        "azext_edge.edge.providers.check.base.resource.get_namespaced_secret",
+        side_effect=ClusterAccessDeniedError(status=status, resource="secret/my-secret"),
+    )
+    result = validate_runtime_resource_ref(
+        name="my-secret", namespace="ns", ref_type=ValidationResourceType.secret
+    )
+    assert isinstance(result, ClusterAccessDeniedError)
+    assert result.status == status
+
+
+@pytest.mark.parametrize(
+    "ref_result, expected_phrase, expected_status",
+    [
+        (True, "Valid", "success"),
+        (False, "Invalid", "error"),
+        (ClusterAccessDeniedError(status=403, resource="secret/x"), "Access denied", "error"),
+    ],
+)
+def test_render_ref_validation(ref_result, expected_phrase, expected_status):
+    # The shared renderer maps valid/invalid/access-denied to the right text and status.
+    from azext_edge.edge.providers.check.mq import _render_ref_validation
+    from azext_edge.edge.providers.check.common import ValidationResourceType
+
+    text, status = _render_ref_validation(ref_result, ValidationResourceType.secret, "my-secret")
+    assert expected_phrase in text
+    assert status == expected_status
+
+
+@pytest.mark.parametrize("status", [401, 403])
+@pytest.mark.parametrize("helper", ["service", "pods", "secret", "cluster_api"])
+def test_shared_read_helpers_reraise_within_context(mocker, helper, status):
+    # Each shared read helper must raise ClusterAccessDeniedError on 401/403 inside the check
+    # context, and preserve its tolerant behavior (swallow -> empty result) outside it.
+    from functools import partial
+    from azext_edge.edge.providers import base
+
+    if helper == "service":
+        api = mocker.Mock()
+        api.read_namespaced_service.side_effect = ApiException(status=status, reason="denied")
+        mocker.patch("azext_edge.edge.providers.base.client.CoreV1Api", return_value=api)
+        call = partial(base.get_namespaced_service, name=f"svc-{status}", namespace=f"ns-{status}")
+        outside_expected = None
+    elif helper == "pods":
+        api = mocker.Mock()
+        api.list_namespaced_pod.side_effect = ApiException(status=status, reason="denied")
+        mocker.patch("azext_edge.edge.providers.base.client.CoreV1Api", return_value=api)
+        call = partial(base.get_namespaced_pods_by_prefix, prefix="p", namespace=f"ns-pods-{status}")
+        outside_expected = []
+    elif helper == "secret":
+        api = mocker.Mock()
+        api.read_namespaced_secret.side_effect = ApiException(status=status, reason="denied")
+        mocker.patch("azext_edge.edge.providers.base.client.CoreV1Api", return_value=api)
+        call = partial(base.get_namespaced_secret, namespace=f"ns-{status}", secret_name=f"sec-{status}")
+        outside_expected = None
+    else:  # cluster_api (API discovery)
+        api = mocker.Mock()
+        api.get_api_resources.side_effect = ApiException(status=status, reason="denied")
+        mocker.patch("azext_edge.edge.providers.base.client.CustomObjectsApi", return_value=api)
+        call = partial(base.get_cluster_custom_api, group=f"grp-{status}", version="v1")
+        outside_expected = None
+
+    with reraise_cluster_access_errors():
+        with pytest.raises(ClusterAccessDeniedError) as exc_info:
+            call()
+    assert exc_info.value.status == status
+
+    # outside the context -> swallowed, no raise
+    assert call() == outside_expected
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_get_config_map_reraise_within_context(mocker, status):
+    # The configmap helper raises ClusterAccessDeniedError inside the context; outside it keeps
+    # its original behavior of re-raising the ApiException on a non-404.
+    from azext_edge.edge.providers.k8s.config_map import get_config_map
+
+    api = mocker.Mock()
+    api.read_namespaced_config_map.side_effect = ApiException(status=status, reason="denied")
+    mocker.patch("azext_edge.edge.providers.k8s.config_map.client.CoreV1Api", return_value=api)
+
+    with reraise_cluster_access_errors():
+        with pytest.raises(ClusterAccessDeniedError) as exc_info:
+            get_config_map(name=f"cm-{status}", namespace=f"ns-{status}")
+    assert exc_info.value.status == status
+
+    with pytest.raises(ApiException):
+        get_config_map(name=f"cm-{status}", namespace=f"ns-{status}")

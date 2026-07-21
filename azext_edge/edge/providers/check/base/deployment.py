@@ -15,8 +15,14 @@ from rich.padding import Padding
 
 from ....common import CheckTaskStatus, ListableEnum
 from ....providers.edge_api import EdgeResourceApi
-from ...base import ClusterAccessDeniedError, client, load_config_context
-from ..common import NON_ERROR_STATUSES, CoreServiceResourceKinds, ResourceOutputDetailLevel
+from ...base import ClusterAccessDeniedError, client, load_config_context, reraise_if_access_denied
+from ..common import (
+    NON_ERROR_STATUSES,
+    CoreServiceResourceKinds,
+    ResourceOutputDetailLevel,
+    build_access_denied_remediation,
+    build_access_denied_text,
+)
 from .check_manager import CheckManager
 from .node import check_nodes
 from .resource import enumerate_ops_service_resources
@@ -34,19 +40,8 @@ def _build_access_denied_result(resource: ListableEnum, error: ClusterAccessDeni
     check_manager = CheckManager(check_name=f"eval{kind}Access", check_desc=f"Evaluate {kind}")
     target = denied_name
     check_manager.add_target(target_name=target)
-    if error.status == 401:
-        # 401 is an authentication failure (e.g. expired/invalid kubeconfig token), not a permissions issue.
-        denied_text = (
-            f"[red]Access denied[/red] (HTTP {error.status}). Could not authenticate to the cluster while "
-            f"reading [bright_blue]{denied_name}[/bright_blue]."
-        )
-        remediation_text = "Verify your cluster credentials (kubeconfig token may be expired or invalid)."
-    else:
-        denied_text = (
-            f"[red]Access denied[/red] (HTTP {error.status}). "
-            f"Principal lacks permission to read [bright_blue]{denied_name}[/bright_blue]."
-        )
-        remediation_text = "Grant read access to this resource to evaluate it."
+    denied_text = build_access_denied_text(error.status, denied_name)
+    remediation_text = build_access_denied_remediation(error.status)
     check_manager.add_target_eval(
         target_name=target,
         status=CheckTaskStatus.error.value,
@@ -120,7 +115,12 @@ def check_pre_deployment(
             }
         )
     for c in desired_checks:
-        output = desired_checks[c]()
+        try:
+            output = desired_checks[c]()
+        except ClusterAccessDeniedError as access_error:
+            # Principal lacks access to a precheck resource (nodes / k8s version / storage classes):
+            # report a precise access-denied result instead of a generic connectivity error.
+            output = _build_access_denied_result(access_error.resource or c, access_error, as_list)
         result.append(output)
     return result
 
@@ -189,6 +189,7 @@ def _check_k8s_version(as_list: bool = False) -> Dict[str, Any]:
         version_details: VersionInfo = version_client.get_code()
     except (ApiException, ImportError) as ae:
         logger.debug(str(ae))
+        reraise_if_access_denied(ae, resource="kubernetes version")
         api_error_text = UNABLE_TO_DETERMINE_VERSION_MSG
         check_manager.add_target_eval(
             target_name=target_k8s_version,
@@ -242,6 +243,7 @@ def _check_storage_classes(acs_config: dict, as_list: bool = False) -> Dict[str,
         storage_classes: V1StorageClassList = storage_client.list_storage_class()
     except ApiException as ae:
         logger.debug(str(ae))
+        reraise_if_access_denied(ae, resource="storage classes")
         api_error_text = "Unable to fetch storage classes"
         check_manager.add_target_eval(
             target_name=target,
