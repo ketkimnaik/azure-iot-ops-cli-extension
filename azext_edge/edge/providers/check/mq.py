@@ -608,53 +608,72 @@ def evaluate_brokers(
 
             pods: List[dict] = []
 
-            for prefix in [
-                AIO_BROKER_DIAGNOSTICS_PROBE_PREFIX,
-                AIO_BROKER_FRONTEND_PREFIX,
-                AIO_BROKER_BACKEND_PREFIX,
-                AIO_BROKER_AUTH_PREFIX,
-                AIO_BROKER_HEALTH_MANAGER,
-                AIO_BROKER_DIAGNOSTICS_SERVICE,
-                AIO_BROKER_OPERATOR,
-                # AIO_BROKER_FLUENT_BIT,
-                # TODO: Fluent Bit is deployed to all nodes and stays in a pending state until an
-                # AIO workload is running on the node. For clusters with many nodes, usually
-                # some instances of Fluent Bit will be in a pending state. This is expected.
-            ]:
-                prefixed_pods = get_namespaced_pods_by_prefix(
-                    prefix=prefix,
-                    namespace=namespace,
-                    label_selector=MQ_NAME_LABEL,
-                )
-
-                if not prefixed_pods:
-                    add_display_and_eval(
-                        check_manager=check_manager,
-                        target_name=target_brokers,
-                        display_text=f"{prefix}* {colorize_string(color='yellow', value='not detected')}.",
-                        eval_status=CheckTaskStatus.warning.value,
-                        eval_value=None,
-                        resource_name=prefix,
+            try:
+                for prefix in [
+                    AIO_BROKER_DIAGNOSTICS_PROBE_PREFIX,
+                    AIO_BROKER_FRONTEND_PREFIX,
+                    AIO_BROKER_BACKEND_PREFIX,
+                    AIO_BROKER_AUTH_PREFIX,
+                    AIO_BROKER_HEALTH_MANAGER,
+                    AIO_BROKER_DIAGNOSTICS_SERVICE,
+                    AIO_BROKER_OPERATOR,
+                    # AIO_BROKER_FLUENT_BIT,
+                    # TODO: Fluent Bit is deployed to all nodes and stays in a pending state until an
+                    # AIO workload is running on the node. For clusters with many nodes, usually
+                    # some instances of Fluent Bit will be in a pending state. This is expected.
+                ]:
+                    prefixed_pods = get_namespaced_pods_by_prefix(
+                        prefix=prefix,
                         namespace=namespace,
-                        padding=(0, 0, 0, broker_properties_padding),
-                    )
-                else:
-                    pods.extend(
-                        get_namespaced_pods_by_prefix(
-                            prefix=prefix,
-                            namespace="",
-                            label_selector=MQ_NAME_LABEL,
-                        )
+                        label_selector=MQ_NAME_LABEL,
                     )
 
-            evaluate_pod_health(
-                check_manager=check_manager,
-                target=target_brokers,
-                namespace=namespace,
-                padding=broker_properties_padding,
-                pods=pods,
-                detail_level=detail_level,
-            )
+                    if not prefixed_pods:
+                        add_display_and_eval(
+                            check_manager=check_manager,
+                            target_name=target_brokers,
+                            display_text=f"{prefix}* {colorize_string(color='yellow', value='not detected')}.",
+                            eval_status=CheckTaskStatus.warning.value,
+                            eval_value=None,
+                            resource_name=prefix,
+                            namespace=namespace,
+                            padding=(0, 0, 0, broker_properties_padding),
+                        )
+                    else:
+                        pods.extend(
+                            get_namespaced_pods_by_prefix(
+                                prefix=prefix,
+                                namespace="",
+                                label_selector=MQ_NAME_LABEL,
+                            )
+                        )
+
+                evaluate_pod_health(
+                    check_manager=check_manager,
+                    target=target_brokers,
+                    namespace=namespace,
+                    padding=broker_properties_padding,
+                    pods=pods,
+                    detail_level=detail_level,
+                )
+            except ClusterAccessDeniedError as access_error:
+                # Denied on the secondary pod reads: keep the broker findings and report inline.
+                denied_resource = str(access_error.resource or "pods")
+                check_manager.add_target_eval(
+                    target_name=target_brokers,
+                    namespace=namespace,
+                    status=CheckTaskStatus.error.value,
+                    value=f"Access denied (HTTP {access_error.status}) reading {denied_resource}",
+                    resource_name=denied_resource,
+                )
+                check_manager.add_display(
+                    target_name=target_brokers,
+                    namespace=namespace,
+                    display=Padding(
+                        "\n" + build_access_denied_text(access_error.status, denied_resource),
+                        (0, 0, 0, broker_properties_padding),
+                    ),
+                )
 
     return check_manager.as_dict(as_list)
 

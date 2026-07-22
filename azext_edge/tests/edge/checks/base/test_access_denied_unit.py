@@ -258,3 +258,97 @@ def test_get_config_map_reraise_within_context(mocker, status):
 
     with pytest.raises(ApiException):
         get_config_map(name=f"cm-{status}", namespace=f"ns-{status}")
+
+
+def _target_display_text(result: dict, target: str) -> str:
+    texts = []
+    for ns_data in result["targets"].get(target, {}).values():
+        for d in ns_data.get("displays", []):
+            texts.append(str(getattr(d, "renderable", d)))
+    return " ".join(texts)
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_evaluate_brokers_pod_read_denied_preserves_findings(mocker, status):
+    # A denial on the secondary pod reads must NOT unwind evaluate_brokers: the broker findings
+    # are preserved and an inline access-denied row is added.
+    from azext_edge.edge.providers.check.mq import evaluate_brokers
+    from azext_edge.tests.edge.checks.conftest import generate_resource_stub
+    from azext_edge.edge.common import ResourceState
+
+    broker = generate_resource_stub(
+        spec={
+            "diagnostics": {},
+            "cardinality": {
+                "backendChain": {"partitions": 1, "redundancyFactor": 2, "workers": 1},
+                "frontend": {"replicas": 1},
+            },
+            "mode": "distributed",
+        },
+        status={"healthState": {"status": ResourceState.available.value, "description": "ok"}},
+    )
+    mocker.patch(
+        "azext_edge.edge.providers.edge_api.base.EdgeResourceApi.get_resources",
+        return_value={"items": [broker]},
+    )
+    # diagnostics service read succeeds; pod reads are denied
+    mocker.patch("azext_edge.edge.providers.check.mq.get_namespaced_service", return_value={"spec": {}})
+    mocker.patch(
+        "azext_edge.edge.providers.check.mq.get_namespaced_pods_by_prefix",
+        side_effect=ClusterAccessDeniedError(status=status, resource="pods"),
+    )
+
+    # must not raise
+    result = evaluate_brokers(as_list=True)
+    target = "brokers.mqttbroker.iotoperations.azure.com"
+    text = _target_display_text(result, target)
+    assert "Access denied" in text
+    assert str(status) in text
+    # broker findings preserved: at least one non-denial evaluation remains
+    evals = [e for ns_data in result["targets"][target].values() for e in ns_data.get("evaluations", [])]
+    assert any("Access denied" not in str(e.get("value")) for e in evals)
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_broker_diagnostics_service_denied_reports_inline(mocker, status):
+    # A denied diagnostics service read renders an inline access-denied row without raising.
+    from azext_edge.edge.providers.check.mq import _evaluate_broker_diagnostics_service
+    from azext_edge.edge.providers.check.base import CheckManager
+
+    mocker.patch(
+        "azext_edge.edge.providers.check.mq.get_namespaced_service",
+        side_effect=ClusterAccessDeniedError(status=status, resource="service/aio-broker-diagnostics-service"),
+    )
+    check_manager = CheckManager(check_name="evalBrokers", check_desc="Evaluate MQTT Brokers")
+    check_manager.add_target(target_name="brokers", namespace="ns")
+    _evaluate_broker_diagnostics_service(check_manager=check_manager, target_brokers="brokers", namespace="ns")
+
+    text = _target_display_text(check_manager.as_dict(as_list=True), "brokers")
+    assert "Access denied" in text
+    assert str(status) in text
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_listener_service_denied_reports_inline(mocker, status):
+    # A denied listener service read renders an inline access-denied row without raising.
+    from azext_edge.edge.providers.check.mq import _evaluate_listener_service
+    from azext_edge.edge.providers.check.base import CheckManager
+
+    mocker.patch(
+        "azext_edge.edge.providers.check.mq.get_namespaced_service",
+        side_effect=ClusterAccessDeniedError(status=status, resource="service/my-listener-svc"),
+    )
+    check_manager = CheckManager(check_name="evalBrokerListeners", check_desc="Evaluate MQTT Broker Listeners")
+    check_manager.add_target(target_name="listeners", namespace="ns")
+    _evaluate_listener_service(
+        check_manager=check_manager,
+        listener_name="my-listener",
+        listener_spec={"serviceName": "my-listener-svc", "serviceType": "ClusterIp", "name": "my-listener"},
+        processed_services={},
+        target_listeners="listeners",
+        namespace="ns",
+    )
+
+    text = _target_display_text(check_manager.as_dict(as_list=True), "listeners")
+    assert "Access denied" in text
+    assert str(status) in text
