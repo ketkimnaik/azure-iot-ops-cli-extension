@@ -1188,9 +1188,28 @@ def _evaluate_broker_diagnostics_service(
     namespace: str,
     detail_level: int = ResourceOutputDetailLevel.summary.value,
 ) -> None:
-    diagnostics_service = get_namespaced_service(
-        name=AIO_BROKER_DIAGNOSTICS_SERVICE, namespace=namespace, as_dict=True
-    )
+    try:
+        diagnostics_service = get_namespaced_service(
+            name=AIO_BROKER_DIAGNOSTICS_SERVICE, namespace=namespace, as_dict=True
+        )
+    except ClusterAccessDeniedError as access_error:
+        # Denied on the secondary diagnostics service read: keep the broker findings and report inline.
+        check_manager.add_target_eval(
+            target_name=target_brokers,
+            namespace=namespace,
+            status=CheckTaskStatus.error.value,
+            value=f"Access denied (HTTP {access_error.status}) reading service/{AIO_BROKER_DIAGNOSTICS_SERVICE}",
+            resource_name=f"service/{AIO_BROKER_DIAGNOSTICS_SERVICE}",
+        )
+        check_manager.add_display(
+            target_name=target_brokers,
+            namespace=namespace,
+            display=Padding(
+                "\n" + build_access_denied_text(access_error.status, f"service {AIO_BROKER_DIAGNOSTICS_SERVICE}"),
+                (0, 0, 0, 12),
+            ),
+        )
+        return
     if not diagnostics_service:
         check_manager.add_target_eval(
             target_name=target_brokers,
