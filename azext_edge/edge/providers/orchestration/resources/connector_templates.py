@@ -297,8 +297,7 @@ class ConnectorTemplates(Queryable):
 
         The OPC UA supervisor adopts a template by the ``azureiotoperationsconnectorforopcua-``
         prefix, so the suffix only needs to be stable per instance. A short deterministic hash of
-        the instance name is used (mirroring the product Bicep, which derives a suffix from the
-        instance id).
+        the instance name is used.
         """
         from ..common import OPCUA_CONNECTOR_TEMPLATE_NAME_PREFIX
 
