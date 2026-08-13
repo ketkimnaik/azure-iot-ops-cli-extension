@@ -40,6 +40,7 @@ from azext_edge.edge.providers.orchestration.resources.instances import (
     SPC_RESOURCE_TYPE,
 )
 from azext_edge.edge.providers.orchestration.targets import InitTargets
+from azext_edge.edge.providers.orchestration.template import TEMPLATE_BLUEPRINT_INSTANCE
 from azext_edge.edge.util import parse_kvp_nargs
 from azext_edge.edge.util.machinery import scoped_semver_import
 
@@ -1009,30 +1010,25 @@ def assert_operation_order(target_scenario: UpgradeScenario, upgrade_result: Lis
     if expects_secretsync:
         assert len(secretsync_migrations) == 1, "Expected exactly one secretsync migration"
 
-    # Connector template is created after the registry endpoint and before the secretsync migration.
+    # Aux operations run in a fixed tail order: registry -> connector template -> secretsync.
+    # Assert relative ordering of whichever are present, and that the last present one is last overall.
+    aux_pipeline = []
+    if expects_registry:
+        aux_pipeline.append(("registry endpoint", registry_creates[0]))
     if expects_connector_template:
-        ct_index = upgrade_result.index(connector_template_creates[0])
-        if expects_registry:
-            assert ct_index > upgrade_result.index(
-                registry_creates[0]
-            ), "Connector template should be created after registry endpoint"
-        if expects_secretsync:
-            assert ct_index < upgrade_result.index(
-                secretsync_migrations[0]
-            ), "Connector template should be created before secretsync migration"
+        aux_pipeline.append(("connector template", connector_template_creates[0]))
+    if expects_secretsync:
+        aux_pipeline.append(("secretsync migration", secretsync_migrations[0]))
 
-    # Check ordering of final operations (registry and/or secretsync)
-    if len(upgrade_result) > 0:
-        if expects_registry and expects_secretsync:
-            # Both registry and secretsync: secretsync should be last, registry second to last
-            assert upgrade_result[-1] in secretsync_migrations, "SecretSync migration should be last operation"
-            assert upgrade_result[-2] in registry_creates, "Registry creation should be before secretsync migration"
-        elif expects_secretsync:
-            # Only secretsync: should be last
-            assert upgrade_result[-1] in secretsync_migrations, "SecretSync migration should be last operation"
-        elif expects_registry:
-            # Only registry: should be last
-            assert upgrade_result[-1] in registry_creates, "Registry endpoint creation should be last operation"
+    if aux_pipeline:
+        positions = [upgrade_result.index(item) for _, item in aux_pipeline]
+        assert positions == sorted(positions), (
+            "Aux operations out of order; expected registry -> connector template -> secretsync, got "
+            f"{[name for name, _ in aux_pipeline]} at positions {positions}"
+        )
+        assert (
+            upgrade_result[-1] == aux_pipeline[-1][1]
+        ), f"Expected '{aux_pipeline[-1][0]}' to be the last operation"
 
     # Build the actual operation sequence (non-empty groups only)
     operation_sequence = []
@@ -1799,6 +1795,24 @@ def assert_operation_order(target_scenario: UpgradeScenario, upgrade_result: Lis
             .set_user_kwargs(ops_version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE)
             .set_auxiliary_kwargs(connector_template_list_error=True),
             {
+                EXTENSION_TYPE_OPS: build_extension_props(
+                    EXTENSION_TYPE_OPS, version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE
+                ),
+            },
+        ),
+        (
+            UpgradeScenario("Combined: registry + OPC UA template + secretsync ordering")
+            .set_extension(ext_type=EXTENSION_TYPE_PLATFORM, ext_vers="1.0.0")
+            .set_extension(ext_type=EXTENSION_TYPE_CM, remove=True)
+            .set_extension(ext_type=EXTENSION_TYPE_OPS, ext_vers="1.4.0")
+            .set_user_kwargs(ops_version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE)
+            .set_auxiliary_kwargs(
+                secretsync_migration_needed=True,
+                default_registry_exists=False,
+                opcua_connector_template_exists=False,
+            ),
+            {
+                EXTENSION_TYPE_CM: build_extension_props(EXTENSION_TYPE_CM, version=BUILT_IN_VALUE),
                 EXTENSION_TYPE_OPS: build_extension_props(
                     EXTENSION_TYPE_OPS, version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE
                 ),
@@ -2658,3 +2672,23 @@ def test_spc_resource_id_extraction(mocked_cmd: Mock):
     assert manager3.spc_opcua is None
     assert manager3.spc_default is None
     assert manager3.has_v1_spc() is False
+
+
+def test_opcua_connector_template_gate_vs_pinned_manifest():
+    """Tripwire tying the OPC UA backfill gate to the CLI's pinned manifest version.
+
+    The default `az iot ops upgrade` (no --ops-version) resolves the pinned
+    TEMPLATE_BLUEPRINT_INSTANCE iotOperations version as the target, so the backfill only
+    activates once that pinned version reaches MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE.
+    While the pinned version is below the gate, the backfill is intentionally dormant on the
+    default path. This test fails the moment the pinned version crosses the gate so the release
+    owner confirms the backfill is meant to be active and adds default-path coverage.
+    """
+    pinned = TEMPLATE_BLUEPRINT_INSTANCE.content["variables"]["VERSIONS"]["iotOperations"]
+    if semver.parse(pinned) >= semver.parse(MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE):
+        pytest.fail(
+            f"Pinned iotOperations manifest ({pinned}) has reached the OPC UA connector template "
+            f"gate ({MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE}). A default upgrade now "
+            "triggers the backfill: confirm this is intended, add default-path (no --ops-version) "
+            "coverage, and update or remove this tripwire."
+        )
