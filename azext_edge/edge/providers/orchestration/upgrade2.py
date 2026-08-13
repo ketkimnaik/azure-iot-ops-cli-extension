@@ -38,6 +38,7 @@ from .common import (
     MIN_INSTANCE_VERSION_V1_FOR_V2_UPGRADE,
     MIN_INSTANCE_VERSION_V2,
     OPCUA_CONNECTOR_ENDPOINT_TYPE,
+    OPCUA_CONNECTOR_TEMPLATE_NAME_PREFIX,
     OPCUA_CONNECTOR_VERSION,
     PROVISIONING_STATE_SUCCESS,
     ConfigSyncModeType,
@@ -206,8 +207,8 @@ class UpgradeManager:
                 instance_name=self.instance_name, resource_group_name=self.resource_group_name
             )
             for template in existing_templates:
-                if (template.get("connectorType") or "").lower() == OPCUA_CONNECTOR_ENDPOINT_TYPE.lower():
-                    logger.debug("OPC UA connector template already exists.")
+                if (template.get("name") or "").lower().startswith(OPCUA_CONNECTOR_TEMPLATE_NAME_PREFIX):
+                    logger.debug("Default OPC UA connector template already exists.")
                     return False
             return True
         except HttpResponseError as e:
