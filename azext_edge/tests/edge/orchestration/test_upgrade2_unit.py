@@ -29,6 +29,7 @@ from azext_edge.edge.providers.orchestration.common import (
     MIN_INSTANCE_VERSION_FOR_CM_MIGRATE,
     MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE,
     OPCUA_CONNECTOR_ENDPOINT_TYPE,
+    OPCUA_CONNECTOR_TEMPLATE_NAME_PREFIX,
     OPCUA_CONNECTOR_VERSION,
     PROVISIONING_STATE_FAILED,
     PROVISIONING_STATE_SUCCESS,
@@ -150,11 +151,17 @@ def expects_connector_template_creation(target_scenario: "UpgradeScenario") -> b
     # A list error is swallowed, so no creation is attempted.
     if aux.get("connector_template_list_error"):
         return False
-    # The template is satisfied only if it exists AND provisioned successfully; a failed template
-    # is repaired on re-run.
+    # Satisfied only if a prefix-named template exists and is not in a terminal failed state; a
+    # failed template is repaired, and an OPC UA template under a non-adopt name is not counted.
     exists = aux.get("opcua_connector_template_exists", True)
+    name = aux.get("opcua_connector_template_name", expected_default_opcua_template["name"])
     state = aux.get("opcua_connector_template_provisioning_state", PROVISIONING_STATE_SUCCESS)
-    if exists and state.lower() == PROVISIONING_STATE_SUCCESS.lower():
+    satisfied = (
+        exists
+        and name.lower().startswith(OPCUA_CONNECTOR_TEMPLATE_NAME_PREFIX)
+        and state.lower() != PROVISIONING_STATE_FAILED.lower()
+    )
+    if satisfied:
         return False
     # A default upgrade (no --ops-version) resolves the pinned manifest as the target.
     target_version = target_scenario.user_kwargs.get("ops_version") or PINNED_IOTOPS_VERSION
@@ -789,6 +796,7 @@ class UpgradeScenario:
 
         template_list_error = self.aux_kwargs.get("connector_template_list_error", False)
         opcua_exists = self.aux_kwargs.get("opcua_connector_template_exists", True)
+        opcua_name = self.aux_kwargs.get("opcua_connector_template_name", expected_default_opcua_template["name"])
         opcua_state = self.aux_kwargs.get("opcua_connector_template_provisioning_state", PROVISIONING_STATE_SUCCESS)
 
         if template_list_error:
@@ -803,7 +811,8 @@ class UpgradeScenario:
             existing_templates = []
             if opcua_exists:
                 template = deepcopy(expected_default_opcua_template)
-                template["id"] = f"{base_list_url}/{template['name']}"
+                template["name"] = opcua_name
+                template["id"] = f"{base_list_url}/{opcua_name}"
                 template["properties"]["provisioningState"] = opcua_state
                 existing_templates.append(template)
 
@@ -1805,6 +1814,34 @@ def assert_operation_order(target_scenario: UpgradeScenario, upgrade_result: Lis
             },
         ),
         (
+            UpgradeScenario("OPC UA Template: Create when existing template lacks adopt prefix")
+            .set_extension(ext_type=EXTENSION_TYPE_OPS, ext_vers="1.4.0")
+            .set_user_kwargs(ops_version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE)
+            .set_auxiliary_kwargs(
+                opcua_connector_template_exists=True,
+                opcua_connector_template_name="my-custom-opcua-template",
+            ),
+            {
+                EXTENSION_TYPE_OPS: build_extension_props(
+                    EXTENSION_TYPE_OPS, version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE
+                ),
+            },
+        ),
+        (
+            UpgradeScenario("OPC UA Template: Skip when existing template is provisioning (transient)")
+            .set_extension(ext_type=EXTENSION_TYPE_OPS, ext_vers="1.4.0")
+            .set_user_kwargs(ops_version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE)
+            .set_auxiliary_kwargs(
+                opcua_connector_template_exists=True,
+                opcua_connector_template_provisioning_state="Accepted",
+            ),
+            {
+                EXTENSION_TYPE_OPS: build_extension_props(
+                    EXTENSION_TYPE_OPS, version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE
+                ),
+            },
+        ),
+        (
             UpgradeScenario("OPC UA Template: Skip creation when template already exists")
             .set_extension(ext_type=EXTENSION_TYPE_OPS, ext_vers="1.4.0")
             .set_user_kwargs(ops_version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE)
@@ -2721,4 +2758,26 @@ def test_opcua_connector_template_backfill_active_by_default():
         f"Pinned iotOperations manifest ({PINNED_IOTOPS_VERSION}) is below the OPC UA connector template "
         f"gate ({MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE}); a default upgrade would skip the "
         "backfill. Re-align the gate or the manifest."
+    )
+
+
+def test_opcua_connector_version_matches_template_tag():
+    """Guard that the upgrade-side OPCUA_CONNECTOR_VERSION matches the tag stamped by the template.
+
+    `az iot ops create` stamps the connectors tag from the OPCUA_CONNECTOR_VERSION ARM variable in
+    TEMPLATE_BLUEPRINT_INSTANCE, while `az iot ops upgrade` stamps the OPCUA_CONNECTOR_VERSION
+    constant. Nothing else couples them, so this fails if a template regeneration bumps one without
+    the other (which would otherwise stamp two different tags on the same release).
+    """
+    import re
+
+    opcua_var = TEMPLATE_BLUEPRINT_INSTANCE.content["variables"].get("OPCUA_CONNECTOR_VERSION")
+    assert opcua_var, "OPCUA_CONNECTOR_VERSION variable missing from the instance template."
+    # The connectors tag is the coalesce fallback literal, i.e. the last single-quoted token.
+    quoted_literals = re.findall(r"'([^']*)'", opcua_var)
+    template_tag = quoted_literals[-1] if quoted_literals else None
+    assert template_tag == OPCUA_CONNECTOR_VERSION, (
+        f"OPCUA_CONNECTOR_VERSION constant ({OPCUA_CONNECTOR_VERSION}) does not match the connectors "
+        f"tag stamped by the instance template ({template_tag}); update the constant during the "
+        "release bump so create and upgrade stamp the same tag."
     )
