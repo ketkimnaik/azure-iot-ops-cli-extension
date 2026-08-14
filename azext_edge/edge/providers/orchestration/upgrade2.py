@@ -199,13 +199,14 @@ class UpgradeManager:
             logger.debug(f"Error checking registry endpoints: {e}")
             return False
 
-    def _check_opcua_connector_template_needed(self) -> bool:
-        """Return True if the default OPC UA connector template is missing or failed.
+    def _check_opcua_connector_template_needed(self) -> Tuple[bool, Optional[str]]:
+        """Return (needed, repair_name) for the default OPC UA connector template.
 
         The OPC UA supervisor requires a default ``akriConnectorTemplates`` resource (2608+) that
         no CLI install path created historically. A prefix-matching template that exists but is in
-        a terminal ``Failed`` state is repaired in place by reusing its name; transient states
-        (e.g. Accepted/Updating/Deleting) are left alone to avoid racing an in-flight provisioning.
+        a terminal ``Failed`` state is repaired in place by reusing its name (``repair_name``);
+        transient states (e.g. Accepted/Updating/Deleting) are left alone to avoid racing an
+        in-flight provisioning.
         """
         self._opcua_template_name_to_repair = None
         try:
@@ -219,14 +220,14 @@ class UpgradeManager:
                     # Repair the existing resource in place by reusing its name.
                     self._opcua_template_name_to_repair = template.get("name")
                     logger.debug("Default OPC UA connector template exists but failed; will repair in place.")
-                    return True
+                    return True, self._opcua_template_name_to_repair
                 # Succeeded or a transient state: leave it alone.
                 logger.debug("Default OPC UA connector template already exists.")
-                return False
-            return True
+                return False, None
+            return True, None
         except HttpResponseError as e:
             logger.debug(f"Error checking OPC UA connector template: {e}")
-            return False
+            return False, None
 
     def _create_default_opcua_connector_template(self, headers: dict) -> dict:
         return self.connector_templates.create_default_opcua_template(
@@ -660,14 +661,26 @@ def render_upgrade_table(upgrade_state: "ClusterUpgradeState"):  # noqa: C901
         # Add OPC UA connector template row if needed
         if upgrade_state.connector_template_needed:
             try:
-                table.add_row(
-                    "opc-ua connector template",
-                    "[dim]Not configured[/dim]",
-                    "[green]Created[/green]",
-                    f"[green]•[/green] Create default OPC UA connector template\n"
-                    f"[green]•[/green] Endpoint: [bold]{OPCUA_CONNECTOR_ENDPOINT_TYPE}[/bold]\n"
-                    f"[green]•[/green] Version: [bold]{OPCUA_CONNECTOR_VERSION}[/bold]",
-                )
+                repair_name = getattr(upgrade_state, "connector_template_repair_name", None)
+                if repair_name:
+                    table.add_row(
+                        "opc-ua connector template",
+                        f"[bold]{repair_name}[/bold]\n[red]Failed[/red]",
+                        "[yellow]Replaced[/yellow]",
+                        f"[yellow]•[/yellow] Replace failed template [bold]{repair_name}[/bold]\n"
+                        f"[yellow]•[/yellow] Existing template settings are reset to defaults\n"
+                        f"[green]•[/green] Endpoint: [bold]{OPCUA_CONNECTOR_ENDPOINT_TYPE}[/bold]\n"
+                        f"[green]•[/green] Version: [bold]{OPCUA_CONNECTOR_VERSION}[/bold]",
+                    )
+                else:
+                    table.add_row(
+                        "opc-ua connector template",
+                        "[dim]Not configured[/dim]",
+                        "[green]Created[/green]",
+                        f"[green]•[/green] Create default OPC UA connector template\n"
+                        f"[green]•[/green] Endpoint: [bold]{OPCUA_CONNECTOR_ENDPOINT_TYPE}[/bold]\n"
+                        f"[green]•[/green] Version: [bold]{OPCUA_CONNECTOR_VERSION}[/bold]",
+                    )
                 table.add_section()
             except Exception as e:
                 logger.debug(f"Error adding connector template row: {e}")
@@ -752,6 +765,7 @@ class ClusterUpgradeState:
         self.force = force
         self.no_cm_install = no_cm_install
         self.semver = scoped_semver_import()
+        self.connector_template_repair_name = None
         self.extension_upgrades = self._refresh_upgrade_state()
         self.instance_upgrade = self._check_instance_upgrade()
         self.registry_endpoint_needed = self._check_registry_endpoint_needed()
@@ -852,17 +866,21 @@ class ClusterUpgradeState:
         return False
 
     def _check_connector_template_needed(self) -> bool:
-        """Check if the default OPC UA connector template needs to be created.
+        """Check if the default OPC UA connector template needs to be created or repaired.
 
         Returns True when the target IoT Operations version is at/above
-        MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE and the template does not yet exist.
+        MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE and the template is missing or failed.
+        When repairing a failed template, ``connector_template_repair_name`` holds its name.
         """
+        self.connector_template_repair_name = None
 
         if not self._is_target_version_at_least(MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE):
             return False
 
         if self.connector_template_check:
-            return self.connector_template_check()
+            needed, repair_name = self.connector_template_check()
+            self.connector_template_repair_name = repair_name
+            return needed
 
         return False
 

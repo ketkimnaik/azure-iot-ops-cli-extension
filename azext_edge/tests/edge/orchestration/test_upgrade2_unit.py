@@ -1805,6 +1805,9 @@ def assert_operation_order(target_scenario: UpgradeScenario, upgrade_result: Lis
             .set_user_kwargs(ops_version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE)
             .set_auxiliary_kwargs(
                 opcua_connector_template_exists=True,
+                # A prefix-matching name the CLI's sha256 4-hex suffix could never derive, so the
+                # assertion below only passes if the repair reuses this discovered ARM name.
+                opcua_connector_template_name="azureiotoperationsconnectorforopcua-repairtarget",
                 opcua_connector_template_provisioning_state=PROVISIONING_STATE_FAILED,
             ),
             {
@@ -2345,6 +2348,39 @@ def assert_secretsync_migration(target_scenario: UpgradeScenario):
     assert len(tracker["delete_spc"]) == 1, f"Expected 1 DELETE SPC call, got {len(tracker['delete_spc'])}"
 
 
+def assert_connector_template_result(target_scenario: UpgradeScenario, connector_templates: List[dict]):
+    """Validate OPC UA connector template creation/repair in the upgrade result."""
+    if not expects_connector_template_creation(target_scenario):
+        assert not connector_templates, f"Unexpected connector template(s) in results. Found {len(connector_templates)}"
+        return
+
+    assert connector_templates, "Expected OPC UA connector template creation but none found in results"
+    assert len(connector_templates) == 1, f"Expected exactly 1 connector template, found {len(connector_templates)}"
+    template = connector_templates[0]
+
+    endpoint_types = template["properties"]["deviceInboundEndpointTypes"]
+    assert endpoint_types[0]["endpointType"] == OPCUA_CONNECTOR_ENDPOINT_TYPE
+    image_settings = template["properties"]["runtimeConfiguration"]["managedConfigurationSettings"][
+        "imageConfigurationSettings"
+    ]
+    assert image_settings["imageName"] == "azureiotoperations/aio-connectors/supervisor"
+    assert image_settings["tagDigestSettings"]["tag"] == OPCUA_CONNECTOR_VERSION
+
+    # When repairing a discovered failed template, the create must reuse that exact ARM name
+    # rather than deriving a new CLI name (otherwise it would orphan the failed resource).
+    aux = target_scenario.aux_kwargs
+    is_repair = (
+        aux.get("opcua_connector_template_exists")
+        and (aux.get("opcua_connector_template_provisioning_state") or "").lower() == PROVISIONING_STATE_FAILED.lower()
+        and (aux.get("opcua_connector_template_name") or "").lower().startswith(OPCUA_CONNECTOR_TEMPLATE_NAME_PREFIX)
+    )
+    if is_repair:
+        assert template["name"] == aux["opcua_connector_template_name"], (
+            f"Repair must reuse the discovered template name '{aux['opcua_connector_template_name']}', "
+            f"got '{template['name']}'"
+        )
+
+
 def assert_result(
     target_scenario: UpgradeScenario, upgrade_result: List[dict], expected_types: Optional[Dict[str, dict]] = None
 ):
@@ -2445,24 +2481,7 @@ def assert_result(
     else:
         assert not registry_endpoints, f"Unexpected registry endpoint(s) in results. Found {len(registry_endpoints)}"
 
-    # Validate OPC UA connector template creation
-    if expects_connector_template_creation(target_scenario):
-        assert connector_templates, "Expected OPC UA connector template creation but none found in results"
-        assert (
-            len(connector_templates) == 1
-        ), f"Expected exactly 1 connector template, found {len(connector_templates)}"
-        template = connector_templates[0]
-        endpoint_types = template["properties"]["deviceInboundEndpointTypes"]
-        assert endpoint_types[0]["endpointType"] == OPCUA_CONNECTOR_ENDPOINT_TYPE
-        image_settings = template["properties"]["runtimeConfiguration"]["managedConfigurationSettings"][
-            "imageConfigurationSettings"
-        ]
-        assert image_settings["imageName"] == "azureiotoperations/aio-connectors/supervisor"
-        assert image_settings["tagDigestSettings"]["tag"] == OPCUA_CONNECTOR_VERSION
-    else:
-        assert (
-            not connector_templates
-        ), f"Unexpected connector template(s) in results. Found {len(connector_templates)}"
+    assert_connector_template_result(target_scenario, connector_templates)
 
     # Validate secretsync migration
     if expects_secretsync_migration(target_scenario):
