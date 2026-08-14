@@ -207,9 +207,13 @@ class UpgradeManager:
                 instance_name=self.instance_name, resource_group_name=self.resource_group_name
             )
             for template in existing_templates:
-                if (template.get("name") or "").lower().startswith(OPCUA_CONNECTOR_TEMPLATE_NAME_PREFIX):
+                if not (template.get("name") or "").lower().startswith(OPCUA_CONNECTOR_TEMPLATE_NAME_PREFIX):
+                    continue
+                # A template that exists but did not provision successfully still needs repair.
+                if (template.get("provisioningState") or "").lower() == PROVISIONING_STATE_SUCCESS.lower():
                     logger.debug("Default OPC UA connector template already exists.")
                     return False
+                logger.debug("Default OPC UA connector template exists but has a non-success provisioning state.")
             return True
         except HttpResponseError as e:
             logger.debug(f"Error checking OPC UA connector template: {e}")

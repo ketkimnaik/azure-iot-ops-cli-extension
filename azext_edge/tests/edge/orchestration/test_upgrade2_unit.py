@@ -114,6 +114,8 @@ expected_default_opcua_template = {
 
 # Fine in testing context.
 semver = scoped_semver_import()
+# The CLI's pinned iotOperations target; a default upgrade (no --ops-version) resolves this.
+PINNED_IOTOPS_VERSION = TEMPLATE_BLUEPRINT_INSTANCE.content["variables"]["VERSIONS"]["iotOperations"]
 
 
 def build_spc_resource_id(resource_group_name: str, spc_name: str) -> str:
@@ -142,12 +144,21 @@ def expects_registry_creation(target_scenario: "UpgradeScenario") -> bool:
 
 
 def expects_connector_template_creation(target_scenario: "UpgradeScenario") -> bool:
-    return (
-        hasattr(target_scenario, "aux_kwargs")
-        and target_scenario.aux_kwargs.get("opcua_connector_template_exists") is False
-        and semver.parse(target_scenario.user_kwargs.get("ops_version", ""))
-        >= semver.parse(MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE)
-    )
+    if not hasattr(target_scenario, "aux_kwargs"):
+        return False
+    aux = target_scenario.aux_kwargs
+    # A list error is swallowed, so no creation is attempted.
+    if aux.get("connector_template_list_error"):
+        return False
+    # The template is satisfied only if it exists AND provisioned successfully; a failed template
+    # is repaired on re-run.
+    exists = aux.get("opcua_connector_template_exists", True)
+    state = aux.get("opcua_connector_template_provisioning_state", PROVISIONING_STATE_SUCCESS)
+    if exists and state.lower() == PROVISIONING_STATE_SUCCESS.lower():
+        return False
+    # A default upgrade (no --ops-version) resolves the pinned manifest as the target.
+    target_version = target_scenario.user_kwargs.get("ops_version") or PINNED_IOTOPS_VERSION
+    return semver.parse(target_version) >= semver.parse(MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE)
 
 
 def expects_secretsync_migration(target_scenario: "UpgradeScenario") -> bool:
@@ -778,6 +789,7 @@ class UpgradeScenario:
 
         template_list_error = self.aux_kwargs.get("connector_template_list_error", False)
         opcua_exists = self.aux_kwargs.get("opcua_connector_template_exists", True)
+        opcua_state = self.aux_kwargs.get("opcua_connector_template_provisioning_state", PROVISIONING_STATE_SUCCESS)
 
         if template_list_error:
             mocked_responses.add(
@@ -792,6 +804,7 @@ class UpgradeScenario:
             if opcua_exists:
                 template = deepcopy(expected_default_opcua_template)
                 template["id"] = f"{base_list_url}/{template['name']}"
+                template["properties"]["provisioningState"] = opcua_state
                 existing_templates.append(template)
 
             mocked_responses.add(
@@ -1770,6 +1783,28 @@ def assert_operation_order(target_scenario: UpgradeScenario, upgrade_result: Lis
             },
         ),
         (
+            UpgradeScenario("OPC UA Template: Create on default upgrade (no --ops-version)")
+            .set_extension(ext_type=EXTENSION_TYPE_OPS, ext_vers="1.4.0")
+            .set_auxiliary_kwargs(opcua_connector_template_exists=False),
+            {
+                EXTENSION_TYPE_OPS: build_extension_props(EXTENSION_TYPE_OPS, version=BUILT_IN_VALUE),
+            },
+        ),
+        (
+            UpgradeScenario("OPC UA Template: Repair when existing template failed to provision")
+            .set_extension(ext_type=EXTENSION_TYPE_OPS, ext_vers="1.4.0")
+            .set_user_kwargs(ops_version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE)
+            .set_auxiliary_kwargs(
+                opcua_connector_template_exists=True,
+                opcua_connector_template_provisioning_state=PROVISIONING_STATE_FAILED,
+            ),
+            {
+                EXTENSION_TYPE_OPS: build_extension_props(
+                    EXTENSION_TYPE_OPS, version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE
+                ),
+            },
+        ),
+        (
             UpgradeScenario("OPC UA Template: Skip creation when template already exists")
             .set_extension(ext_type=EXTENSION_TYPE_OPS, ext_vers="1.4.0")
             .set_user_kwargs(ops_version=MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE)
@@ -2674,21 +2709,16 @@ def test_spc_resource_id_extraction(mocked_cmd: Mock):
     assert manager3.has_v1_spc() is False
 
 
-def test_opcua_connector_template_gate_vs_pinned_manifest():
-    """Tripwire tying the OPC UA backfill gate to the CLI's pinned manifest version.
+def test_opcua_connector_template_backfill_active_by_default():
+    """Guard the alignment between the OPC UA backfill gate and the pinned manifest version.
 
-    The default `az iot ops upgrade` (no --ops-version) resolves the pinned
-    TEMPLATE_BLUEPRINT_INSTANCE iotOperations version as the target, so the backfill only
-    activates once that pinned version reaches MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE.
-    While the pinned version is below the gate, the backfill is intentionally dormant on the
-    default path. This test fails the moment the pinned version crosses the gate so the release
-    owner confirms the backfill is meant to be active and adds default-path coverage.
+    A default `az iot ops upgrade` (no --ops-version) resolves the pinned
+    TEMPLATE_BLUEPRINT_INSTANCE iotOperations version as the target, so the backfill is active by
+    default only while that pinned version is at/above MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE.
+    This fails if a manifest regression drops below the gate and silently makes the backfill inert.
     """
-    pinned = TEMPLATE_BLUEPRINT_INSTANCE.content["variables"]["VERSIONS"]["iotOperations"]
-    if semver.parse(pinned) >= semver.parse(MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE):
-        pytest.fail(
-            f"Pinned iotOperations manifest ({pinned}) has reached the OPC UA connector template "
-            f"gate ({MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE}). A default upgrade now "
-            "triggers the backfill: confirm this is intended, add default-path (no --ops-version) "
-            "coverage, and update or remove this tripwire."
-        )
+    assert semver.parse(PINNED_IOTOPS_VERSION) >= semver.parse(MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE), (
+        f"Pinned iotOperations manifest ({PINNED_IOTOPS_VERSION}) is below the OPC UA connector template "
+        f"gate ({MIN_INSTANCE_VERSION_FOR_OPCUA_CONNECTOR_TEMPLATE}); a default upgrade would skip the "
+        "backfill. Re-align the gate or the manifest."
+    )

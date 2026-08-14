@@ -296,8 +296,9 @@ class ConnectorTemplates(Queryable):
         Build the default OPC UA connector template name.
 
         The OPC UA supervisor adopts a template by the ``azureiotoperationsconnectorforopcua-``
-        prefix, so the suffix only needs to be stable per instance. A short deterministic hash of
-        the instance name is used.
+        prefix, so only the prefix matters for adoption and the suffix just needs to be stable per
+        instance. A short deterministic hash of the instance name is used here; the product Bicep
+        derives its suffix from the instance resource id, but the exact suffix is not significant.
         """
         from ..common import OPCUA_CONNECTOR_TEMPLATE_NAME_PREFIX
 
