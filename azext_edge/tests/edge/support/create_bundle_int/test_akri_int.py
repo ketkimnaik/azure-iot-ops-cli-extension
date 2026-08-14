@@ -18,6 +18,7 @@ AKRI_PREFIXES = [
     "aio-akri",
     "aiomedia",
     "aioonvif",
+    "azureiotoperationsconnectorforopcua",
     "media-connector-template",
     "onvif-connector-template",
     "rest-connector-template",

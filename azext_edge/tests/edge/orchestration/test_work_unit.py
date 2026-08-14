@@ -55,6 +55,7 @@ from azext_edge.edge.providers.orchestration.rp_namespace import (
     RP_NAMESPACE_OPTIONAL_SET,
     RP_NAMESPACE_SET,
 )
+from azext_edge.edge.providers.orchestration.resources.connector_templates import ConnectorTemplates
 from azext_edge.edge.providers.orchestration.targets import (
     InstancePhase,
     get_default_cl_name,
@@ -1656,6 +1657,5 @@ def assert_instance_deployment_body(body_str: str, target_scenario: dict, phase:
         assert resources["dataflowProfile"]["name"] == f"{instance_name_lowered}/{DEFAULT_DATAFLOW_PROFILE}"
         assert resources["dataflowEndpoint"]["name"] == f"{instance_name_lowered}/{DEFAULT_DATAFLOW_ENDPOINT}"
         assert resources["artifactRegistryEndpoint"]["name"] == f"{instance_name_lowered}/{DEFAULT_ARTIFACT_REGISTRY}"
-        assert resources["opcUaConnectorTemplate"]["name"] == (
-            f"[format('{instance_name_lowered}/{{0}}', variables('opcUaConnectorTemplateName'))]"
-        )
+        expected_opcua_template = ConnectorTemplates.default_opcua_template_name(instance_name_lowered)
+        assert resources["opcUaConnectorTemplate"]["name"] == f"{instance_name_lowered}/{expected_opcua_template}"

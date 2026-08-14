@@ -27,6 +27,7 @@ from ..orchestration.common import (
     TRUST_SETTING_KEYS,
 )
 from ..orchestration.resources.brokers import Brokers
+from ..orchestration.resources.connector_templates import ConnectorTemplates
 from ..orchestration.resources.instances import parse_feature_kvp_nargs
 from .template import (
     TEMPLATE_BLUEPRINT_ENABLEMENT,
@@ -291,7 +292,7 @@ class InitTargets:
             dataflow_endpoint["name"] = f"{self.instance_name}/{DEFAULT_DATAFLOW_ENDPOINT}"
             artifact_registry_endpoint["name"] = f"{self.instance_name}/{DEFAULT_ARTIFACT_REGISTRY}"
             opcua_connector_template["name"] = (
-                f"[format('{self.instance_name}/{{0}}', variables('opcUaConnectorTemplateName'))]"
+                f"{self.instance_name}/{ConnectorTemplates.default_opcua_template_name(self.instance_name)}"
             )
 
             template.content["outputs"]["aio"]["value"]["name"] = self.instance_name
