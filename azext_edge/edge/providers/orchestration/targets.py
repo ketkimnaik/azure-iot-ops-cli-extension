@@ -275,6 +275,7 @@ class InitTargets:
         dataflow_profile = template.get_resource_by_key("dataflowProfile")
         dataflow_endpoint = template.get_resource_by_key("dataflowEndpoint")
         artifact_registry_endpoint = template.get_resource_by_key("artifactRegistryEndpoint")
+        opcua_connector_template = template.get_resource_by_key("opcUaConnectorTemplate")
 
         instance["properties"] = get_default_instance_config(
             description=self.instance_description,
@@ -289,6 +290,9 @@ class InitTargets:
             dataflow_profile["name"] = f"{self.instance_name}/{DEFAULT_DATAFLOW_PROFILE}"
             dataflow_endpoint["name"] = f"{self.instance_name}/{DEFAULT_DATAFLOW_ENDPOINT}"
             artifact_registry_endpoint["name"] = f"{self.instance_name}/{DEFAULT_ARTIFACT_REGISTRY}"
+            opcua_connector_template["name"] = (
+                f"[format('{self.instance_name}/{{0}}', variables('opcUaConnectorTemplateName'))]"
+            )
 
             template.content["outputs"]["aio"]["value"]["name"] = self.instance_name
 

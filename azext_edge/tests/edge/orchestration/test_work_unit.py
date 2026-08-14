@@ -1656,3 +1656,6 @@ def assert_instance_deployment_body(body_str: str, target_scenario: dict, phase:
         assert resources["dataflowProfile"]["name"] == f"{instance_name_lowered}/{DEFAULT_DATAFLOW_PROFILE}"
         assert resources["dataflowEndpoint"]["name"] == f"{instance_name_lowered}/{DEFAULT_DATAFLOW_ENDPOINT}"
         assert resources["artifactRegistryEndpoint"]["name"] == f"{instance_name_lowered}/{DEFAULT_ARTIFACT_REGISTRY}"
+        assert resources["opcUaConnectorTemplate"]["name"] == (
+            f"[format('{instance_name_lowered}/{{0}}', variables('opcUaConnectorTemplateName'))]"
+        )
