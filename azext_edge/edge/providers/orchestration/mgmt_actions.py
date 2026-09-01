@@ -1417,7 +1417,7 @@ class MgmtActions(EventGridProviderBase):
         result["exists"] = all_exists
         return result
 
-    def _setup_eg_dataflow_endpoint(
+    def _setup_eg_dataflow_endpoint(  # pylint: disable=arguments-renamed
         self,
         eg_ctx: EgNamespaceContext,
         instance_name: str,

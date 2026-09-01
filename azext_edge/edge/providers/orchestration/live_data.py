@@ -472,10 +472,11 @@ class LiveData(EventGridProviderBase):
     ) -> None:
         """Disable Live Data for an IoT Operations instance.
 
-        Removes this instance's observability endpoint entry first (per-instance disable),
-        then tears down the dedicated dataflow profile, EG dataflow endpoint, and topic
-        space. Namespace-scoped role assignments are preserved; topic-space-scoped roles
-        are removed together with the topic space.
+        Tears down the dedicated dataflow profile, EG dataflow endpoint, and topic space,
+        then removes this instance's observability endpoint entry from the Device Registry
+        namespace last so an interrupted disable can be safely re-run. Namespace-scoped
+        role assignments are preserved; topic-space-scoped roles are removed together with
+        the topic space.
         """
         analyzing_cats = {"Analyzing": ["Instance & ADR namespace", "Resource probing"]}
         with WorkflowDisplay(
@@ -608,7 +609,7 @@ class LiveData(EventGridProviderBase):
         no_progress: Optional[bool] = None,
         **kwargs,
     ) -> None:
-        """Execute the teardown of disable(): remove endpoint entry first, then resources."""
+        """Execute the teardown of disable(): delete resources first, then remove the endpoint entry last."""
         eg_ns_label = f"Event Grid Namespace ({eg_ctx.namespace_name})" if eg_ctx else "Event Grid Namespace"
         cat_adr = f"Device Registry Namespace ({adr_namespace_name})"
         cat_aio = f"IoT Operations Instance ({name})"

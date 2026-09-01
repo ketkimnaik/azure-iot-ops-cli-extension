@@ -4,7 +4,7 @@
 # Licensed under the MIT License. See License file in the project root for license information.
 # ----------------------------------------------------------------------------------------------
 
-from typing import Callable, Dict, NamedTuple, Optional
+from typing import Any, Callable, Dict, NamedTuple, Optional
 
 from azure.cli.core.azclierror import InvalidArgumentValueError, ValidationError
 from azure.core.exceptions import ResourceNotFoundError
@@ -58,6 +58,10 @@ class EventGridProviderBase(Queryable):
     are responsible for constructing the ``eventgrid_mgmt_client``, ``iotops_mgmt_client``,
     ``resource_client``, and ``permission_manager`` attributes these helpers rely on.
     """
+
+    # Constructed by subclasses in __init__; declared here so shared helpers can reference them.
+    iotops_mgmt_client: Any
+    permission_manager: Any
 
     def _validate_eg_namespace(
         self,

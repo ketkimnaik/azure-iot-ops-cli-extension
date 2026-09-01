@@ -2526,9 +2526,10 @@ def load_iotops_help():
         type: command
         short-summary: Disable Live Data for an IoT Operations instance.
         long-summary: |
-            Removes this instance's observability endpoint entry from the Device Registry
-            namespace first (the per-instance disable signal), then tears down the dedicated
-            dataflow profile, the EG dataflow endpoint, and the observability topic space.
+            Tears down the dedicated dataflow profile, the EG dataflow endpoint, and the
+            observability topic space, then removes this instance's observability endpoint
+            entry from the Device Registry namespace last so an interrupted disable can be
+            safely re-run.
 
             Namespace-scoped role assignments are preserved; topic-space-scoped role
             assignments are removed together with the topic space.
