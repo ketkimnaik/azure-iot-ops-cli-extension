@@ -1,0 +1,122 @@
+name: Teams notification
+run-name: "Teams notification [${{ inputs.notification-type }}]"
+
+on:
+  workflow_dispatch:
+    inputs:
+      notification-type:
+        description: Notification template to send
+        type: choice
+        required: true
+        options:
+          - test
+          - pr-ready
+          - approval-required
+          - failure
+      cli-version:
+        description: CLI version associated with the notification
+        type: string
+        required: false
+        default: ""
+      target-url:
+        description: Related PR or workflow URL in this repository
+        type: string
+        required: false
+        default: ""
+      details:
+        description: Short notification details
+        type: string
+        required: false
+        default: ""
+
+permissions: {}
+
+jobs:
+  notify:
+    name: Post to Zoro - CLI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate inputs and build adaptive card
+        env:
+          NOTIFICATION_TYPE: ${{ inputs.notification-type }}
+          CLI_VERSION: ${{ inputs.cli-version }}
+          TARGET_URL: ${{ inputs.target-url }}
+          DETAILS: ${{ inputs.details }}
+        run: |
+          case "$NOTIFICATION_TYPE" in
+            test)
+              title="Azure IoT Operations CLI notification test"
+              summary="The GitHub Actions to Teams integration is working. No action is required."
+              ;;
+            pr-ready)
+              title="Alpha CLI ${CLI_VERSION} preparation PR is ready"
+              summary="Please review and merge the alpha preparation PR."
+              ;;
+            approval-required)
+              title="Alpha CLI ${CLI_VERSION} requires production approval"
+              summary="Integration tests passed. The release workflow is waiting for an authorized approver."
+              ;;
+            failure)
+              title="Alpha CLI ${CLI_VERSION} automation stopped"
+              summary="The alpha release workflow stopped and requires investigation."
+              ;;
+            *)
+              echo "Unsupported notification type: $NOTIFICATION_TYPE" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ -n "$TARGET_URL" && ! "$TARGET_URL" =~ ^https://github\.com/Azure/azure-iot-ops-cli-extension/(pull|actions/runs)/[0-9]+([/?#].*)?$ ]]; then
+            echo "target-url must reference a PR or Actions run in Azure/azure-iot-ops-cli-extension." >&2
+            exit 1
+          fi
+
+          if (( ${#CLI_VERSION} > 40 || ${#DETAILS} > 1000 || ${#TARGET_URL} > 500 )); then
+            echo "One or more inputs exceed their allowed length." >&2
+            exit 1
+          fi
+
+          jq -n \
+            --arg title "$title" \
+            --arg summary "$summary" \
+            --arg details "$DETAILS" \
+            --arg target_url "$TARGET_URL" \
+            '{
+              type: "message",
+              attachments: [
+                {
+                  contentType: "application/vnd.microsoft.card.adaptive",
+                  contentUrl: null,
+                  content: {
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    type: "AdaptiveCard",
+                    version: "1.4",
+                    body: [
+                      {type: "TextBlock", size: "Large", weight: "Bolder", wrap: true, text: $title},
+                      {type: "TextBlock", wrap: true, text: $summary},
+                      {type: "TextBlock", wrap: true, text: $details, isVisible: ($details != "")}
+                    ],
+                    actions: (if $target_url == "" then [] else [{type: "Action.OpenUrl", title: "Open in GitHub", url: $target_url}] end)
+                  }
+                }
+              ]
+            }' > payload.json
+
+      - name: Send notification
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          if [[ -z "$TEAMS_WEBHOOK_URL" ]]; then
+            echo "The TEAMS_WEBHOOK_URL repository secret is not configured." >&2
+            exit 1
+          fi
+
+          curl \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --retry 2 \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data-binary @payload.json \
+            "$TEAMS_WEBHOOK_URL"
