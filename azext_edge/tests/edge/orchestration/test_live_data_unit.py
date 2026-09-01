@@ -603,6 +603,7 @@ class TestSetupAdrObservability:
             json=_build_adr_namespace_response(
                 adr_ns, rg, identity_type="SystemAssigned", principal_id="adr-pid",
                 observability_endpoints={cl_id: desired},
+                outbound_identity={"type": "SystemAssigned"},
             ),
             status=200,
         )

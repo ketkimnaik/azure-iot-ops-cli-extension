@@ -63,13 +63,18 @@ def _build_adr_observability_put_payload(adr_namespace: Dict, custom_location_id
     outboundIdentity, management, and messaging from the original namespace.
     """
     properties = adr_namespace.get("properties", {})
-    existing_endpoints = properties.get("observability", {}).get("endpoints", {})
+    observability = properties.get("observability", {})
+    existing_endpoints = observability.get("endpoints", {})
     updated_endpoints = {k: v for k, v in existing_endpoints.items() if k != custom_location_id}
+
+    # Preserve any sibling keys under observability since this is a full PUT.
+    updated_observability = dict(observability)
+    updated_observability["endpoints"] = updated_endpoints
 
     payload: Dict = {
         "location": adr_namespace.get("location", ""),
         "properties": {
-            "observability": {"endpoints": updated_endpoints},
+            "observability": updated_observability,
         },
     }
     if adr_namespace.get("identity"):
@@ -856,6 +861,8 @@ class LiveData(EventGridProviderBase):
         current_endpoint = existing_endpoints.get(custom_location_id)
         endpoint_already_configured = current_endpoint == desired_endpoint
 
+        outbound_identity_already_configured = properties.get("outboundIdentity") == outbound_identity
+
         current_identity = adr_namespace.get("identity", {})
         current_identity_type = (current_identity.get("type") or "").lower()
         sami_already_enabled = current_identity_type == "systemassigned"
@@ -867,7 +874,7 @@ class LiveData(EventGridProviderBase):
         if needs_identity_enable:
             base_payload["identity"] = {"type": "SystemAssigned"}
 
-        if endpoint_already_configured and (not needs_identity_enable):
+        if endpoint_already_configured and outbound_identity_already_configured and (not needs_identity_enable):
             principal_id = self._resolve_outbound_principal(mi_resource, current_identity)
             logger.info(
                 "ADR namespace '%s' already has outbound identity and observability endpoint configured.",
