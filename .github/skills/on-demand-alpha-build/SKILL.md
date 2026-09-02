@@ -1,6 +1,6 @@
 ---
 name: on-demand-alpha-build
-description: "Orchestrate an on-demand Azure IoT Operations CLI alpha release from a chosen azure-iot-operations-tests ref: refresh generated release inputs, create a PR, run integration tests after merge, then start the build and wheel-publish workflow and notify approvers."
+description: "Orchestrate an on-demand Azure IoT Operations CLI alpha release from a chosen azure-iot-operations-tests ref: refresh generated release inputs, create a PR, run integration tests after merge, then start the build and wheel-publish workflow while relying on native GitHub notifications in Teams."
 ---
 
 # On-demand alpha build
@@ -27,10 +27,6 @@ Ask for these at the start. Do not infer or invent them:
 - integration-test scenarios for `.github/workflows/int_test.yml` (default: all scenarios); the workflow must be
    dispatched against the CLI PR base branch after the preparation PR is merged;
 - integration-test resource group and optional runtime arguments, or confirmation to use workflow defaults;
-- notification mode and recipients. The known Teams channel is
-  `https://teams.microsoft.com/l/channel/19%3Af997ad0535d54c53abddabacc24997f1%40thread.tacv2/Zoro%20-%20CLI?groupId=05e2c8a1-69f8-4eb6-831d-097e813d571a&tenantId=72f988bf-86f1-41af-91ab-2d7cd011db47`.
-   Known approval contacts are `zhengzh@microsoft.com` and `Paymaun.Heidari@microsoft.com`. A Teams channel URL is not
-   a posting credential.
 
 Optional resume inputs:
 
@@ -44,12 +40,15 @@ Optional resume inputs:
   succeeded. Show the proposed action and obtain explicit confirmation immediately before each remote write.
 - Never merge the generated PR. A human reviewer owns approval and merge.
 - Never bypass the `production` environment approval in `release_workflow.yml`.
-- Never post to Teams unless an approved posting mechanism is already configured outside chat. Do not request or
-  expose webhook URLs, access tokens, or credentials in chat. Without one, print a ready-to-send message and the
-  channel link.
-- The approved posting mechanism is `.github/workflows/teams_notify.yml`, which reads `TEAMS_WEBHOOK_URL` from the
-   upstream repository's Actions secrets. Dispatch that workflow on a trusted CLI base branch; never read, print,
-   pass as an input, or otherwise handle the webhook URL directly.
+- Teams notifications are provided by the native **Microsoft Teams for GitHub** app after the configured channel is
+   subscribed to `Azure/azure-iot-ops-cli-extension` with the `pulls`, `reviews`, and `workflows` features. Do not
+   create or dispatch a custom notification workflow, request a webhook URL, or require a Teams-related repository
+   secret. The skill emits GitHub events; the installed app owns Teams delivery.
+- Never claim that a Teams notification was delivered. Report the PR or workflow event that should trigger the native
+   app and ask the user to verify the channel when delivery matters. If the app subscription is unavailable, print the
+   ready-to-send fallback message for manual posting in the configured channel. Do not store an internal Teams channel
+   URL or individual approval contacts in this public repository. Resolve approvers from the protected GitHub
+   environment or user input at runtime.
 - Never create a GitHub release for an alpha build. Alpha versions are not public GitHub releases and do not enter
   the public Azure CLI extension index.
 - Preserve unrelated local changes. Stop if any file that the template-sync workflow may edit is already modified.
@@ -110,11 +109,10 @@ Optional resume inputs:
    Include the source ref/commit, release moniker, Bicep compiler version, alpha version, connector tag, behavioral
    changes, redactions or policy overrides, and validation results in the PR body. Request reviewers only when their
    exact GitHub handles were supplied.
-10. Ask for confirmation before sending the review notification. When `.github/workflows/teams_notify.yml` is
-   available on the trusted CLI base branch, dispatch it on that branch with `notification-type=pr-ready`, the CLI
-   version, PR URL, and a concise source/validation summary. Correlate its run using the same timestamp, workflow,
-   branch, event, and actor checks required for integration-test dispatch. Require the notification run to succeed;
-   otherwise print the channel link and this ready-to-send fallback, substituting real values:
+10. Creating the PR emits the `pull_request` event used by the native Microsoft Teams for GitHub app. Report that the
+   event should produce a PR card in the subscribed channel, but do not claim delivery or perform another
+   notification dispatch. Ask the user to verify the channel. Also print this ready-to-send fallback, substituting
+   real values, so it can be posted manually if the native notification is absent:
 
     ```text
     Alpha CLI <CLI_VERSION> preparation PR is ready: <PR_URL>
@@ -140,7 +138,9 @@ Optional resume inputs:
    with `--ref <CLI_BASE_BRANCH>`. The ref must be the preparation PR's merged base branch, not the PR head branch or
    merge ref. Omit `test-scenarios` to run all scenarios; otherwise pass the user-supplied comma-separated list. Pass
    resource group and runtime inputs only when explicitly supplied.
-4. Immediately record the resulting run URL and database ID. Because workflow dispatch does not reliably return the
+4. Immediately record the resulting run URL and database ID. The `workflow_run` event should produce native Teams
+   updates for a channel subscribed to the `workflows` feature; report this expectation without claiming delivery.
+   Because workflow dispatch does not reliably return the
    run ID, correlate only runs created after the dispatch timestamp, on the exact branch, event `workflow_dispatch`,
    workflow file, and authenticated actor. If zero or multiple runs match, stop and ask instead of selecting the
    newest run blindly.
@@ -159,12 +159,12 @@ Optional resume inputs:
    - `upload_wheel=true`.
 3. Trigger `.github/workflows/release_workflow.yml` with those inputs. Correlate and record its run exactly as in
    phase 2; never select a run solely because it is newest.
-4. Watch until the run either completes or reaches the `production` environment approval gate. Never approve it.
-5. At the approval gate, ask for confirmation before notifying the configured approvers. Dispatch
-   `.github/workflows/teams_notify.yml` on the trusted CLI base branch with
-   `notification-type=approval-required`, the CLI version, release run URL, and the successful integration-test run
-   plus approver aliases in `details`. Correlate and require the notification run to succeed. If dispatch or delivery
-   fails, print the channel link and this ready-to-send message:
+4. Watch until the run either completes or reaches the `production` environment approval gate. Never approve it. A
+   channel subscribed to the `workflows` feature should receive the workflow run and approval updates through the
+   native Microsoft Teams for GitHub app.
+5. At the approval gate, report that GitHub emitted the approval event but do not claim Teams delivery. Ask the user
+   to verify the configured channel and print this ready-to-send fallback message for manual posting if the notification is
+   absent:
 
    ```text
    Alpha CLI <CLI_VERSION> release workflow is waiting for production approval: <RUN_URL>
@@ -200,5 +200,6 @@ A successful run reports:
 - PR URL and merge commit;
 - integration-test run URL and scenario conclusions;
 - release workflow URL and upload conclusion;
-- every notification sent or printed;
+- every GitHub event expected to produce a native Teams notification, every delivery verification reported by the
+   user, and every fallback message printed;
 - confirmation that no GitHub release or public-index update was performed.
