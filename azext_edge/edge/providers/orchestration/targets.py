@@ -251,19 +251,24 @@ class InitTargets:
     ) -> Tuple[dict, dict]:
         if not cl_extension_ids:
             cl_extension_ids = []
+        param_to_target = {
+            "clusterName": self.cluster_name,
+            "clusterNamespace": self.cluster_namespace,
+            "clusterLocation": self.location,
+            "customLocationName": self.custom_location_name,
+            "clExtensionIds": cl_extension_ids,
+            "schemaRegistryId": self.schema_registry_resource_id,
+            "adrNamespaceId": self.adr_namespace_resource_id,
+            "defaultDataflowInstanceCount": self.dataflow_profile_instances,
+            "brokerConfig": self.broker_config,
+            "trustConfig": self.trust_config,
+        }
+        # Drive the template's OPC UA connector condition; the instance features are injected
+        # directly (not via the features parameter), so gate on the parameter the condition reads.
+        if self.instance_features and self.instance_features.get("opcua", {}).get("mode") == "Disabled":
+            param_to_target["disableOpcUaFeature"] = True
         template, parameters = self._handle_apply_targets(
-            param_to_target={
-                "clusterName": self.cluster_name,
-                "clusterNamespace": self.cluster_namespace,
-                "clusterLocation": self.location,
-                "customLocationName": self.custom_location_name,
-                "clExtensionIds": cl_extension_ids,
-                "schemaRegistryId": self.schema_registry_resource_id,
-                "adrNamespaceId": self.adr_namespace_resource_id,
-                "defaultDataflowInstanceCount": self.dataflow_profile_instances,
-                "brokerConfig": self.broker_config,
-                "trustConfig": self.trust_config,
-            },
+            param_to_target=param_to_target,
             template_blueprint=TEMPLATE_BLUEPRINT_INSTANCE,
         )
 
