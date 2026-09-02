@@ -495,6 +495,63 @@ def test_init_targets_opcua_mode(target_scenario: dict):
 
 
 @pytest.mark.parametrize(
+    "instance_features",
+    [
+        ["opcua.mode=Disabled"],
+    ],
+)
+def test_init_targets_opcua_disabled_omits_connector_template(instance_features):
+    """When opcua.mode=Disabled, the OPC UA akriConnectorTemplates resource must not be deployed
+    unconditionally. With the feature off the OPC UA supervisor is never deployed, so the
+    akriConnectorTemplates resource never reaches a terminal provisioning state and hangs
+    `az iot ops create`. A correct template either omits the resource or gates it with an ARM
+    condition.
+    """
+    targets = InitTargets(
+        cluster_name=generate_random_string(),
+        resource_group_name=generate_random_string(),
+        schema_registry_resource_id=get_schema_registry_id(),
+        adr_namespace_resource_id=get_ns_resource_id(),
+        instance_name=generate_random_string(),
+        instance_features=instance_features,
+    )
+    extension_ids = [generate_random_string()]
+
+    for phase in (None, InstancePhase.RESOURCES):
+        template, _ = targets.get_ops_instance_template(extension_ids, phase=phase)
+        connector_template = template["resources"].get("opcUaConnectorTemplate")
+        not_deployed = connector_template is None
+        gated = bool(connector_template and connector_template.get("condition"))
+        assert not_deployed or gated, (
+            f"Phase {phase}: opcUaConnectorTemplate is deployed unconditionally while "
+            "opcua.mode=Disabled; expected it to be omitted or gated by an ARM condition."
+        )
+
+
+@pytest.mark.parametrize(
+    "instance_features",
+    [
+        None,
+        ["opcua.mode=Stable"],
+    ],
+)
+def test_init_targets_opcua_enabled_keeps_connector_template(instance_features):
+    """OPC UA enabled (default or Stable) must still deploy the connector template; the disabled
+    guard must not over-remove it.
+    """
+    targets = InitTargets(
+        cluster_name=generate_random_string(),
+        resource_group_name=generate_random_string(),
+        schema_registry_resource_id=get_schema_registry_id(),
+        adr_namespace_resource_id=get_ns_resource_id(),
+        instance_name=generate_random_string(),
+        instance_features=instance_features,
+    )
+    template, _ = targets.get_ops_instance_template([generate_random_string()], phase=InstancePhase.RESOURCES)
+    assert "opcUaConnectorTemplate" in template["resources"]
+
+
+@pytest.mark.parametrize(
     "cm_config, expected_config",
     [
         (None, get_default_cm_config()),
