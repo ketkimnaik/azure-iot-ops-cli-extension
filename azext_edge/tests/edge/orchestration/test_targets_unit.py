@@ -518,13 +518,19 @@ def test_init_targets_opcua_disabled_omits_connector_template(instance_features)
     extension_ids = [generate_random_string()]
 
     for phase in (None, InstancePhase.RESOURCES):
-        template, _ = targets.get_ops_instance_template(extension_ids, phase=phase)
+        template, parameters = targets.get_ops_instance_template(extension_ids, phase=phase)
         connector_template = template["resources"].get("opcUaConnectorTemplate")
         not_deployed = connector_template is None
-        gated = bool(connector_template and connector_template.get("condition"))
+        # If the resource is still present, its ARM condition must be driven off by a supplied
+        # parameter; otherwise the condition defaults to enabled and the template still deploys.
+        gated = bool(
+            connector_template
+            and connector_template.get("condition")
+            and parameters.get("disableOpcUaFeature", {}).get("value") is True
+        )
         assert not_deployed or gated, (
             f"Phase {phase}: opcUaConnectorTemplate is deployed unconditionally while "
-            "opcua.mode=Disabled; expected it to be omitted or gated by an ARM condition."
+            "opcua.mode=Disabled; expected it to be omitted or gated by a driven ARM condition."
         )
 
 

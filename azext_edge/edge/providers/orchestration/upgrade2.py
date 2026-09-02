@@ -209,9 +209,9 @@ class UpgradeManager:
         in-flight provisioning.
         """
         self._opcua_template_name_to_repair = None
-        opcua_mode = (
-            (self.instance_record.get("properties") or {}).get("features", {}).get("opcua", {}).get("mode")
-        )
+        # features (and its nested objects) may be absent or explicitly null on the record.
+        features = (self.instance_record.get("properties") or {}).get("features") or {}
+        opcua_mode = (features.get("opcua") or {}).get("mode")
         # Disabled: no supervisor reconciles the template, so its PUT never reaches a terminal state.
         if opcua_mode == "Disabled":
             return False, None
