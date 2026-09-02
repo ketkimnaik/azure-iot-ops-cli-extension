@@ -27,6 +27,10 @@ scenarios:
     description: "Cloud tests"
     tox_env: python-rpsaas-int
 
+  - name: opcuaoff
+    description: "Create with OPC UA disabled"
+    create_args: "--feature opcua.mode=Disabled"
+
   - name: upgrade
     description: "Upgrade tests"
     tox_env: python-upgrade-int
