@@ -2827,6 +2827,8 @@ def test_check_opcua_connector_template_needed_disabled():
 
     assert needed is False
     assert repair_name is None
+
+
 def build_ext_upgrade_state(
     ext_type: str = EXTENSION_TYPE_CM,
     current_version: Optional[str] = "1.4.73",
