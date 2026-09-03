@@ -27,10 +27,6 @@ scenarios:
     description: "Cloud tests"
     tox_env: python-rpsaas-int
 
-  - name: opcuaoff
-    description: "Create with OPC UA disabled"
-    create_args: "--feature opcua.mode=Disabled"
-
   - name: upgrade
     description: "Upgrade tests"
     tox_env: python-upgrade-int
@@ -42,8 +38,9 @@ scenarios:
     parallel: false
 
   - name: redeploy
-    description: "Redeployment tests"
+    description: "Redeployment tests (OPC UA disabled)"
     test_redeploy: true
+    create_args: "--feature opcua.mode=Disabled"
 
   - name: trustbundle
     description: "Workload identity tests"

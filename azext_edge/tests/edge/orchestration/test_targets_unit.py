@@ -501,11 +501,9 @@ def test_init_targets_opcua_mode(target_scenario: dict):
     ],
 )
 def test_init_targets_opcua_disabled_omits_connector_template(instance_features):
-    """When opcua.mode=Disabled, the OPC UA akriConnectorTemplates resource must not be deployed
-    unconditionally. With the feature off the OPC UA supervisor is never deployed, so the
-    akriConnectorTemplates resource never reaches a terminal provisioning state and hangs
-    `az iot ops create`. A correct template either omits the resource or gates it with an ARM
-    condition.
+    """When opcua.mode=Disabled, the OPC UA akriConnectorTemplates resource must be omitted from
+    the full and RESOURCES templates. With the feature off the OPC UA supervisor is never deployed,
+    so the resource would never reach a terminal provisioning state and would hang `az iot ops create`.
     """
     targets = InitTargets(
         cluster_name=generate_random_string(),
@@ -518,19 +516,9 @@ def test_init_targets_opcua_disabled_omits_connector_template(instance_features)
     extension_ids = [generate_random_string()]
 
     for phase in (None, InstancePhase.RESOURCES):
-        template, parameters = targets.get_ops_instance_template(extension_ids, phase=phase)
-        connector_template = template["resources"].get("opcUaConnectorTemplate")
-        not_deployed = connector_template is None
-        # If the resource is still present, its ARM condition must be driven off by a supplied
-        # parameter; otherwise the condition defaults to enabled and the template still deploys.
-        gated = bool(
-            connector_template
-            and connector_template.get("condition")
-            and parameters.get("disableOpcUaFeature", {}).get("value") is True
-        )
-        assert not_deployed or gated, (
-            f"Phase {phase}: opcUaConnectorTemplate is deployed unconditionally while "
-            "opcua.mode=Disabled; expected it to be omitted or gated by a driven ARM condition."
+        template, _ = targets.get_ops_instance_template(extension_ids, phase=phase)
+        assert "opcUaConnectorTemplate" not in template["resources"], (
+            f"Phase {phase}: opcUaConnectorTemplate must be omitted when opcua.mode=Disabled."
         )
 
 
@@ -553,8 +541,13 @@ def test_init_targets_opcua_enabled_keeps_connector_template(instance_features):
         instance_name=generate_random_string(),
         instance_features=instance_features,
     )
-    template, _ = targets.get_ops_instance_template([generate_random_string()], phase=InstancePhase.RESOURCES)
-    assert "opcUaConnectorTemplate" in template["resources"]
+    extension_ids = [generate_random_string()]
+
+    for phase in (None, InstancePhase.RESOURCES):
+        template, _ = targets.get_ops_instance_template(extension_ids, phase=phase)
+        assert "opcUaConnectorTemplate" in template["resources"], (
+            f"Phase {phase}: opcUaConnectorTemplate must be present when opcua is enabled."
+        )
 
 
 @pytest.mark.parametrize(
