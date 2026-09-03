@@ -600,7 +600,7 @@ After editing:
    echo "===== INSTANCE (azure-iot-operations-instance.bicep) ====="
    jq '{ _generator: .metadata._generator, VERSIONS: .variables.VERSIONS, TRAINS: .variables.TRAINS }' temp-instance.json
 
-  # ---- OPC UA connectors image tag -> constants.OPCUA_CONNECTOR_VERSION (bug 39164109) ----
+  # ---- OPC UA connectors image tag -> common.OPCUA_CONNECTOR_VERSION ----
   # Key-agnostic: the tag lives under a Bicep-mangled loadJsonContent variable ($fxv#N),
   # so search all objects for connectors.image.tag instead of hard-coding the key name.
   echo
