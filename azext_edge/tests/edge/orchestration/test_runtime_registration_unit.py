@@ -19,12 +19,15 @@ from azure.cli.core.commands.validators import IterateValue
 from azure.cli.core.parser import AzCliCommandParser
 from knack.arguments import CLIArgumentType, ignore_type
 from knack.cli import CLI
-from knack.events import EVENT_INVOKER_POST_PARSE_ARGS
+from knack.events import EVENT_INVOKER_POST_PARSE_ARGS, EVENT_INVOKER_PRE_PARSE_ARGS
+from knack.help_files import helps
 
 from azext_edge import OpsExtensionCommandsLoader
 from azext_edge.edge.providers.orchestration import runtime_requirements
 from azext_edge.edge.providers.orchestration.runtime import OperationRequirements, ParameterRequirement, RuntimeContext
-from azext_edge.edge.providers.orchestration.runtime_commands import RuntimeTarget
+from azext_edge.edge.providers.orchestration.runtime_commands import (
+    PREVIEW_RUNTIME_NOTICE, RuntimeTarget, get_runtime_notice_targets,
+)
 from azext_edge.edge.providers.orchestration.runtime_profiles import RuntimeChannel, RuntimeIdentity
 
 
@@ -89,13 +92,18 @@ def invocation(mocker, tmp_path):
         command.handler = writer
         help_handler = Mock()
 
-        def execute(arguments=(), expanded_targets=None):
+        def execute(arguments=(), expanded_targets=None, help_command=None):
+            selected_command = help_command or command_name
+            invoker.data["command_string"] = selected_command
+            cli.data["runtime_notice_targets"] = get_runtime_notice_targets(loader.command_table)
             global_parser = AzCliCommandParser.create_global_parser(cli_ctx=cli)
             invoker.parser = AzCliCommandParser(
                 cli_ctx=cli, cli_help=help_handler, prog="az", parents=[global_parser],
             )
             invoker.parser.load_command_table(loader)
-            namespace = invoker.parser.parse_args(command_name.split() + list(arguments))
+            args = selected_command.split() + list(arguments)
+            cli.raise_event(EVENT_INVOKER_PRE_PARSE_ARGS, args=args)
+            namespace = invoker.parser.parse_args(args)
             cli.raise_event(EVENT_INVOKER_POST_PARSE_ARGS, command=command_name, args=namespace)
             if expanded_targets:
                 # Same values the ARM --ids parser supplies; use the actual CLI
@@ -125,9 +133,66 @@ def invocation(mocker, tmp_path):
     return register
 
 
+@pytest.mark.parametrize("registration", ["metadata", "registry"])
+@pytest.mark.parametrize("label", [False, True])
+@pytest.mark.parametrize("help_command", ["iot ops synthetic show", "iot ops synthetic"])
+def test_fixed_runtime_notice_for_offline_help(invocation, mocker, caplog, registration, label, help_command):
+    name = "iot ops synthetic show"
+    metadata = {"runtime_requirement": PREVIEW_ONLY} if registration == "metadata" else {}
+    if registration == "registry":
+        mocker.patch.dict(runtime_requirements.COMMAND_REQUIREMENTS, {name: PREVIEW_ONLY})
+    call = invocation(command_name=name, is_preview=label, **metadata)
+    original_help = dict(helps)
+    preview_info = call.command.preview_info
+    with pytest.raises(SystemExit) as result:
+        call.execute(["--help"], help_command=help_command)
+    assert result.value.code == 0
+    assert caplog.messages.count(PREVIEW_RUNTIME_NOTICE) == 1
+    assert helps == original_help
+    assert call.command.preview_info is preview_info
+    call.instances.assert_not_called()
+    call.writer.assert_not_called()
+    call.help_handler.show_help.assert_called_once()
+
+
+def test_runtime_notice_once_per_invocation_not_per_target(invocation, caplog):
+    call = invocation(runtime_requirement=PREVIEW_ONLY)
+    call.instances.return_value.get_runtime_context.return_value = runtime(RuntimeChannel.PREVIEW)
+    OpsExtensionCommandsLoader(call.cli)
+    for _ in range(2):
+        call.execute(expanded_targets=[("first", "rg", "sub"), ("second", "rg", "sub")])
+    assert call.writer.call_count == 4
+    assert caplog.messages.count(PREVIEW_RUNTIME_NOTICE) == 2
+
+
+@pytest.mark.parametrize("metadata", [
+    {"is_preview": True},
+    {"runtime_requirement": OperationRequirements("Stable", channels={RuntimeChannel.STABLE})},
+    {"runtime_requirement": OperationRequirements("Shared", channels=set(RuntimeChannel))},
+    {"runtime_parameters": (ParameterRequirement("enabled", PREVIEW_ONLY),)},
+])
+def test_shared_command_help_has_no_preview_runtime_notice(invocation, caplog, metadata):
+    call = invocation(**metadata)
+    with pytest.raises(SystemExit) as result:
+        call.execute(["--help"])
+    assert result.value.code == 0
+    assert PREVIEW_RUNTIME_NOTICE not in caplog.messages
+    call.instances.assert_not_called()
+
+
+def test_mixed_group_help_has_no_preview_runtime_notice(invocation, caplog):
+    invocation(command_name="iot ops synthetic shared")
+    call = invocation(command_name="iot ops synthetic restricted", runtime_requirement=PREVIEW_ONLY)
+    with pytest.raises(SystemExit) as result:
+        call.execute(["--help"], help_command="iot ops synthetic")
+    assert result.value.code == 0
+    assert PREVIEW_RUNTIME_NOTICE not in caplog.messages
+    call.instances.assert_not_called()
+
+
 @pytest.mark.parametrize("channel", list(RuntimeChannel))
 @pytest.mark.parametrize("registration", ["metadata", "registry"])
-def test_command_requirement_precedes_handler(invocation, mocker, channel, registration):
+def test_command_requirement_precedes_handler(invocation, mocker, channel, registration, caplog):
     metadata = {"runtime_requirement": PREVIEW_ONLY} if registration == "metadata" else {}
     if registration == "registry":
         mocker.patch.dict(runtime_requirements.COMMAND_REQUIREMENTS, {"iot ops synthetic": PREVIEW_ONLY})
@@ -141,6 +206,7 @@ def test_command_requirement_precedes_handler(invocation, mocker, channel, regis
         call.execute()
         call.writer.assert_called_once()
     assert call.command.preview_info is None
+    assert caplog.messages.count(PREVIEW_RUNTIME_NOTICE) == 1
 
 
 @pytest.mark.parametrize("registration_method", ["show_command", "custom_show_command"])
@@ -172,11 +238,12 @@ def test_show_parameter_metadata_and_custom_target(invocation, registration_meth
 
 
 @pytest.mark.parametrize("label", [False, True])
-def test_unmarked_command_and_cli_preview_label_do_not_discover(invocation, label):
+def test_unmarked_command_and_cli_preview_label_do_not_discover(invocation, label, caplog):
     call = invocation(is_preview=label)
     call.execute()
     call.instances.assert_not_called()
     call.writer.assert_called_once()
+    assert PREVIEW_RUNTIME_NOTICE not in caplog.messages
 
 
 @pytest.mark.parametrize("parameter", ["mode", "enabled", "count"])

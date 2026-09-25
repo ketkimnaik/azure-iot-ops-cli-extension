@@ -223,4 +223,4 @@ def test_bundled_preview_normal_consent_flow(mocker, confirm_yes, answer):
     if confirm_yes:
         ask.assert_not_called()
     else:
-        assert ask.call_args.kwargs["default"] is False
+        assert ask.call_args.kwargs["default"] is True

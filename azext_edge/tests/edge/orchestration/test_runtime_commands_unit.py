@@ -38,7 +38,7 @@ def test_preview_explicit_consent(mocker, preview_profile, answer):
     mocker.patch.object(preview.sys.stdin, "isatty", return_value=True)
     ask = mocker.patch.object(preview.Confirm, "ask", return_value=answer)
     assert preview.confirm_preview_creation(preview_profile) is answer
-    assert ask.call_args.kwargs["default"] is False
+    assert ask.call_args.kwargs["default"] is True
     assert output.call_args_list == [
         call(preview_profile.preview_notice, markup=False),
         call(preview_profile.preview_agreement_url, markup=False),
@@ -52,10 +52,11 @@ def test_preview_cancel_stops(mocker, preview_profile, error):
     assert preview.confirm_preview_creation(preview_profile) is False
 
 
-def test_blank_preview_acceptance_is_no(mocker, preview_profile):
+@pytest.mark.parametrize("answer, accepted", [("", True), ("y", True), ("Y", True), ("n", False), ("N", False)])
+def test_preview_prompt_responses(mocker, preview_profile, answer, accepted):
     mocker.patch.object(preview.sys.stdin, "isatty", return_value=True)
-    mocker.patch.object(preview.console, "input", return_value="")
-    assert preview.confirm_preview_creation(preview_profile) is False
+    mocker.patch.object(preview.console, "input", side_effect=[answer])
+    assert preview.confirm_preview_creation(preview_profile) is accepted
 
 
 def test_preview_automation_still_displays_notice(mocker, preview_profile):

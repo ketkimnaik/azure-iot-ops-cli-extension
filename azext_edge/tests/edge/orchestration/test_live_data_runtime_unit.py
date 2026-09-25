@@ -10,17 +10,20 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+import yaml
 from azure.cli.core import AzCli
 from azure.cli.core.azclierror import ValidationError
 from azure.cli.core.commands import AzCliCommandInvoker
 from azure.cli.core.parser import AzCliCommandParser
 from knack.arguments import CLIArgumentType, ignore_type
 from knack.cli import CLI
-from knack.events import EVENT_INVOKER_POST_PARSE_ARGS
+from knack.events import EVENT_INVOKER_POST_PARSE_ARGS, EVENT_INVOKER_PRE_PARSE_ARGS
+from knack.help_files import helps
 
 from azext_edge import OpsExtensionCommandsLoader
 from azext_edge.edge.providers.orchestration.runtime import RuntimeContext
 from azext_edge.edge.providers.orchestration.runtime_catalog import get_runtime_catalog
+from azext_edge.edge.providers.orchestration.runtime_commands import PREVIEW_RUNTIME_NOTICE
 from azext_edge.edge.providers.orchestration.runtime_profiles import RuntimeChannel
 
 from . import test_live_data_int as integration
@@ -65,7 +68,9 @@ def live_data_invocation(mocker, tmp_path):
         loader.command_table = {name: command}
         help_handler = Mock()
 
-        def execute(help_only=False):
+        def execute(help_only=False, group_help=False):
+            selected_name = "iot ops live-data" if group_help else name
+            invoker.data["command_string"] = selected_name
             parent = AzCliCommandParser.create_global_parser(cli_ctx=cli)
             invoker.parser = AzCliCommandParser(cli_ctx=cli, cli_help=help_handler, prog="az", parents=[parent])
             invoker.parser.load_command_table(loader)
@@ -75,7 +80,9 @@ def live_data_invocation(mocker, tmp_path):
                               "Microsoft.EventGrid/namespaces/test"]
             if not help_only and verb == "disable":
                 arguments += ["--yes"]
-            namespace = invoker.parser.parse_args(name.split() + arguments)
+            args = selected_name.split() + arguments
+            cli.raise_event(EVENT_INVOKER_PRE_PARSE_ARGS, args=args)
+            namespace = invoker.parser.parse_args(args)
             cli.raise_event(EVENT_INVOKER_POST_PARSE_ARGS, command=name, args=namespace)
             namespace.cmd = namespace._cmd = command
             invoker._validation(namespace)  # pylint: disable=protected-access
@@ -89,7 +96,7 @@ def live_data_invocation(mocker, tmp_path):
 
 @pytest.mark.parametrize("verb", ["enable", "disable", "show"])
 @pytest.mark.parametrize("channel", list(RuntimeChannel))
-def test_live_data_registered_requirement_precedes_provider(live_data_invocation, verb, channel):
+def test_live_data_registered_requirement_precedes_provider(live_data_invocation, verb, channel, caplog):
     call = live_data_invocation(verb, channel)
     assert call.command.runtime_requirement.channels == frozenset({RuntimeChannel.PREVIEW})
     if channel == RuntimeChannel.STABLE:
@@ -101,14 +108,24 @@ def test_live_data_registered_requirement_precedes_provider(live_data_invocation
         call.provider.assert_called_once()
         getattr(call.provider.return_value, verb).assert_called_once()
     call.instances.return_value.show.assert_called_once_with(name="instance", resource_group_name="rg")
+    assert caplog.messages.count(PREVIEW_RUNTIME_NOTICE) == 1
 
 
 @pytest.mark.parametrize("verb", ["enable", "disable", "show"])
-def test_live_data_help_stays_offline(live_data_invocation, verb):
+@pytest.mark.parametrize("group_help", [False, True])
+def test_live_data_help_stays_offline(live_data_invocation, verb, group_help, caplog):
     call = live_data_invocation(verb, RuntimeChannel.STABLE)
+    original_help = dict(helps)
+    for name in ("iot ops live-data", f"iot ops live-data {verb}"):
+        content = yaml.safe_load(helps[name])
+        assert "This feature requires" not in content.get("long-summary", "")
+        assert content["short-summary"]
+    assert yaml.safe_load(helps[f"iot ops live-data {verb}"])["examples"]
     with pytest.raises(SystemExit) as result:
-        call.execute(help_only=True)
+        call.execute(help_only=True, group_help=group_help)
     assert result.value.code == 0
+    assert caplog.messages.count(PREVIEW_RUNTIME_NOTICE) == 1
+    assert helps == original_help
     call.instances.assert_not_called()
     call.provider.assert_not_called()
 

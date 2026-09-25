@@ -22,13 +22,50 @@ from typing import Optional
 
 from azure.cli.core.azclierror import ValidationError
 from azure.cli.core.commands import AzCommandGroup
+from knack.log import get_logger
 
+from .runtime_profiles import RuntimeChannel
 from .runtime_requirements import get_runtime_requirements, requested_selections
+
+
+logger = get_logger(__name__)
+
+PREVIEW_RUNTIME_NOTICE = (
+    "[Preview Runtime] This feature requires a supported Azure IoT Operations preview cluster. "
+    "It is not available on stable clusters. "
+    "Check the feature's supported runtime versions and prerequisites."
+)
 
 
 # These entry points already discover their runtime (or select a create profile)
 # and enforce requirements before writes. Keep their repair/readiness semantics.
 LIFECYCLE_COMMANDS = frozenset({"iot ops create", "iot ops update", "iot ops upgrade"})
+
+
+def get_runtime_notice_targets(command_table):
+    """Select commands and wholly restricted groups before the CLI trims its table."""
+    restricted = set()
+    for name, command in command_table.items():
+        if "runtime_target" not in vars(command) or name == "iot ops init":
+            continue
+        requirement, _ = get_runtime_requirements(name, command)
+        if requirement is not None and requirement.channels == {RuntimeChannel.PREVIEW}:
+            restricted.add(name)
+    groups = {
+        " ".join(name.split()[:depth])
+        for name in restricted for depth in range(3, len(name.split()))
+    }
+    return restricted | {
+        group for group in groups
+        if all(name in restricted for name in command_table if name.startswith(group + " "))
+    }
+
+
+def runtime_notice_handler(cli_ctx, **_kwargs):
+    """Emit fixed wording for help and execution without changing help or maturity."""
+    command_name = cli_ctx.invocation.data.get("command_string")
+    if command_name in cli_ctx.data.get("runtime_notice_targets", ()):
+        logger.warning(PREVIEW_RUNTIME_NOTICE)
 
 
 @dataclass(frozen=True)

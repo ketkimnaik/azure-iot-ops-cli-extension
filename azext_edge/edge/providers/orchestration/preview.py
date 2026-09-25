@@ -32,6 +32,6 @@ def confirm_preview_creation(profile: RuntimeProfile, confirm_yes: bool = False)
     if not sys.stdin.isatty():
         raise ValidationError("Preview creation requires explicit acceptance. Use --yes for noninteractive execution.")
     try:
-        return Confirm.ask("Accept the preview terms and create a preview instance?", default=False, console=console)
+        return Confirm.ask("Accept the preview terms and create a preview instance?", default=True, console=console)
     except (EOFError, KeyboardInterrupt):
         return False
